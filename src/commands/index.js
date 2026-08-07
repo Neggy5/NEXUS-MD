@@ -1420,25 +1420,25 @@ register({
   }
 });
 register({
-  name: 'blackbox',
-  aliases: ['bb', 'codeai', 'codingai'],
+  name: 'gpt',
+  aliases: ['ai', 'chatgpt', 'ask'],
   category: 'AI',
-  description: 'AI Coding & Logic Assistant (Blackbox AI)',
+  description: 'Chat with ChatGPT AI assistant',
   async execute({ sock, from, args, prefix, command }) {
     if (!args[0]) {
       return await sock.sendMessage(from, { 
-        text: `💻 *Blackbox AI Assistant*\n\nUsage: ${prefix}${command} <your question>\nExample: ${prefix}${command} Write a Python function to sort a list\n\n*Examples:*\n${prefix}${command} Explain closures in JavaScript\n${prefix}${command} Debug this code: console.log('hello'\n${prefix}${command} Create a React component for a button` 
+        text: `🤖 *GPT Assistant*\n\nUsage: ${prefix}${command} <your question>\nExample: ${prefix}${command} What is the capital of France?\n\n*Examples:*\n${prefix}${command} Write a poem about AI\n${prefix}${command} Explain quantum computing in simple terms\n${prefix}${command} Create a JavaScript function to reverse a string` 
       });
     }
 
     const query = args.join(" ");
 
-    await sock.sendMessage(from, { text: `⏳ Analyzing code...` });
+    await sock.sendMessage(from, { text: `⏳ Thinking...` });
 
     try {
-      // Use the correct endpoint: /blackbox
+      // Primary: EliteProTech API
       const response = await fetch(
-        `https://apis.davidcyril.name.ng/blackbox?query=${encodeURIComponent(query)}`,
+        `https://eliteprotech-apis.zone.id/chatgpt?prompt=${encodeURIComponent(query)}`,
         {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -1452,52 +1452,591 @@ register({
 
       const data = await response.json();
 
-      // Extract response from various formats
-      let reply = data.result || data.reply || data.message || data.response || data.text || data.code || data.data || data.answer;
+      // Extract response
+      let reply = data.response || data.result || data.reply || data.message;
 
       if (!reply) {
+        // Fallback: try to find any text in the response
         const jsonString = JSON.stringify(data);
-        const textMatch = jsonString.match(/"result":"([^"]+)"/) || 
+        const textMatch = jsonString.match(/"response":"([^"]+)"/) || 
+                          jsonString.match(/"result":"([^"]+)"/) ||
                           jsonString.match(/"reply":"([^"]+)"/) ||
-                          jsonString.match(/"message":"([^"]+)"/) ||
-                          jsonString.match(/"code":"([^"]+)"/) ||
-                          jsonString.match(/"answer":"([^"]+)"/);
+                          jsonString.match(/"message":"([^"]+)"/);
         if (textMatch) reply = textMatch[1];
       }
 
       if (!reply) {
-        throw new Error("Could not extract response from Blackbox AI.");
+        throw new Error("Could not extract response from AI.");
       }
 
-      reply = reply.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\t/g, '  ');
+      // Clean up
+      reply = reply.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+
+      // Truncate if too long
+      if (reply.length > 65000) {
+        reply = reply.slice(0, 65000) + '\n\n... (truncated)';
+      }
+
+      // Send the response
+      await sock.sendMessage(from, { 
+        text: `🤖 *GPT:*\n\n${reply}` 
+      });
+
+    } catch (error) {
+      console.error('GPT error:', error);
+
+      // Fallback: OmegaTech API
+      try {
+        const omegaUrl = 'https://omegatech-api.dixonomega.tech/api/ai/gpt';
+        const fallbackRes = await fetch(`${omegaUrl}?q=${encodeURIComponent(query)}`);
+        const fallbackData = await fallbackRes.json();
+        const fallbackReply = fallbackData.result || fallbackData.reply || fallbackData.message;
+
+        if (fallbackReply) {
+          return await sock.sendMessage(from, { 
+            text: `🤖 *GPT (fallback):*\n\n${fallbackReply}` 
+          });
+        }
+      } catch (fallbackErr) {}
+
+      // Fallback: Prince API
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/ai/gpt';
+        const princeRes = await fetch(`${princeUrl}?apikey=prince&query=${encodeURIComponent(query)}`);
+        const princeData = await princeRes.json();
+        const princeReply = princeData.result || princeData.reply || princeData.message;
+
+        if (princeReply) {
+          return await sock.sendMessage(from, { 
+            text: `🤖 *GPT (fallback):*\n\n${princeReply}` 
+          });
+        }
+      } catch (princeErr) {}
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ GPT Error: ${error.message || 'Unknown error'}\n\n💡 Try again later.` 
+      });
+    }
+  }
+});
+register({
+  name: 'tiktok',
+  aliases: ['tt', 'ttdl', 'tiktokdl'],
+  category: 'DOWNLOADER',
+  description: 'Download TikTok videos (no watermark)',
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `📥 *TikTok Downloader*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://vm.tiktok.com/xxxxx/\n\n*Supported URLs:*\n• vm.tiktok.com\n• www.tiktok.com\n• tiktok.com` 
+      });
+    }
+
+    const url = args[0];
+
+    if (!url.includes('tiktok.com')) {
+      return await sock.sendMessage(from, { 
+        text: `❌ Invalid URL. Please provide a valid TikTok link.\nExample: https://vm.tiktok.com/xxxxx/` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `⏳ Processing TikTok video...` });
+
+    try {
+      // Primary: EliteProTech API
+      const response = await fetch(
+        `https://eliteprotech-apis.zone.id/tiktok?url=${encodeURIComponent(url)}`,
+        {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Extract video URL and metadata
+      let videoUrl = data.result?.video || data.result?.download_url || data.result?.url || 
+                     data.video || data.download_url || data.url;
+      let title = data.result?.title || data.title || data.caption || 'TikTok Video';
+      let author = data.result?.author || data.author || data.username || 'Unknown';
+      let duration = data.result?.duration || data.duration || 'N/A';
+      let thumbnail = data.result?.thumbnail || data.thumbnail || data.cover || null;
+
+      if (!videoUrl) {
+        const jsonString = JSON.stringify(data);
+        const urlMatch = jsonString.match(/https?:\/\/[^\s"',]+\.(mp4|mov)/i);
+        if (urlMatch) videoUrl = urlMatch[0];
+      }
+
+      if (!videoUrl) {
+        throw new Error("Could not extract video URL from API response.");
+      }
+
+      // Send thumbnail if available
+      if (thumbnail) {
+        try {
+          await sock.sendMessage(from, {
+            image: { url: thumbnail },
+            caption: `🎵 *${title}*\n👤 *Author:* ${author}\n⏱️ *Duration:* ${duration}s\n\n⬇️ *Downloading video...*`
+          });
+        } catch (thumbErr) {}
+      }
+
+      // Download and send the video
+      const videoResponse = await fetch(videoUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!videoResponse.ok) {
+        throw new Error(`Video download failed: ${videoResponse.status}`);
+      }
+
+      const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+
+      if (videoBuffer.length < 5000) {
+        throw new Error("Downloaded file is too small. The link may be invalid.");
+      }
+
+      const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
+
+      try {
+        await sock.sendMessage(from, {
+          video: videoBuffer,
+          caption: `🎵 *${title}*\n👤 *Author:* ${author}\n⏱️ *Duration:* ${duration}s\n📦 *Size:* ${fileSizeMB} MB\n\n✅ *TikTok Download Success*`
+        });
+      } catch (sendErr) {
+        await sock.sendMessage(from, {
+          document: videoBuffer,
+          mimetype: 'video/mp4',
+          fileName: `tiktok_${author}_${Date.now()}.mp4`,
+          caption: `🎵 *${title}*\n👤 *Author:* ${author}\n📦 *Size:* ${fileSizeMB} MB`
+        });
+      }
+
+    } catch (error) {
+      console.error('TikTok download error:', error);
+
+      // Fallback: OmegaTech API
+      try {
+        const omegaUrl = 'https://omegatech-api.dixonomega.tech/api/download/tiktok';
+        const fallbackRes = await fetch(`${omegaUrl}?url=${encodeURIComponent(url)}`);
+        const fallbackData = await fallbackRes.json();
+
+        let fallbackVideo = fallbackData.result?.video || fallbackData.result?.url || 
+                            fallbackData.video || fallbackData.url;
+
+        if (fallbackVideo) {
+          const vRes = await fetch(fallbackVideo);
+          const vBuf = Buffer.from(await vRes.arrayBuffer());
+          if (vBuf.length > 5000) {
+            return await sock.sendMessage(from, {
+              video: vBuf,
+              caption: '🎵 *TikTok Video (fallback)*\n✅ *Download Success*'
+            });
+          }
+        }
+      } catch (fallbackErr) {}
+
+      // Fallback: Prince API
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/download/tiktok';
+        const princeRes = await fetch(`${princeUrl}?apikey=prince&url=${encodeURIComponent(url)}`);
+        const princeData = await princeRes.json();
+
+        let princeVideo = princeData.result?.video || princeData.result?.url || princeData.video || princeData.url;
+
+        if (princeVideo) {
+          const vRes = await fetch(princeVideo);
+          const vBuf = Buffer.from(await vRes.arrayBuffer());
+          if (vBuf.length > 5000) {
+            return await sock.sendMessage(from, {
+              video: vBuf,
+              caption: '🎵 *TikTok Video (fallback)*\n✅ *Download Success*'
+            });
+          }
+        }
+      } catch (princeErr) {}
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Download Error: ${error.message || 'Unknown error'}\n\n💡 Try again or use a different video link.` 
+      });
+    }
+  }
+});
+register({
+  name: 'letmegpt',
+  aliases: ['giftedai', 'gptai'],
+  category: 'AI',
+  description: 'Chat with LetMeGPT AI from GiftedTech',
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🤖 *LetMeGPT AI Assistant*\n\nUsage: ${prefix}${command} <your question>\nExample: ${prefix}${command} What is the capital of France?` 
+      });
+    }
+
+    const query = args.join(" ");
+    const apiKey = 'gifted'; // Public test key
+
+    await sock.sendMessage(from, { text: `⏳ Thinking...` });
+
+    try {
+      // Primary: GiftedTech API
+      const response = await fetch(
+        `https://api.giftedtech.co.ke/api/ai/letmegpt?apikey=${apiKey}&q=${encodeURIComponent(query)}`,
+        {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Extract response
+      let reply = data.result || data.response || data.reply || data.message;
+
+      if (!reply) {
+        const jsonString = JSON.stringify(data);
+        const textMatch = jsonString.match(/"result":"([^"]+)"/) || 
+                          jsonString.match(/"response":"([^"]+)"/) ||
+                          jsonString.match(/"reply":"([^"]+)"/) ||
+                          jsonString.match(/"message":"([^"]+)"/);
+        if (textMatch) reply = textMatch[1];
+      }
+
+      // Handle null result
+      if (!reply) {
+        // Try alternative parameter name
+        const altRes = await fetch(
+          `https://api.giftedtech.co.ke/api/ai/letmegpt?apikey=${apiKey}&prompt=${encodeURIComponent(query)}`,
+          {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+          }
+        );
+
+        if (altRes.ok) {
+          const altData = await altRes.json();
+          reply = altData.result || altData.response || altData.reply || altData.message;
+        }
+      }
+
+      if (!reply) {
+        throw new Error("Could not extract response from LetMeGPT AI.");
+      }
+
+      reply = reply.replace(/\\n/g, '\n').replace(/\\"/g, '"');
 
       if (reply.length > 65000) {
         reply = reply.slice(0, 65000) + '\n\n... (truncated)';
       }
 
       await sock.sendMessage(from, { 
-        text: `💻 *Blackbox AI:*\n\n${reply}` 
+        text: `🤖 *LetMeGPT:*\n\n${reply}` 
       });
 
     } catch (error) {
-      console.error('Blackbox error:', error);
+      console.error('LetMeGPT error:', error);
 
-      // Fallback: Prince API
+      // Fallback: EliteProTech ChatGPT API
       try {
-        const princeUrl = 'https://api.princetechn.com/api/ai/blackbox';
-        const fallbackRes = await fetch(`${princeUrl}?apikey=prince&query=${encodeURIComponent(query)}`);
+        const eliteUrl = 'https://eliteprotech-apis.zone.id/chatgpt';
+        const fallbackRes = await fetch(`${eliteUrl}?prompt=${encodeURIComponent(query)}`);
         const fallbackData = await fallbackRes.json();
-        const fallbackReply = fallbackData.result || fallbackData.reply || fallbackData.code;
-        
+        const fallbackReply = fallbackData.response || fallbackData.result || fallbackData.reply;
+
         if (fallbackReply) {
           return await sock.sendMessage(from, { 
-            text: `💻 *Blackbox AI (fallback):*\n\n${fallbackReply}` 
+            text: `🤖 *GPT (fallback):*\n\n${fallbackReply}` 
           });
         }
       } catch (fallbackErr) {}
 
+      // Fallback: OmegaTech GPT
+      try {
+        const omegaUrl = 'https://omegatech-api.dixonomega.tech/api/ai/gpt';
+        const omegaRes = await fetch(`${omegaUrl}?q=${encodeURIComponent(query)}`);
+        const omegaData = await omegaRes.json();
+        const omegaReply = omegaData.result || omegaData.reply || omegaData.message;
+
+        if (omegaReply) {
+          return await sock.sendMessage(from, { 
+            text: `🤖 *GPT (fallback):*\n\n${omegaReply}` 
+          });
+        }
+      } catch (omegaErr) {}
+
       await sock.sendMessage(from, { 
-        text: `⚠️ Blackbox Error: ${error.message || 'Unknown error'}\n\n💡 Try again or use a different question.` 
+        text: `⚠️ LetMeGPT Error: ${error.message || 'Unknown error'}\n\n💡 Try again later.` 
+      });
+    }
+  }
+});
+register({
+  name: 'giftedflux',
+  aliases: ['gf', 'giftedimg', 'fluxai'],
+  category: 'AI',
+  description: 'Generate AI images using GiftedTech Flux AI',
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🎨 *GiftedTech Flux AI Image Generator*\n\nUsage: ${prefix}${command} <description> [ratio]\nExample: ${prefix}${command} A futuristic city with neon lights\n\n*With ratio:*\n${prefix}${command} A beautiful landscape 16:9\n${prefix}${command} A portrait of a woman 9:16\n\n*Available ratios:*\n• 1:1 (square - default)\n• 16:9 (wide)\n• 9:16 (vertical)\n• 4:3 (standard)\n• 3:4 (portrait)\n\n*Tips for better results:*\n• Be descriptive\n• Include style (realistic, cartoon, anime, etc.)\n• Mention colors, lighting, mood` 
+      });
+    }
+
+    let prompt = args[0];
+    let ratio = '1:1';
+
+    // Check if the last argument is a ratio
+    const possibleRatios = ['1:1', '16:9', '9:16', '4:3', '3:4', '21:9'];
+    if (args.length > 1 && possibleRatios.includes(args[args.length - 1])) {
+      ratio = args[args.length - 1];
+      prompt = args.slice(0, -1).join(' ');
+    }
+
+    const apiKey = 'gifted';
+
+    await sock.sendMessage(from, { text: `🎨 *Generating image with Flux AI...*\n⏳ This may take 15-30 seconds...\n\n📝 *Prompt:* ${prompt}\n📐 *Ratio:* ${ratio}` });
+
+    try {
+      // Primary: GiftedTech API
+      const response = await fetch(
+        `https://api.giftedtech.co.ke/api/ai/fluximg?apikey=${apiKey}&prompt=${encodeURIComponent(prompt)}&ratio=${encodeURIComponent(ratio)}`,
+        {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Extract image URL
+      let imageUrl = data.result?.url || data.url || data.image || data.result?.image;
+
+      if (!imageUrl) {
+        const jsonString = JSON.stringify(data);
+        const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(png|jpg|jpeg|gif|webp)/i);
+        if (urlMatch) imageUrl = urlMatch[0];
+      }
+
+      if (!imageUrl) {
+        throw new Error("Could not extract image URL from API response.");
+      }
+
+      // Send the generated image
+      await sock.sendMessage(from, {
+        image: { url: imageUrl },
+        caption: `🎨 *Flux AI Generated Image*\n\n📝 *Prompt:* ${prompt}\n📐 *Ratio:* ${ratio}\n\n✨ _Generated by GiftedTech Flux AI_`
+      });
+
+    } catch (error) {
+      console.error('GiftedTech Flux error:', error);
+
+      // Fallback: Try alternative GiftedTech endpoint
+      try {
+        const altUrl = 'https://api.giftedtech.co.ke/api/ai/flux';
+        const altRes = await fetch(`${altUrl}?apikey=${apiKey}&prompt=${encodeURIComponent(prompt)}&ratio=${encodeURIComponent(ratio)}`);
+        const altData = await altRes.json();
+
+        let altImage = altData.result?.url || altData.url || altData.image;
+
+        if (altImage) {
+          return await sock.sendMessage(from, {
+            image: { url: altImage },
+            caption: `🎨 *Flux AI Generated Image (fallback)*\n\n📝 *Prompt:* ${prompt}\n📐 *Ratio:* ${ratio}`
+          });
+        }
+      } catch (altErr) {}
+
+      // Fallback: Try David Cyril Writecream
+      try {
+        const davidUrl = 'https://apis.davidcyril.name.ng/imagegen/writecream';
+        const davidRes = await fetch(`${davidUrl}?prompt=${encodeURIComponent(prompt)}`);
+        const davidData = await davidRes.json();
+
+        let davidImage = davidData.result || davidData.url || davidData.image;
+
+        if (davidImage) {
+          return await sock.sendMessage(from, {
+            image: { url: davidImage },
+            caption: `🎨 *Writecream Generated Image (fallback)*\n\n📝 *Prompt:* ${prompt}`
+          });
+        }
+      } catch (davidErr) {}
+
+      // Fallback: Try Prince API Flux
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/ai/flux';
+        const princeRes = await fetch(`${princeUrl}?apikey=prince&prompt=${encodeURIComponent(prompt)}`);
+        const princeData = await princeRes.json();
+
+        let princeImage = princeData.result || princeData.url || princeData.image;
+
+        if (princeImage) {
+          return await sock.sendMessage(from, {
+            image: { url: princeImage },
+            caption: `🎨 *Flux AI Generated Image (fallback)*\n\n📝 *Prompt:* ${prompt}`
+          });
+        }
+      } catch (princeErr) {}
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Image Generation Error: ${error.message || 'Could not generate image.'}\n\n💡 Try a different prompt or try again later.` 
+      });
+    }
+  }
+});
+register({
+  name: 'unlimitedai',
+  aliases: ['uai', 'unlimited', 'giftedai'],
+  category: 'AI',
+  description: 'Chat with Unlimited AI from GiftedTech',
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🤖 *Unlimited AI Assistant*\n\nUsage: ${prefix}${command} <your question>\nExample: ${prefix}${command} What is the capital of France?\n\n*Examples:*\n${prefix}${command} Write a poem about AI\n${prefix}${command} Explain quantum computing\n${prefix}${command} Create a JavaScript function\n\n*Features:*\n• Powered by GPT-4\n• No usage limits\n• Fast responses` 
+      });
+    }
+
+    const query = args.join(" ");
+    const apiKey = 'gifted';
+
+    await sock.sendMessage(from, { text: `⏳ Thinking...` });
+
+    try {
+      // Primary: GiftedTech API
+      const response = await fetch(
+        `https://api.giftedtech.co.ke/api/ai/unlimitedai?apikey=${apiKey}&q=${encodeURIComponent(query)}`,
+        {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Extract response
+      let reply = data.result || data.response || data.reply || data.message;
+
+      if (!reply) {
+        const jsonString = JSON.stringify(data);
+        const textMatch = jsonString.match(/"result":"([^"]+)"/) || 
+                          jsonString.match(/"response":"([^"]+)"/) ||
+                          jsonString.match(/"reply":"([^"]+)"/) ||
+                          jsonString.match(/"message":"([^"]+)"/);
+        if (textMatch) reply = textMatch[1];
+      }
+
+      if (!reply) {
+        // Try alternative parameter name
+        const altRes = await fetch(
+          `https://api.giftedtech.co.ke/api/ai/unlimitedai?apikey=${apiKey}&prompt=${encodeURIComponent(query)}`,
+          {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+          }
+        );
+
+        if (altRes.ok) {
+          const altData = await altRes.json();
+          reply = altData.result || altData.response || altData.reply || altData.message;
+        }
+      }
+
+      if (!reply) {
+        throw new Error("Could not extract response from Unlimited AI.");
+      }
+
+      reply = reply.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+
+      if (reply.length > 65000) {
+        reply = reply.slice(0, 65000) + '\n\n... (truncated)';
+      }
+
+      // Split into chunks if needed
+      if (reply.length > 1000) {
+        const chunks = reply.match(/.{1,1000}/g) || [reply];
+        for (let i = 0; i < Math.min(chunks.length, 5); i++) {
+          const chunk = chunks[i];
+          const prefix = i === 0 ? `🤖 *Unlimited AI:*\n\n` : `\n\n*Continued...*\n\n`;
+          await sock.sendMessage(from, { text: prefix + chunk });
+        }
+      } else {
+        await sock.sendMessage(from, { 
+          text: `🤖 *Unlimited AI:*\n\n${reply}` 
+        });
+      }
+
+    } catch (error) {
+      console.error('Unlimited AI error:', error);
+
+      // Fallback: EliteProTech ChatGPT API
+      try {
+        const eliteUrl = 'https://eliteprotech-apis.zone.id/chatgpt';
+        const fallbackRes = await fetch(`${eliteUrl}?prompt=${encodeURIComponent(query)}`);
+        const fallbackData = await fallbackRes.json();
+        const fallbackReply = fallbackData.response || fallbackData.result || fallbackData.reply;
+
+        if (fallbackReply) {
+          return await sock.sendMessage(from, { 
+            text: `🤖 *GPT (fallback):*\n\n${fallbackReply}` 
+          });
+        }
+      } catch (fallbackErr) {}
+
+      // Fallback: OmegaTech GPT
+      try {
+        const omegaUrl = 'https://omegatech-api.dixonomega.tech/api/ai/gpt';
+        const omegaRes = await fetch(`${omegaUrl}?q=${encodeURIComponent(query)}`);
+        const omegaData = await omegaRes.json();
+        const omegaReply = omegaData.result || omegaData.reply || omegaData.message;
+
+        if (omegaReply) {
+          return await sock.sendMessage(from, { 
+            text: `🤖 *GPT (fallback):*\n\n${omegaReply}` 
+          });
+        }
+      } catch (omegaErr) {}
+
+      // Fallback: Prince API GPT
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/ai/gpt';
+        const princeRes = await fetch(`${princeUrl}?apikey=prince&query=${encodeURIComponent(query)}`);
+        const princeData = await princeRes.json();
+        const princeReply = princeData.result || princeData.reply || princeData.message;
+
+        if (princeReply) {
+          return await sock.sendMessage(from, { 
+            text: `🤖 *GPT (fallback):*\n\n${princeReply}` 
+          });
+        }
+      } catch (princeErr) {}
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Unlimited AI Error: ${error.message || 'Unknown error'}\n\n💡 Try again later.` 
       });
     }
   }
