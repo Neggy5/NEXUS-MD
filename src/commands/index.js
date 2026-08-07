@@ -1148,7 +1148,1369 @@ register({
     }
   }
 });
+register({
+  name: 'facebook',
+  aliases: ['fb', 'fbdl', 'facebookdl'],
+  category: 'DOWNLOADER',
+  description: 'Download Facebook Videos (HD/SD)',
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `📥 *Facebook Downloader*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://www.facebook.com/reel/402579285704851\n\n*Supports:*\n• Facebook Reels\n• Facebook Videos\n• Facebook Watch\n\n*Note:* Returns HD video if available.` 
+      });
+    }
 
+    const url = args[0];
+
+    if (!url.includes('facebook.com') && !url.includes('fb.watch')) {
+      return await sock.sendMessage(from, { 
+        text: `❌ Invalid URL. Please provide a valid Facebook link.` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `⏳ Processing Facebook video...` });
+
+    try {
+      // Primary: GiftedTech API
+      const response = await fetch(
+        `https://api.giftedtech.co.ke/api/download/facebook?apikey=gifted&url=${encodeURIComponent(url)}`,
+        {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Extract video data
+      let title = data.result?.title || 'Facebook Video';
+      let duration = data.result?.duration || 'N/A';
+      let thumbnail = data.result?.thumbnail || null;
+      let hdVideo = data.result?.hd_video || null;
+      let sdVideo = data.result?.sd_video || null;
+
+      if (!hdVideo && !sdVideo) {
+        throw new Error("Could not extract video URL from API response.");
+      }
+
+      // Use HD if available, otherwise SD
+      const videoUrl = hdVideo || sdVideo;
+      const quality = hdVideo ? 'HD' : 'SD';
+
+      // Send thumbnail if available
+      if (thumbnail) {
+        try {
+          await sock.sendMessage(from, {
+            image: { url: thumbnail },
+            caption: `🎬 *${title}*\n⏱️ *Duration:* ${duration}\n📊 *Quality:* ${quality}\n\n⬇️ *Downloading video...*`
+          });
+        } catch (thumbErr) {
+          await sock.sendMessage(from, { 
+            text: `🎬 *${title}*\n⏱️ *Duration:* ${duration}\n📊 *Quality:* ${quality}\n\n⬇️ *Downloading video...*` 
+          });
+        }
+      }
+
+      // Download and send the video
+      const videoResponse = await fetch(videoUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!videoResponse.ok) {
+        throw new Error(`Video download failed: ${videoResponse.status}`);
+      }
+
+      const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+
+      if (videoBuffer.length < 5000) {
+        throw new Error("Downloaded file is too small. The link may be invalid.");
+      }
+
+      const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
+
+      try {
+        await sock.sendMessage(from, {
+          video: videoBuffer,
+          caption: `🎬 *${title}*\n⏱️ *Duration:* ${duration}\n📊 *Quality:* ${quality}\n📦 *Size:* ${fileSizeMB} MB\n\n✅ *Facebook Download Success*`
+        });
+      } catch (sendErr) {
+        // Fallback: send as document
+        await sock.sendMessage(from, {
+          document: videoBuffer,
+          mimetype: 'video/mp4',
+          fileName: `facebook_${Date.now()}.mp4`,
+          caption: `🎬 *${title}*\n📊 *Quality:* ${quality}\n📦 *Size:* ${fileSizeMB} MB`
+        });
+      }
+
+    } catch (error) {
+      console.error('Facebook download error:', error);
+
+      // Fallback: Prince API
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/download/facebook';
+        const fallbackRes = await fetch(`${princeUrl}?apikey=prince&url=${encodeURIComponent(url)}`);
+        const fallbackData = await fallbackRes.json();
+
+        let fallbackVideo = fallbackData.result?.video || fallbackData.result?.download_url || 
+                            fallbackData.video || fallbackData.download_url || fallbackData.url;
+        let fallbackTitle = fallbackData.result?.title || fallbackData.title || 'Facebook Video';
+
+        if (fallbackVideo) {
+          const vRes = await fetch(fallbackVideo);
+          const vBuf = Buffer.from(await vRes.arrayBuffer());
+          if (vBuf.length > 5000) {
+            return await sock.sendMessage(from, { 
+              video: vBuf, 
+              caption: `🎬 *${fallbackTitle}*\n\n✅ *Facebook Download (fallback)*` 
+            });
+          }
+        }
+      } catch (fallbackErr) {}
+
+      // Fallback: Try alternative GiftedTech endpoint
+      try {
+        const altUrl = 'https://api.giftedtech.co.ke/api/download/fb';
+        const altRes = await fetch(`${altUrl}?apikey=gifted&url=${encodeURIComponent(url)}`);
+        const altData = await altRes.json();
+
+        let altVideo = altData.result?.hd_video || altData.result?.sd_video || altData.result?.video || altData.video;
+
+        if (altVideo) {
+          const vRes = await fetch(altVideo);
+          const vBuf = Buffer.from(await vRes.arrayBuffer());
+          if (vBuf.length > 5000) {
+            return await sock.sendMessage(from, { 
+              video: vBuf, 
+              caption: '✅ *Facebook Download (fallback)*' 
+            });
+          }
+        }
+      } catch (altErr) {}
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Download Error: ${error.message || 'Could not download video.'}\n\n💡 Make sure the URL is valid and the video is public.` 
+      });
+    }
+  }
+});
+register({
+  name: 'facebookv2',
+  aliases: ['fbv2', 'fb2', 'fbdl2'],
+  category: 'DOWNLOADER',
+  description: 'Download Facebook Videos with quality selection (HD/SD)',
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `📥 *Facebook Downloader v2*\n\nUsage: ${prefix}${command} <url> [quality]\nExample: ${prefix}${command} https://www.facebook.com/reel/402579285704851\n\n*Quality options:*\n• 1920p (HD - best)\n• 1280p (HD)\n• 960p (SD)\n• 640p (SD - smallest)\n\n*Examples:*\n${prefix}${command} https://www.facebook.com/reel/xxxxx 1920p\n${prefix}${command} https://fb.watch/xxxxx 640p\n\n*Note:* If no quality is specified, the highest available quality will be used.` 
+      });
+    }
+
+    const url = args[0];
+    let preferredQuality = '1920p';
+
+    // Check if user specified a quality
+    const qualityArg = args[1] || '';
+    const validQualities = ['1920p', '1280p', '960p', '640p', '1080p', '720p', '480p', '360p'];
+    if (validQualities.includes(qualityArg.toLowerCase())) {
+      preferredQuality = qualityArg.toLowerCase();
+    }
+
+    if (!url.includes('facebook.com') && !url.includes('fb.watch')) {
+      return await sock.sendMessage(from, { 
+        text: `❌ Invalid URL. Please provide a valid Facebook link.` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `⏳ Processing Facebook video...` });
+
+    try {
+      // Primary: GiftedTech API v2
+      const response = await fetch(
+        `https://api.giftedtech.co.ke/api/download/facebookv2?apikey=gifted&url=${encodeURIComponent(url)}`,
+        {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Extract video data
+      let title = data.result?.title || 'Facebook Video';
+      let duration = data.result?.duration || 'N/A';
+      let thumbnail = data.result?.thumbnail || null;
+      let uploader = data.result?.uploader || 'Unknown';
+      let viewCount = data.result?.view_count || 'N/A';
+      let links = data.result?.links || [];
+
+      if (!links || links.length === 0) {
+        throw new Error("Could not extract video links from API response.");
+      }
+
+      // Sort links by quality (highest first)
+      const qualityOrder = ['1920p', '1280p', '1080p', '960p', '720p', '640p', '480p', '360p'];
+      links.sort((a, b) => {
+        return qualityOrder.indexOf(a.quality) - qualityOrder.indexOf(b.quality);
+      });
+
+      // Find the best available quality
+      let selectedLink = null;
+      let selectedQuality = '';
+
+      // Try to match user's preferred quality
+      for (const link of links) {
+        if (link.quality === preferredQuality) {
+          selectedLink = link;
+          selectedQuality = link.quality;
+          break;
+        }
+      }
+
+      // If preferred quality not found, use the highest available
+      if (!selectedLink && links.length > 0) {
+        selectedLink = links[0];
+        selectedQuality = selectedLink.quality || 'HD';
+      }
+
+      if (!selectedLink || !selectedLink.url) {
+        throw new Error("Could not find a valid video link.");
+      }
+
+      const videoUrl = selectedLink.url;
+
+      // Format view count
+      const viewCountFormatted = viewCount !== 'N/A' ? new Intl.NumberFormat().format(viewCount) : 'N/A';
+
+      // Send thumbnail if available
+      if (thumbnail) {
+        try {
+          await sock.sendMessage(from, {
+            image: { url: thumbnail },
+            caption: `🎬 *${title}*\n👤 *Uploader:* ${uploader}\n⏱️ *Duration:* ${duration}\n📊 *Views:* ${viewCountFormatted}\n📊 *Quality:* ${selectedQuality}\n\n⬇️ *Downloading video...*`
+          });
+        } catch (thumbErr) {
+          await sock.sendMessage(from, { 
+            text: `🎬 *${title}*\n👤 *Uploader:* ${uploader}\n⏱️ *Duration:* ${duration}\n📊 *Views:* ${viewCountFormatted}\n📊 *Quality:* ${selectedQuality}\n\n⬇️ *Downloading video...*` 
+          });
+        }
+      }
+
+      // Download and send the video
+      const videoResponse = await fetch(videoUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!videoResponse.ok) {
+        throw new Error(`Video download failed: ${videoResponse.status}`);
+      }
+
+      const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+
+      if (videoBuffer.length < 5000) {
+        throw new Error("Downloaded file is too small. The link may be invalid.");
+      }
+
+      const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
+
+      // Build caption with available qualities
+      let qualityList = '';
+      links.slice(0, 4).forEach((link) => {
+        const check = link.quality === selectedQuality ? '✅' : '•';
+        qualityList += `${check} ${link.quality}\n`;
+      });
+
+      const caption = `🎬 *${title}*\n👤 *Uploader:* ${uploader}\n⏱️ *Duration:* ${duration}\n📊 *Views:* ${viewCountFormatted}\n📦 *Size:* ${fileSizeMB} MB\n📊 *Quality:* ${selectedQuality}\n\n📥 *Available Qualities:*\n${qualityList}\n\n✅ *Facebook Download Success*\n\n💡 Use ${prefix}${command} <url> <quality> to select quality.`;
+
+      try {
+        await sock.sendMessage(from, {
+          video: videoBuffer,
+          caption: caption
+        });
+      } catch (sendErr) {
+        await sock.sendMessage(from, {
+          document: videoBuffer,
+          mimetype: 'video/mp4',
+          fileName: `facebook_${Date.now()}.mp4`,
+          caption: `🎬 *${title}*\n📊 *Quality:* ${selectedQuality}\n📦 *Size:* ${fileSizeMB} MB`
+        });
+      }
+
+    } catch (error) {
+      console.error('Facebook v2 download error:', error);
+
+      // Fallback: Prince API
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/download/facebook';
+        const fallbackRes = await fetch(`${princeUrl}?apikey=prince&url=${encodeURIComponent(url)}`);
+        const fallbackData = await fallbackRes.json();
+
+        let fallbackVideo = fallbackData.result?.video || fallbackData.result?.download_url || 
+                            fallbackData.video || fallbackData.download_url || fallbackData.url;
+        let fallbackTitle = fallbackData.result?.title || fallbackData.title || 'Facebook Video';
+
+        if (fallbackVideo) {
+          const vRes = await fetch(fallbackVideo);
+          const vBuf = Buffer.from(await vRes.arrayBuffer());
+          if (vBuf.length > 5000) {
+            return await sock.sendMessage(from, { 
+              video: vBuf, 
+              caption: `🎬 *${fallbackTitle}*\n\n✅ *Facebook Download (fallback)*` 
+            });
+          }
+        }
+      } catch (fallbackErr) {}
+
+      // Fallback: GiftedTech v1
+      try {
+        const v1Url = 'https://api.giftedtech.co.ke/api/download/facebook';
+        const v1Res = await fetch(`${v1Url}?apikey=gifted&url=${encodeURIComponent(url)}`);
+        const v1Data = await v1Res.json();
+
+        let v1Video = v1Data.result?.hd_video || v1Data.result?.sd_video || v1Data.result?.video || v1Data.video;
+
+        if (v1Video) {
+          const vRes = await fetch(v1Video);
+          const vBuf = Buffer.from(await vRes.arrayBuffer());
+          if (vBuf.length > 5000) {
+            return await sock.sendMessage(from, { 
+              video: vBuf, 
+              caption: '✅ *Facebook Download (fallback)*' 
+            });
+          }
+        }
+      } catch (v1Err) {}
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Download Error: ${error.message || 'Could not download video.'}\n\n💡 Make sure the URL is valid and the video is public.` 
+      });
+    }
+  }
+});
+register({
+  name: 'ytmp3',
+  aliases: ['yt3', 'ytmusic', 'ytaudio'],
+  category: 'DOWNLOADER',
+  description: 'Download YouTube videos as MP3 audio with quality selection',
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🎵 *YouTube MP3 Downloader*\n\nUsage: ${prefix}${command} <url> [quality]\nExample: ${prefix}${command} https://youtu.be/qF-JLqKtr2Q\n\n*Quality options:*\n• 320kbps (best)\n• 128kbps (default)\n\n*Examples:*\n${prefix}${command} https://youtu.be/xxxxx 320\n${prefix}${command} https://youtu.be/xxxxx 128\n\n*Note:* Download URL expires in 10 minutes.` 
+      });
+    }
+
+    const url = args[0];
+    let quality = '128'; // Default quality
+
+    // Check if user specified quality
+    const qualityArg = args[1] || '';
+    if (qualityArg === '320' || qualityArg === '320kbps') {
+      quality = '320';
+    }
+
+    if (!url.includes('youtube.com') && !url.includes('youtu.be')) {
+      return await sock.sendMessage(from, { 
+        text: `❌ Invalid URL. Please provide a valid YouTube link.` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `⏳ Processing YouTube audio...` });
+
+    try {
+      // Primary: GiftedTech API
+      const response = await fetch(
+        `https://api.giftedtech.co.ke/api/download/ytmp3?apikey=gifted&url=${encodeURIComponent(url)}&quality=${quality}kbps`,
+        {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Extract data
+      let title = data.result?.title || 'YouTube Audio';
+      let thumbnail = data.result?.thumbnail || null;
+      let downloadUrl = data.result?.download_url || null;
+      let format = data.result?.format || 'mp3';
+      let qualityReturned = data.result?.quality || `${quality}kbps`;
+      let availableQualities = data.result?.availableQualities || [];
+      let message = data.result?.message || '';
+
+      if (!downloadUrl) {
+        throw new Error("Could not extract download URL from API response.");
+      }
+
+      // Send thumbnail if available
+      if (thumbnail) {
+        try {
+          await sock.sendMessage(from, {
+            image: { url: thumbnail },
+            caption: `🎵 *${title}*\n📊 *Quality:* ${qualityReturned}\n📦 *Format:* ${format}\n${message ? `\n${message}` : ''}\n\n⬇️ *Downloading audio...*`
+          });
+        } catch (thumbErr) {
+          await sock.sendMessage(from, { 
+            text: `🎵 *${title}*\n📊 *Quality:* ${qualityReturned}\n📦 *Format:* ${format}\n${message ? `\n${message}` : ''}\n\n⬇️ *Downloading audio...*` 
+          });
+        }
+      }
+
+      // Download the audio
+      const audioResponse = await fetch(downloadUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!audioResponse.ok) {
+        throw new Error(`Audio download failed: ${audioResponse.status}`);
+      }
+
+      const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+
+      if (audioBuffer.length < 5000) {
+        throw new Error("Downloaded file is too small. The link may be invalid.");
+      }
+
+      const fileSizeMB = (audioBuffer.length / 1024 / 1024).toFixed(1);
+
+      // Build available qualities message
+      let qualityList = '';
+      if (availableQualities.length > 0) {
+        qualityList = availableQualities.map(q => `${q}kbps`).join(', ');
+      }
+
+      const caption = `🎵 *${title}*\n📊 *Quality:* ${qualityReturned}\n📦 *Format:* ${format}\n📦 *Size:* ${fileSizeMB} MB\n${qualityList ? `📥 *Available:* ${qualityList}` : ''}\n\n✅ *Download Success*\n${message ? `\n⚠️ ${message}` : ''}`;
+
+      // Try to send as audio
+      try {
+        await sock.sendMessage(from, {
+          audio: audioBuffer,
+          mimetype: 'audio/mpeg',
+          fileName: `${title.replace(/[^a-zA-Z0-9]/g, '_')}.${format}`,
+          caption: caption,
+          ptt: false
+        });
+      } catch (sendErr) {
+        // Fallback: send as document
+        await sock.sendMessage(from, {
+          document: audioBuffer,
+          mimetype: 'audio/mpeg',
+          fileName: `${title.replace(/[^a-zA-Z0-9]/g, '_')}.${format}`,
+          caption: caption
+        });
+      }
+
+    } catch (error) {
+      console.error('YouTube MP3 download error:', error);
+
+      // Fallback: OmegaTech API
+      try {
+        const omegaUrl = 'https://omegatech-api.dixonomega.tech/api/download/play';
+        const fallbackRes = await fetch(`${omegaUrl}?url=${encodeURIComponent(url)}`);
+        const fallbackData = await fallbackRes.json();
+
+        let fallbackAudio = fallbackData.download_url || fallbackData.download || fallbackData.url;
+        let fallbackTitle = fallbackData.title || 'YouTube Audio';
+
+        if (fallbackAudio) {
+          const aRes = await fetch(fallbackAudio);
+          const aBuf = Buffer.from(await aRes.arrayBuffer());
+          if (aBuf.length > 5000) {
+            return await sock.sendMessage(from, {
+              audio: aBuf,
+              mimetype: 'audio/mpeg',
+              fileName: `${fallbackTitle}.mp3`,
+              caption: `🎵 *${fallbackTitle}*\n\n✅ *YouTube MP3 Download (fallback)*`
+            });
+          }
+        }
+      } catch (fallbackErr) {}
+
+      // Fallback: Prince API
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/download/ytmp3';
+        const princeRes = await fetch(`${princeUrl}?apikey=prince&url=${encodeURIComponent(url)}`);
+        const princeData = await princeRes.json();
+
+        let princeAudio = princeData.result?.download_url || princeData.result?.url || princeData.download_url || princeData.url;
+        let princeTitle = princeData.result?.title || princeData.title || 'YouTube Audio';
+
+        if (princeAudio) {
+          const aRes = await fetch(princeAudio);
+          const aBuf = Buffer.from(await aRes.arrayBuffer());
+          if (aBuf.length > 5000) {
+            return await sock.sendMessage(from, {
+              audio: aBuf,
+              mimetype: 'audio/mpeg',
+              fileName: `${princeTitle}.mp3`,
+              caption: `🎵 *${princeTitle}*\n\n✅ *YouTube MP3 Download (fallback)*`
+            });
+          }
+        }
+      } catch (princeErr) {}
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Download Error: ${error.message || 'Could not download audio.'}\n\n💡 Make sure the URL is valid and try again.` 
+      });
+    }
+  }
+});
+register({
+  name: 'ytmp4',
+  aliases: ['ytv', 'youtube', 'ytdl', 'youtubedl'],
+  category: 'DOWNLOADER',
+  description: 'Download YouTube videos with quality selection',
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🎬 *YouTube MP4 Downloader*\n\nUsage: ${prefix}${command} <url> [quality]\nExample: ${prefix}${command} https://youtu.be/wdJrTQJh1ZQ\n\n*Quality options:*\n• 1080p (best)\n• 720p (default)\n• 480p\n• 360p\n• 240p\n• 144p\n\n*Examples:*\n${prefix}${command} https://youtu.be/xxxxx 1080p\n${prefix}${command} https://youtu.be/xxxxx 720p\n\n*Note:* Download URL expires in 10 minutes.` 
+      });
+    }
+
+    const url = args[0];
+    let quality = '720p'; // Default quality
+
+    // Check if user specified quality
+    const qualityArg = (args[1] || '').toLowerCase();
+    const validQualities = ['1080p', '720p', '480p', '360p', '240p', '144p'];
+    if (validQualities.includes(qualityArg)) {
+      quality = qualityArg;
+    }
+
+    if (!url.includes('youtube.com') && !url.includes('youtu.be')) {
+      return await sock.sendMessage(from, { 
+        text: `❌ Invalid URL. Please provide a valid YouTube link.` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `⏳ Processing YouTube video... (${quality})` });
+
+    try {
+      // Primary: GiftedTech API
+      const response = await fetch(
+        `https://api.giftedtech.co.ke/api/download/ytmp4?apikey=gifted&url=${encodeURIComponent(url)}&quality=${quality}`,
+        {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Extract data
+      let title = data.result?.title || 'YouTube Video';
+      let thumbnail = data.result?.thumbnail || null;
+      let downloadUrl = data.result?.download_url || null;
+      let format = data.result?.format || 'mp4';
+      let qualityReturned = data.result?.quality || quality;
+      let availableQualities = data.result?.availableQualities || [];
+      let message = data.result?.message || '';
+
+      if (!downloadUrl) {
+        throw new Error("Could not extract download URL from API response.");
+      }
+
+      // Send thumbnail if available
+      if (thumbnail) {
+        try {
+          await sock.sendMessage(from, {
+            image: { url: thumbnail },
+            caption: `🎬 *${title}*\n📊 *Quality:* ${qualityReturned}\n📦 *Format:* ${format}\n${message ? `\n${message}` : ''}\n\n⬇️ *Downloading video...*`
+          });
+        } catch (thumbErr) {
+          await sock.sendMessage(from, { 
+            text: `🎬 *${title}*\n📊 *Quality:* ${qualityReturned}\n📦 *Format:* ${format}\n${message ? `\n${message}` : ''}\n\n⬇️ *Downloading video...*` 
+          });
+        }
+      }
+
+      // Download the video
+      const videoResponse = await fetch(downloadUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!videoResponse.ok) {
+        throw new Error(`Video download failed: ${videoResponse.status}`);
+      }
+
+      const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+
+      if (videoBuffer.length < 5000) {
+        throw new Error("Downloaded file is too small. The link may be invalid.");
+      }
+
+      const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
+
+      // Build available qualities message
+      let qualityList = '';
+      if (availableQualities.length > 0) {
+        qualityList = availableQualities.map(q => `${q}p`).join(', ');
+      }
+
+      const caption = `🎬 *${title}*\n📊 *Quality:* ${qualityReturned}\n📦 *Format:* ${format}\n📦 *Size:* ${fileSizeMB} MB\n${qualityList ? `📥 *Available:* ${qualityList}` : ''}\n\n✅ *Download Success*\n${message ? `\n⚠️ ${message}` : ''}`;
+
+      // Try to send as video
+      try {
+        await sock.sendMessage(from, {
+          video: videoBuffer,
+          caption: caption
+        });
+      } catch (sendErr) {
+        // Fallback: send as document
+        await sock.sendMessage(from, {
+          document: videoBuffer,
+          mimetype: 'video/mp4',
+          fileName: `${title.replace(/[^a-zA-Z0-9]/g, '_')}.${format}`,
+          caption: caption
+        });
+      }
+
+    } catch (error) {
+      console.error('YouTube MP4 download error:', error);
+
+      // Fallback: OmegaTech API
+      try {
+        const omegaUrl = 'https://omegatech-api.dixonomega.tech/api/download/ytmp4';
+        const fallbackRes = await fetch(`${omegaUrl}?url=${encodeURIComponent(url)}&quality=${quality}`);
+        const fallbackData = await fallbackRes.json();
+
+        let fallbackVideo = fallbackData.download_url || fallbackData.url || fallbackData.video;
+        let fallbackTitle = fallbackData.title || 'YouTube Video';
+
+        if (fallbackVideo) {
+          const vRes = await fetch(fallbackVideo);
+          const vBuf = Buffer.from(await vRes.arrayBuffer());
+          if (vBuf.length > 5000) {
+            return await sock.sendMessage(from, {
+              video: vBuf,
+              caption: `🎬 *${fallbackTitle}*\n\n✅ *YouTube Download (fallback)*`
+            });
+          }
+        }
+      } catch (fallbackErr) {}
+
+      // Fallback: Prince API
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/download/ytmp4';
+        const princeRes = await fetch(`${princeUrl}?apikey=prince&url=${encodeURIComponent(url)}&quality=${quality}`);
+        const princeData = await princeRes.json();
+
+        let princeVideo = princeData.result?.download_url || princeData.result?.url || princeData.download_url || princeData.url;
+        let princeTitle = princeData.result?.title || princeData.title || 'YouTube Video';
+
+        if (princeVideo) {
+          const vRes = await fetch(princeVideo);
+          const vBuf = Buffer.from(await vRes.arrayBuffer());
+          if (vBuf.length > 5000) {
+            return await sock.sendMessage(from, {
+              video: vBuf,
+              caption: `🎬 *${princeTitle}*\n\n✅ *YouTube Download (fallback)*`
+            });
+          }
+        }
+      } catch (princeErr) {}
+
+      // Fallback: Try yt-search with GiftedTech
+      try {
+        const yts = require('yt-search');
+        const searchResults = await yts(url);
+        if (searchResults && searchResults.videos && searchResults.videos.length > 0) {
+          const target = searchResults.videos[0];
+          const ytUrl = target.url;
+
+          const giftedRes = await fetch(
+            `https://api.giftedtech.co.ke/api/download/ytmp4?apikey=gifted&url=${encodeURIComponent(ytUrl)}&quality=${quality}`
+          );
+          const giftedData = await giftedRes.json();
+
+          let giftedVideo = giftedData.result?.download_url || giftedData.download_url || giftedData.url;
+          if (giftedVideo) {
+            const vRes = await fetch(giftedVideo);
+            const vBuf = Buffer.from(await vRes.arrayBuffer());
+            if (vBuf.length > 5000) {
+              return await sock.sendMessage(from, {
+                video: vBuf,
+                caption: `🎬 *${target.title}*\n\n✅ *YouTube Download (search fallback)*`
+              });
+            }
+          }
+        }
+      } catch (ytErr) {}
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Download Error: ${error.message || 'Could not download video.'}\n\n💡 Make sure the URL is valid and try again.` 
+      });
+    }
+  }
+});
+register({
+  name: 'twitter',
+  aliases: ['x', 'xdl', 'twitterdl', 'tweet'],
+  category: 'DOWNLOADER',
+  description: 'Download Twitter/X Videos with quality selection',
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🐦 *Twitter/X Downloader*\n\nUsage: ${prefix}${command} <url> [quality]\nExample: ${prefix}${command} https://twitter.com/elonmusk/status/1822355008559489216\n\n*Quality options:*\n• 720p (best)\n• 360p (default)\n• 270p (smallest)\n\n*Examples:*\n${prefix}${command} https://twitter.com/user/status/xxxxx 720p\n${prefix}${command} https://x.com/user/status/xxxxx 360p\n\n*Note:* Supports Twitter/X video posts.` 
+      });
+    }
+
+    const url = args[0];
+    let preferredQuality = '360p'; // Default quality
+
+    // Check if user specified quality
+    const qualityArg = (args[1] || '').toLowerCase();
+    const validQualities = ['720p', '360p', '270p'];
+    if (validQualities.includes(qualityArg)) {
+      preferredQuality = qualityArg;
+    }
+
+    // Check URL format
+    if (!url.includes('twitter.com') && !url.includes('x.com')) {
+      return await sock.sendMessage(from, { 
+        text: `❌ Invalid URL. Please provide a valid Twitter/X link.` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `⏳ Processing Twitter/X media...` });
+
+    try {
+      // Primary: GiftedTech API
+      const response = await fetch(
+        `https://api.giftedtech.co.ke/api/download/twitter?apikey=gifted&url=${encodeURIComponent(url)}`,
+        {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Extract video data
+      let thumbnail = data.result?.thumbnail || null;
+      let videoUrls = data.result?.videoUrls || [];
+
+      if (!videoUrls || videoUrls.length === 0) {
+        throw new Error("Could not extract video URLs from API response.");
+      }
+
+      // Find best quality matching user preference
+      let selectedVideo = null;
+      let selectedQuality = '';
+
+      // Quality order from best to worst
+      const qualityOrder = ['720p', '360p', '270p'];
+
+      // First, try to match user's preferred quality
+      for (const video of videoUrls) {
+        if (video.quality === preferredQuality) {
+          selectedVideo = video;
+          selectedQuality = video.quality;
+          break;
+        }
+      }
+
+      // If not found, use the best available
+      if (!selectedVideo) {
+        for (const q of qualityOrder) {
+          for (const video of videoUrls) {
+            if (video.quality === q) {
+              selectedVideo = video;
+              selectedQuality = video.quality;
+              break;
+            }
+          }
+          if (selectedVideo) break;
+        }
+      }
+
+      // If still no match, use the first one
+      if (!selectedVideo) {
+        selectedVideo = videoUrls[0];
+        selectedQuality = selectedVideo.quality || 'Unknown';
+      }
+
+      const videoUrl = selectedVideo.url;
+
+      // Send thumbnail if available
+      if (thumbnail) {
+        try {
+          await sock.sendMessage(from, {
+            image: { url: thumbnail },
+            caption: `🐦 *Twitter/X Video*\n📊 *Quality:* ${selectedQuality}\n\n⬇️ *Downloading video...*`
+          });
+        } catch (thumbErr) {
+          await sock.sendMessage(from, { 
+            text: `🐦 *Twitter/X Video*\n📊 *Quality:* ${selectedQuality}\n\n⬇️ *Downloading video...*` 
+          });
+        }
+      }
+
+      // Download and send the video
+      const videoResponse = await fetch(videoUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!videoResponse.ok) {
+        throw new Error(`Video download failed: ${videoResponse.status}`);
+      }
+
+      const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+
+      if (videoBuffer.length < 5000) {
+        throw new Error("Downloaded file is too small. The link may be invalid.");
+      }
+
+      const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
+
+      // Build quality list
+      let qualityList = '';
+      videoUrls.forEach((video) => {
+        const check = video.quality === selectedQuality ? '✅' : '•';
+        qualityList += `${check} ${video.quality}\n`;
+      });
+
+      const caption = `🐦 *Twitter/X Video*\n📊 *Quality:* ${selectedQuality}\n📦 *Size:* ${fileSizeMB} MB\n\n📥 *Available Qualities:*\n${qualityList}\n\n✅ *Download Success*`;
+
+      try {
+        await sock.sendMessage(from, {
+          video: videoBuffer,
+          caption: caption
+        });
+      } catch (sendErr) {
+        await sock.sendMessage(from, {
+          document: videoBuffer,
+          mimetype: 'video/mp4',
+          fileName: `twitter_${Date.now()}.mp4`,
+          caption: `🐦 *Twitter/X Video*\n📊 *Quality:* ${selectedQuality}\n📦 *Size:* ${fileSizeMB} MB`
+        });
+      }
+
+    } catch (error) {
+      console.error('Twitter/X download error:', error);
+
+      // Fallback: Prince API
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/download/twitter';
+        const fallbackRes = await fetch(`${princeUrl}?apikey=prince&url=${encodeURIComponent(url)}`);
+        const fallbackData = await fallbackRes.json();
+
+        let fallbackVideo = fallbackData.result?.video || fallbackData.result?.download_url || 
+                            fallbackData.video || fallbackData.download_url || fallbackData.url;
+        let fallbackImages = fallbackData.result?.images || fallbackData.images || [];
+
+        if (fallbackVideo) {
+          const vRes = await fetch(fallbackVideo);
+          const vBuf = Buffer.from(await vRes.arrayBuffer());
+          if (vBuf.length > 5000) {
+            return await sock.sendMessage(from, { 
+              video: vBuf, 
+              caption: '✅ *Twitter/X Download (fallback)*' 
+            });
+          }
+        }
+        if (fallbackImages.length > 0) {
+          for (const img of fallbackImages.slice(0, 3)) {
+            if (img && img.startsWith('http')) {
+              await sock.sendMessage(from, { image: { url: img } });
+              await new Promise(r => setTimeout(r, 500));
+            }
+          }
+          return;
+        }
+      } catch (fallbackErr) {}
+
+      // Fallback: David Cyril API
+      try {
+        const davidUrl = 'https://apis.davidcyril.name.ng/download/twitterx';
+        const davidRes = await fetch(`${davidUrl}?url=${encodeURIComponent(url)}`);
+        const davidData = await davidRes.json();
+
+        let davidVideo = davidData.result?.video || davidData.video || davidData.download_url || davidData.url;
+
+        if (davidVideo) {
+          const vRes = await fetch(davidVideo);
+          const vBuf = Buffer.from(await vRes.arrayBuffer());
+          if (vBuf.length > 5000) {
+            return await sock.sendMessage(from, { 
+              video: vBuf, 
+              caption: '✅ *Twitter/X Download (fallback)*' 
+            });
+          }
+        }
+      } catch (davidErr) {}
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Download Error: ${error.message || 'Could not download media.'}\n\n💡 Make sure the URL is valid and the post contains a video.` 
+      });
+    }
+  }
+});
+register({
+  name: 'pinterest',
+  aliases: ['pin', 'pins', 'pinterestdl'],
+  category: 'DOWNLOADER',
+  description: 'Download Pinterest videos and images',
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `📌 *Pinterest Downloader*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://pin.it/1cR6JJNpv\n\n*Supports:*\n• Pinterest video pins\n• Pinterest image pins\n\n*Note:* For image pins, use the image URL directly.` 
+      });
+    }
+
+    const url = args[0];
+
+    // Check if it's a Pinterest URL
+    if (!url.includes('pin.it') && !url.includes('pinterest.com')) {
+      return await sock.sendMessage(from, { 
+        text: `❌ Invalid URL. Please provide a valid Pinterest link.\nExample: https://pin.it/1cR6JJNpv` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `⏳ Processing Pinterest media...` });
+
+    try {
+      // Primary: GiftedTech API
+      const response = await fetch(
+        `https://api.giftedtech.co.ke/api/download/pinterestv2?apikey=gifted&url=${encodeURIComponent(url)}`,
+        {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Extract video and audio URLs
+      let videoUrl = data.result?.videoUrl || null;
+      let audioUrl = data.result?.audioUrl || null;
+
+      if (!videoUrl && !audioUrl) {
+        // Try to find any URL in the response
+        const jsonString = JSON.stringify(data);
+        const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp4|mov|jpg|jpeg|png|gif)/i);
+        if (urlMatch) {
+          videoUrl = urlMatch[0];
+        }
+      }
+
+      if (!videoUrl && !audioUrl) {
+        throw new Error("Could not extract media from Pinterest link.");
+      }
+
+      // Use video URL as primary, fallback to audio URL
+      const mediaUrl = videoUrl || audioUrl;
+
+      // Download the media
+      const mediaResponse = await fetch(mediaUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!mediaResponse.ok) {
+        throw new Error(`Media download failed: ${mediaResponse.status}`);
+      }
+
+      const mediaBuffer = Buffer.from(await mediaResponse.arrayBuffer());
+
+      if (mediaBuffer.length < 5000) {
+        throw new Error("Downloaded file is too small. The link may be invalid.");
+      }
+
+      const fileSizeMB = (mediaBuffer.length / 1024 / 1024).toFixed(1);
+
+      // Detect if it's video or image
+      const isVideo = mediaUrl.includes('.mp4') || mediaUrl.includes('.mov') || mediaUrl.includes('.webm');
+      const isAudio = mediaUrl.includes('.mp3') || mediaUrl.includes('.m4a') || mediaUrl.includes('.ogg');
+
+      const caption = `📌 *Pinterest Media*\n📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success*`;
+
+      // Send based on media type
+      try {
+        if (isVideo) {
+          await sock.sendMessage(from, {
+            video: mediaBuffer,
+            caption: caption
+          });
+        } else if (isAudio) {
+          await sock.sendMessage(from, {
+            audio: mediaBuffer,
+            mimetype: 'audio/mpeg',
+            fileName: `pinterest_audio_${Date.now()}.mp3`,
+            caption: caption
+          });
+        } else {
+          // Try to send as image
+          await sock.sendMessage(from, {
+            image: mediaBuffer,
+            caption: caption
+          });
+        }
+      } catch (sendErr) {
+        // Fallback: send as document
+        const ext = mediaUrl.split('.').pop().split('?')[0] || 'mp4';
+        await sock.sendMessage(from, {
+          document: mediaBuffer,
+          fileName: `pinterest_${Date.now()}.${ext}`,
+          caption: `📌 *Pinterest Media*\n📦 *Size:* ${fileSizeMB} MB`
+        });
+      }
+
+    } catch (error) {
+      console.error('Pinterest download error:', error);
+
+      // Fallback: Prince API
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/search/pinterest';
+        const fallbackRes = await fetch(`${princeUrl}?apikey=prince&query=${encodeURIComponent(url)}`);
+        const fallbackData = await fallbackRes.json();
+
+        let fallbackImage = fallbackData.result?.[0] || fallbackData.url || fallbackData.image;
+
+        if (fallbackImage) {
+          const imgRes = await fetch(fallbackImage);
+          const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+          if (imgBuf.length > 5000) {
+            return await sock.sendMessage(from, {
+              image: imgBuf,
+              caption: '📌 *Pinterest Image (fallback)*\n✅ *Download Success*'
+            });
+          }
+        }
+      } catch (fallbackErr) {}
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Download Error: ${error.message || 'Could not download media.'}\n\n💡 Make sure the URL is valid and try again.` 
+      });
+    }
+  }
+});
+register({
+  name: 'livescore',
+  aliases: ['score', 'football', 'scores', 'livefootball'],
+  category: 'INFO',
+  description: 'Get live football scores and match updates',
+  async execute({ sock, from, args, prefix, command }) {
+    // Check if user wants to filter by league
+    let filter = '';
+    if (args[0]) {
+      filter = args.join(' ').toLowerCase();
+    }
+
+    await sock.sendMessage(from, { text: `⏳ Fetching live scores...` });
+
+    try {
+      // Primary: GiftedTech API
+      const response = await fetch(
+        `https://api.giftedtech.co.ke/api/football/livescore2?apikey=gifted`,
+        {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Extract matches
+      let matches = data.result?.matches || [];
+      let totalMatches = data.result?.totalMatches || 0;
+
+      if (!matches || matches.length === 0) {
+        return await sock.sendMessage(from, { 
+          text: `⚠️ No matches found right now.` 
+        });
+      }
+
+      // Filter by league if specified
+      if (filter) {
+        matches = matches.filter(m => 
+          m.league?.toLowerCase().includes(filter) ||
+          m.homeTeam?.toLowerCase().includes(filter) ||
+          m.awayTeam?.toLowerCase().includes(filter)
+        );
+      }
+
+      if (matches.length === 0) {
+        return await sock.sendMessage(from, { 
+          text: `❌ No matches found for "${filter}".\n\n💡 Try a different filter or remove it.` 
+        });
+      }
+
+      // Limit to 20 matches to avoid message overflow
+      const maxMatches = Math.min(matches.length, 20);
+
+      // Build the response
+      let msg = `⚽ *LIVE SCORES*\n`;
+      if (filter) msg += `📌 *Filter:* ${filter}\n`;
+      msg += `📊 *Showing:* ${maxMatches}/${matches.length} matches\n\n`;
+
+      matches.slice(0, maxMatches).forEach((match) => {
+        const home = match.homeTeam || 'Unknown';
+        const away = match.awayTeam || 'Unknown';
+        const homeScore = match.homeScore || '0';
+        const awayScore = match.awayScore || '0';
+        const league = match.league || 'Unknown League';
+        const status = match.status || 'Unknown';
+        const startTime = match.startTime ? new Date(match.startTime).toLocaleString() : 'N/A';
+
+        // Status emoji
+        let statusEmoji = '⏳';
+        if (status.toLowerCase().includes('full time') || status.toLowerCase().includes('ft')) {
+          statusEmoji = '✅ FT';
+        } else if (status.toLowerCase().includes('live') || status.toLowerCase().includes('in progress')) {
+          statusEmoji = '🟢 LIVE';
+        } else if (status.toLowerCase().includes('half time')) {
+          statusEmoji = '⏸️ HT';
+        } else if (status.toLowerCase().includes('scheduled')) {
+          statusEmoji = '📅';
+        }
+
+        msg += `${statusEmoji} *${league}*\n`;
+        msg += `🏠 ${home} ${homeScore} - ${awayScore} ${away}\n`;
+        msg += `📅 ${startTime}\n\n`;
+      });
+
+      if (matches.length > 20) {
+        msg += `\n*Showing 20 of ${matches.length} matches.*\n`;
+        msg += `💡 Use ${prefix}${command} <league> to filter results.`;
+      }
+
+      // Send as text
+      await sock.sendMessage(from, { text: msg });
+
+    } catch (error) {
+      console.error('Livescore error:', error);
+
+      // Fallback: Try alternative endpoint
+      try {
+        const fallbackUrl = 'https://api.giftedtech.co.ke/api/football/livescore';
+        const fallbackRes = await fetch(`${fallbackUrl}?apikey=gifted`);
+        const fallbackData = await fallbackRes.json();
+
+        let fallbackMatches = fallbackData.result?.matches || [];
+
+        if (fallbackMatches.length > 0) {
+          let msg = `⚽ *Live Scores (fallback)*\n\n`;
+          fallbackMatches.slice(0, 15).forEach((match) => {
+            const home = match.homeTeam || 'Unknown';
+            const away = match.awayTeam || 'Unknown';
+            const score = match.score || `${match.homeScore || 0} - ${match.awayScore || 0}`;
+            const league = match.league || 'Unknown League';
+            msg += `*${league}*\n${home} ${score} ${away}\n\n`;
+          });
+          return await sock.sendMessage(from, { text: msg });
+        }
+      } catch (fallbackErr) {}
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Livescore Error: ${error.message || 'Could not fetch scores.'}\n\n💡 Try again later.` 
+      });
+    }
+  }
+});
+register({
+  name: 'neko',
+  aliases: ['nekogirl', 'animecat', 'nekoai'],
+  category: 'TOOLS',
+  description: 'Get a random Neko anime girl image',
+  async execute({ sock, from, prefix, command }) {
+    await sock.sendMessage(from, { text: `⏳ Fetching a neko image...` });
+
+    try {
+      // Primary: GiftedTech API
+      const response = await fetch(
+        `https://api.giftedtech.co.ke/api/anime/neko?apikey=gifted`,
+        {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Extract image URL
+      let imageUrl = data.result || data.url || data.image || data.data?.url || data.data?.result;
+
+      if (!imageUrl) {
+        const jsonString = JSON.stringify(data);
+        const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(png|jpg|jpeg|gif|webp)/i);
+        if (urlMatch) imageUrl = urlMatch[0];
+      }
+
+      if (!imageUrl) {
+        throw new Error("Could not extract image URL from API response.");
+      }
+
+      // Send the image
+      await sock.sendMessage(from, {
+        image: { url: imageUrl },
+        caption: `🐱 *Neko Girl*\n\n✨ _Powered by NEXUS-MD_`
+      });
+
+    } catch (error) {
+      console.error('Neko error:', error);
+
+      // Fallback: Waifu API (sfw/neko)
+      try {
+        const fallbackRes = await fetch('https://api.waifu.pics/sfw/neko');
+        const fallbackData = await fallbackRes.json();
+
+        if (fallbackData && fallbackData.url) {
+          return await sock.sendMessage(from, {
+            image: { url: fallbackData.url },
+            caption: `🐱 *Neko Girl (fallback)*\n\n✨ _Powered by NEXUS-MD_`
+          });
+        }
+      } catch (fallbackErr) {}
+
+      // Fallback: Another anime API
+      try {
+        const anotherRes = await fetch('https://nekos.life/api/v2/img/neko');
+        const anotherData = await anotherRes.json();
+
+        if (anotherData && anotherData.url) {
+          return await sock.sendMessage(from, {
+            image: { url: anotherData.url },
+            caption: `🐱 *Neko Girl (fallback)*\n\n✨ _Powered by NEXUS-MD_`
+          });
+        }
+      } catch (anotherErr) {}
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Neko Error: ${error.message || 'Could not fetch image.'}\n\n💡 Try again later.` 
+      });
+    }
+  }
+});
+register({
+  name: 'waifu',
+  aliases: ['animegirl', 'waifuai', 'waifuimg'],
+  category: 'TOOLS',
+  description: 'Get a random anime waifu image',
+  async execute({ sock, from, prefix, command }) {
+    await sock.sendMessage(from, { text: `⏳ Fetching a waifu image...` });
+
+    try {
+      // Primary: GiftedTech API
+      const response = await fetch(
+        `https://api.giftedtech.co.ke/api/anime/waifu?apikey=gifted`,
+        {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Extract image URL
+      let imageUrl = data.result || data.url || data.image || data.data?.url || data.data?.result;
+
+      if (!imageUrl) {
+        const jsonString = JSON.stringify(data);
+        const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(png|jpg|jpeg|gif|webp)/i);
+        if (urlMatch) imageUrl = urlMatch[0];
+      }
+
+      if (!imageUrl) {
+        throw new Error("Could not extract image URL from API response.");
+      }
+
+      // Send the image
+      await sock.sendMessage(from, {
+        image: { url: imageUrl },
+        caption: `💕 *Waifu*\n\n✨ _Powered by NEXUS-MD_`
+      });
+
+    } catch (error) {
+      console.error('Waifu error:', error);
+
+      // Fallback: Waifu API (sfw/waifu)
+      try {
+        const fallbackRes = await fetch('https://api.waifu.pics/sfw/waifu');
+        const fallbackData = await fallbackRes.json();
+
+        if (fallbackData && fallbackData.url) {
+          return await sock.sendMessage(from, {
+            image: { url: fallbackData.url },
+            caption: `💕 *Waifu (fallback)*\n\n✨ _Powered by NEXUS-MD_`
+          });
+        }
+      } catch (fallbackErr) {}
+
+      // Fallback: Another anime API
+      try {
+        const anotherRes = await fetch('https://nekos.life/api/v2/img/waifu');
+        const anotherData = await anotherRes.json();
+
+        if (anotherData && anotherData.url) {
+          return await sock.sendMessage(from, {
+            image: { url: anotherData.url },
+            caption: `💕 *Waifu (fallback)*\n\n✨ _Powered by NEXUS-MD_`
+          });
+        }
+      } catch (anotherErr) {}
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Waifu Error: ${error.message || 'Could not fetch image.'}\n\n💡 Try again later.` 
+      });
+    }
+  }
+});
 register({
   name: 'github',
   category: 'INFO',
@@ -1310,7 +2672,7 @@ register({
 });
 
 register({
-  name: 'waifu',
+  name: 'waifu2',
   category: 'TOOLS',
   description: 'Random Waifu Anime Image',
   async execute({ sock, from }) {
@@ -1785,7 +3147,7 @@ register({
   }
 });
 register({
-  name: 'giftedflux',
+  name: 'flux',
   aliases: ['gf', 'giftedimg', 'fluxai'],
   category: 'AI',
   description: 'Generate AI images using GiftedTech Flux AI',
