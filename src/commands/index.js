@@ -144,9 +144,15 @@ register({
   description: 'Chat with ChatGPT',
   async execute({ sock, from, text }) {
     if (!text) return sock.sendMessage(from, { text: '❓ Please provide a question.' });
-    const res = await fetch(`${P_BASE}/ai/gpt?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
-    const data = await res.json();
-    await sock.sendMessage(from, { text: `🤖 *GPT:* ${data.result || data.reply}` });
+    try {
+      const res = await fetch(`${P_BASE}/ai/gpt?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
+      const data = await res.json();
+      const reply = data.result || data.reply;
+      if (!reply) return sock.sendMessage(from, { text: '❌ No response from the API. Try again shortly.' });
+      await sock.sendMessage(from, { text: `🤖 *GPT:* ${reply}` });
+    } catch (e) {
+      await sock.sendMessage(from, { text: '⚠️ GPT Error: ' + e.message });
+    }
   }
 });
 
@@ -156,9 +162,14 @@ register({
   description: 'Google Gemini AI Assistant',
   async execute({ sock, from, text }) {
     if (!text) return sock.sendMessage(from, { text: '❓ Ask me anything.' });
-    const res = await fetch(`${P_BASE}/ai/gemini?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
-    const data = await res.json();
-    await sock.sendMessage(from, { text: `✨ *Gemini:* ${data.result}` });
+    try {
+      const res = await fetch(`${P_BASE}/ai/gemini?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
+      const data = await res.json();
+      if (!data.result) return sock.sendMessage(from, { text: '❌ No response from the API. Try again shortly.' });
+      await sock.sendMessage(from, { text: `✨ *Gemini:* ${data.result}` });
+    } catch (e) {
+      await sock.sendMessage(from, { text: '⚠️ Gemini Error: ' + e.message });
+    }
   }
 });
 
@@ -168,9 +179,14 @@ register({
   description: 'AI Coding and Logic Assistant',
   async execute({ sock, from, text }) {
     if (!text) return sock.sendMessage(from, { text: '❓ What code should I write?' });
-    const res = await fetch(`${P_BASE}/ai/blackbox?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
-    const data = await res.json();
-    await sock.sendMessage(from, { text: `💻 *Blackbox AI:*\n\n${data.result}` });
+    try {
+      const res = await fetch(`${P_BASE}/ai/blackbox?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
+      const data = await res.json();
+      if (!data.result) return sock.sendMessage(from, { text: '❌ No response from the API. Try again shortly.' });
+      await sock.sendMessage(from, { text: `💻 *Blackbox AI:*\n\n${data.result}` });
+    } catch (e) {
+      await sock.sendMessage(from, { text: '⚠️ Blackbox Error: ' + e.message });
+    }
   }
 });
 
@@ -182,9 +198,14 @@ register({
   async execute({ sock, from, text }) {
     if (!text) return sock.sendMessage(from, { text: '❓ Describe the image you want to create.' });
     await sock.sendMessage(from, { text: '🎨 *Creating your masterpiece...*' });
-    const res = await fetch(`${P_BASE}/ai/dalle?apikey=${P_KEY}&prompt=${encodeURIComponent(text)}`);
-    const data = await res.json();
-    await sock.sendMessage(from, { image: { url: data.result }, caption: `✨ *Prompt:* ${text}` });
+    try {
+      const res = await fetch(`${P_BASE}/ai/dalle?apikey=${P_KEY}&prompt=${encodeURIComponent(text)}`);
+      const data = await res.json();
+      if (!data.result) return sock.sendMessage(from, { text: '❌ Could not generate an image. Try again shortly.' });
+      await sock.sendMessage(from, { image: { url: data.result }, caption: `✨ *Prompt:* ${text}` });
+    } catch (e) {
+      await sock.sendMessage(from, { text: '⚠️ Image Generation Error: ' + e.message });
+    }
   }
 });
 
@@ -276,11 +297,16 @@ register({
   description: 'Search Google for info',
   async execute({ sock, from, text }) {
     if (!text) return sock.sendMessage(from, { text: '❓ Search query?' });
-    const res = await fetch(`${P_BASE}/search/google?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
-    const data = await res.json();
-    let msg = `🔎 *Google Search:* ${text}\n\n`;
-    data.result.slice(0, 5).forEach(v => msg += `*${v.title}*\n🔗 ${v.link}\n\n`);
-    await sock.sendMessage(from, { text: msg });
+    try {
+      const res = await fetch(`${P_BASE}/search/google?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
+      const data = await res.json();
+      if (!data.result || !data.result.length) return sock.sendMessage(from, { text: '❌ No results found.' });
+      let msg = `🔎 *Google Search:* ${text}\n\n`;
+      data.result.slice(0, 5).forEach(v => msg += `*${v.title}*\n🔗 ${v.link}\n\n`);
+      await sock.sendMessage(from, { text: msg });
+    } catch (e) {
+      await sock.sendMessage(from, { text: '⚠️ Search Error: ' + e.message });
+    }
   }
 });
 
@@ -290,10 +316,15 @@ register({
   description: 'Find images on Pinterest',
   async execute({ sock, from, text }) {
     if (!text) return sock.sendMessage(from, { text: '❓ Search query?' });
-    const res = await fetch(`${P_BASE}/search/pinterest?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
-    const data = await res.json();
-    const img = data.result[0];
-    await sock.sendMessage(from, { image: { url: img }, caption: `📌 Result for: ${text}` });
+    try {
+      const res = await fetch(`${P_BASE}/search/pinterest?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
+      const data = await res.json();
+      const img = data.result && data.result[0];
+      if (!img) return sock.sendMessage(from, { text: '❌ No results found.' });
+      await sock.sendMessage(from, { image: { url: img }, caption: `📌 Result for: ${text}` });
+    } catch (e) {
+      await sock.sendMessage(from, { text: '⚠️ Search Error: ' + e.message });
+    }
   }
 });
 
@@ -303,9 +334,14 @@ register({
   description: 'Find song lyrics',
   async execute({ sock, from, text }) {
     if (!text) return sock.sendMessage(from, { text: '❓ Song name?' });
-    const res = await fetch(`${P_BASE}/search/lyrics?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
-    const data = await res.json();
-    await sock.sendMessage(from, { text: `🎶 *Lyrics:* ${text}\n\n${data.result}` });
+    try {
+      const res = await fetch(`${P_BASE}/search/lyrics?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
+      const data = await res.json();
+      if (!data.result) return sock.sendMessage(from, { text: '❌ Lyrics not found.' });
+      await sock.sendMessage(from, { text: `🎶 *Lyrics:* ${text}\n\n${data.result}` });
+    } catch (e) {
+      await sock.sendMessage(from, { text: '⚠️ Lyrics Error: ' + e.message });
+    }
   }
 });
 
@@ -315,9 +351,14 @@ register({
   description: 'Search Wikipedia',
   async execute({ sock, from, text }) {
     if (!text) return sock.sendMessage(from, { text: '❓ Search query?' });
-    const res = await fetch(`${P_BASE}/search/wiki?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
-    const data = await res.json();
-    await sock.sendMessage(from, { text: `📖 *Wikipedia:* ${text}\n\n${data.result}` });
+    try {
+      const res = await fetch(`${P_BASE}/search/wiki?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
+      const data = await res.json();
+      if (!data.result) return sock.sendMessage(from, { text: '❌ No article found.' });
+      await sock.sendMessage(from, { text: `📖 *Wikipedia:* ${text}\n\n${data.result}` });
+    } catch (e) {
+      await sock.sendMessage(from, { text: '⚠️ Wikipedia Error: ' + e.message });
+    }
   }
 });
 
@@ -327,10 +368,15 @@ register({
   description: 'Check weather of any city',
   async execute({ sock, from, text }) {
     if (!text) return sock.sendMessage(from, { text: '❓ Provide city name.' });
-    const res = await fetch(`${P_BASE}/search/weather?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
-    const data = await res.json();
-    const w = data.result;
-    await sock.sendMessage(from, { text: `🌡️ *Weather: ${text}*\n\n☁️ Condition: ${w.condition}\n🌡️ Temp: ${w.temp}°C\n💧 Humidity: ${w.humidity}` });
+    try {
+      const res = await fetch(`${P_BASE}/search/weather?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
+      const data = await res.json();
+      const w = data.result;
+      if (!w) return sock.sendMessage(from, { text: '❌ City not found.' });
+      await sock.sendMessage(from, { text: `🌡️ *Weather: ${text}*\n\n☁️ Condition: ${w.condition}\n🌡️ Temp: ${w.temp}°C\n💧 Humidity: ${w.humidity}` });
+    } catch (e) {
+      await sock.sendMessage(from, { text: '⚠️ Weather Error: ' + e.message });
+    }
   }
 });
 
@@ -340,11 +386,16 @@ register({
   description: 'Search GitHub user profiles',
   async execute({ sock, from, text }) {
     if (!text) return sock.sendMessage(from, { text: '❓ GitHub username?' });
-    const res = await fetch(`${P_BASE}/search/github?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
-    const data = await res.json();
-    const v = data.result;
-    const info = `👤 *User:* ${v.login}\n📂 *Repos:* ${v.public_repos}\n👥 *Followers:* ${v.followers}\n🔗 *Link:* ${v.html_url}`;
-    await sock.sendMessage(from, { image: { url: v.avatar_url }, caption: info });
+    try {
+      const res = await fetch(`${P_BASE}/search/github?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
+      const data = await res.json();
+      const v = data.result;
+      if (!v) return sock.sendMessage(from, { text: '❌ User not found.' });
+      const info = `👤 *User:* ${v.login}\n📂 *Repos:* ${v.public_repos}\n👥 *Followers:* ${v.followers}\n🔗 *Link:* ${v.html_url}`;
+      await sock.sendMessage(from, { image: { url: v.avatar_url }, caption: info });
+    } catch (e) {
+      await sock.sendMessage(from, { text: '⚠️ GitHub Error: ' + e.message });
+    }
   }
 });
 
@@ -368,9 +419,14 @@ register({
   description: 'Shorten a long URL',
   async execute({ sock, from, args }) {
     if (!args[0]) return sock.sendMessage(from, { text: '❓ Provide URL.' });
-    const res = await fetch(`${P_BASE}/tools/tinyurl?apikey=${P_KEY}&url=${args[0]}`);
-    const data = await res.json();
-    await sock.sendMessage(from, { text: `🔗 *Shortened:* ${data.result}` });
+    try {
+      const res = await fetch(`${P_BASE}/tools/tinyurl?apikey=${P_KEY}&url=${args[0]}`);
+      const data = await res.json();
+      if (!data.result) return sock.sendMessage(from, { text: '❌ Could not shorten that URL.' });
+      await sock.sendMessage(from, { text: `🔗 *Shortened:* ${data.result}` });
+    } catch (e) {
+      await sock.sendMessage(from, { text: '⚠️ Shorten Error: ' + e.message });
+    }
   }
 });
 
@@ -380,9 +436,14 @@ register({
   description: 'Translate text to English',
   async execute({ sock, from, text }) {
     if (!text) return sock.sendMessage(from, { text: '❓ Text to translate?' });
-    const res = await fetch(`${P_BASE}/tools/translate?apikey=${P_KEY}&query=${encodeURIComponent(text)}&lang=en`);
-    const data = await res.json();
-    await sock.sendMessage(from, { text: `🌍 *Translation:* ${data.result}` });
+    try {
+      const res = await fetch(`${P_BASE}/tools/translate?apikey=${P_KEY}&query=${encodeURIComponent(text)}&lang=en`);
+      const data = await res.json();
+      if (!data.result) return sock.sendMessage(from, { text: '❌ Could not translate that text.' });
+      await sock.sendMessage(from, { text: `🌍 *Translation:* ${data.result}` });
+    } catch (e) {
+      await sock.sendMessage(from, { text: '⚠️ Translate Error: ' + e.message });
+    }
   }
 });
 
@@ -409,9 +470,14 @@ register({
   category: 'TOOLS',
   description: 'Get a random interesting fact',
   async execute({ sock, from }) {
-    const res = await fetch(`${P_BASE}/tools/fact?apikey=${P_KEY}`);
-    const data = await res.json();
-    await sock.sendMessage(from, { text: `💡 *Did you know?*\n\n${data.result}` });
+    try {
+      const res = await fetch(`${P_BASE}/tools/fact?apikey=${P_KEY}`);
+      const data = await res.json();
+      if (!data.result) return sock.sendMessage(from, { text: '❌ Could not fetch a fact right now.' });
+      await sock.sendMessage(from, { text: `💡 *Did you know?*\n\n${data.result}` });
+    } catch (e) {
+      await sock.sendMessage(from, { text: '⚠️ Fact Error: ' + e.message });
+    }
   }
 });
 
@@ -420,9 +486,14 @@ register({
   category: 'TOOLS',
   description: 'Get a random motivational quote',
   async execute({ sock, from }) {
-    const res = await fetch(`${P_BASE}/tools/quote?apikey=${P_KEY}`);
-    const data = await res.json();
-    await sock.sendMessage(from, { text: `💬 "${data.result.quote}"\n\n— *${data.result.author}*` });
+    try {
+      const res = await fetch(`${P_BASE}/tools/quote?apikey=${P_KEY}`);
+      const data = await res.json();
+      if (!data.result) return sock.sendMessage(from, { text: '❌ Could not fetch a quote right now.' });
+      await sock.sendMessage(from, { text: `💬 "${data.result.quote}"\n\n— *${data.result.author}*` });
+    } catch (e) {
+      await sock.sendMessage(from, { text: '⚠️ Quote Error: ' + e.message });
+    }
   }
 });
 
@@ -432,9 +503,14 @@ register({
   description: 'Dictionary definition',
   async execute({ sock, from, text }) {
     if (!text) return sock.sendMessage(from, { text: '❓ Word to define?' });
-    const res = await fetch(`${P_BASE}/search/dictionary?apikey=${P_KEY}&query=${text}`);
-    const data = await res.json();
-    await sock.sendMessage(from, { text: `📖 *Definition:* ${text}\n\n${data.result}` });
+    try {
+      const res = await fetch(`${P_BASE}/search/dictionary?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
+      const data = await res.json();
+      if (!data.result) return sock.sendMessage(from, { text: '❌ No definition found.' });
+      await sock.sendMessage(from, { text: `📖 *Definition:* ${text}\n\n${data.result}` });
+    } catch (e) {
+      await sock.sendMessage(from, { text: '⚠️ Define Error: ' + e.message });
+    }
   }
 });
 register({
@@ -473,11 +549,16 @@ register({
     status += `📡 *Platform:* \`${os.platform()}\`\n\n`;
     status += `_System is running at optimal capacity._`;
 
-    // Send the detailed status as an edit or a new message quoting the first one
-    await sock.sendMessage(from, { 
-      text: status, 
-      edit: sent.key 
-    });
+    // Send the detailed status as an edit; fall back to a new message if
+    // editing isn't supported/fails, so the command never goes silent.
+    try {
+      await sock.sendMessage(from, {
+        text: status,
+        edit: sent.key,
+      });
+    } catch (e) {
+      await sock.sendMessage(from, { text: status });
+    }
   },
 });
 
@@ -485,7 +566,9 @@ register({
   name: 'xnxx',
   category: 'NSFW',
   description: 'Search and Download XNXX videos',
-  async execute({ sock, from, args, prefix, command }) {
+  async execute({ sock, from, args }) {
+    const prefix = PREFIX;
+    const command = 'xnxx';
     if (!args[0]) {
       return await sock.sendMessage(from, { 
         text: `*NEXUS-MD XNXX Tool*\n\n*Search:* ${prefix}${command} Naruto\n*Download:* ${prefix}${command} <link>` 
@@ -563,7 +646,9 @@ register({
   name: 'play',
   category: 'DOWNLOADER',
   description: 'Play audio from YouTube',
-  async execute({ sock, from, args, prefix, command }) {
+  async execute({ sock, from, args }) {
+    const prefix = PREFIX;
+    const command = 'play';
     if (!args[0]) return await sock.sendMessage(from, { text: `*Example:* ${prefix}${command} Faded` });
 
     const query = args.join(" ");
