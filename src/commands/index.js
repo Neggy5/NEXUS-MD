@@ -6,6 +6,34 @@ const { isSenderAdmin } = require('../moderation');
 function bareNumber(jid = '') {
   return jid.split('@')[0].split(':')[0];
 }
+// ==========================================
+//        PRINCE API HELPER & CONSTANTS
+// ==========================================
+const P_KEY = 'prince';
+const P_BASE = 'https://api.princetechn.com/api';
+
+/**
+ * Helper to handle media downloads to reduce repetitive code
+ */
+const princeDownload = async (sock, from, url, path, type = 'video') => {
+  try {
+    await sock.sendMessage(from, { text: `📥 *Processing ${type}...* Please wait.` });
+    const res = await fetch(`${P_BASE}/download/${path}?apikey=${P_KEY}&url=${encodeURIComponent(url)}`);
+    const data = await res.json();
+    const link = data.result?.url || data.result?.download_url || data.url || data.result;
+
+    if (!link) return sock.sendMessage(from, { text: "❌ Failed to fetch download link." });
+
+    if (type === 'video') {
+      await sock.sendMessage(from, { video: { url: link }, caption: `✅ *NEXUS-MD Download Success*`, mimetype: 'video/mp4' });
+    } else {
+      await sock.sendMessage(from, { audio: { url: link }, mimetype: 'audio/mpeg', fileName: 'audio.mp3' });
+    }
+  } catch (e) {
+    sock.sendMessage(from, { text: "⚠️ Download Error: " + e.message });
+  }
+};
+
 
 const BOT_NAME = 'NEXUS-MD';
 const PREFIX = process.env.PREFIX || '.';
@@ -16,10 +44,14 @@ const CATEGORY_STYLE = {
   MAIN: '🏠',
   INFO: 'ℹ️',
   TOOLS: '🛠️',
+  AI: '🤖',
+  DOWNLOADER: '📥',
   'GROUP-ADMIN': '👥',
   'GROUP-SECURITY': '🛡️',
+  NSFW: '🔞'
 };
-const CATEGORY_ORDER = ['MAIN', 'INFO', 'TOOLS', 'GROUP-ADMIN', 'GROUP-SECURITY'];
+
+const CATEGORY_ORDER = ['MAIN', 'AI', 'DOWNLOADER', 'INFO', 'TOOLS', 'GROUP-ADMIN', 'GROUP-SECURITY', 'NSFW'];
 
 function greeting() {
   const h = new Date().getHours();
@@ -102,7 +134,309 @@ register({
     }
   },
 });
+// ==========================================
+//               AI COMMANDS
+// ==========================================
 
+register({
+  name: 'gpt',
+  category: 'AI',
+  description: 'Chat with ChatGPT',
+  async execute({ sock, from, text }) {
+    if (!text) return sock.sendMessage(from, { text: '❓ Please provide a question.' });
+    const res = await fetch(`${P_BASE}/ai/gpt?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
+    const data = await res.json();
+    await sock.sendMessage(from, { text: `🤖 *GPT:* ${data.result || data.reply}` });
+  }
+});
+
+register({
+  name: 'gemini',
+  category: 'AI',
+  description: 'Google Gemini AI Assistant',
+  async execute({ sock, from, text }) {
+    if (!text) return sock.sendMessage(from, { text: '❓ Ask me anything.' });
+    const res = await fetch(`${P_BASE}/ai/gemini?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
+    const data = await res.json();
+    await sock.sendMessage(from, { text: `✨ *Gemini:* ${data.result}` });
+  }
+});
+
+register({
+  name: 'blackbox',
+  category: 'AI',
+  description: 'AI Coding and Logic Assistant',
+  async execute({ sock, from, text }) {
+    if (!text) return sock.sendMessage(from, { text: '❓ What code should I write?' });
+    const res = await fetch(`${P_BASE}/ai/blackbox?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
+    const data = await res.json();
+    await sock.sendMessage(from, { text: `💻 *Blackbox AI:*\n\n${data.result}` });
+  }
+});
+
+register({
+  name: 'dalle',
+  aliases: ['imagine', 'aiimg'],
+  category: 'AI',
+  description: 'Generate high-quality AI images',
+  async execute({ sock, from, text }) {
+    if (!text) return sock.sendMessage(from, { text: '❓ Describe the image you want to create.' });
+    await sock.sendMessage(from, { text: '🎨 *Creating your masterpiece...*' });
+    const res = await fetch(`${P_BASE}/ai/dalle?apikey=${P_KEY}&prompt=${encodeURIComponent(text)}`);
+    const data = await res.json();
+    await sock.sendMessage(from, { image: { url: data.result }, caption: `✨ *Prompt:* ${text}` });
+  }
+});
+
+// ==========================================
+//            DOWNLOADER COMMANDS
+// ==========================================
+
+register({
+  name: 'tiktok',
+  aliases: ['tt', 'ttdl'],
+  category: 'DOWNLOADER',
+  description: 'Download TikTok video (No Watermark)',
+  async execute({ sock, from, args }) {
+    if (!args[0]) return sock.sendMessage(from, { text: '❌ Please provide a TikTok link.' });
+    await princeDownload(sock, from, args[0], 'tiktok', 'video');
+  }
+});
+
+register({
+  name: 'ig',
+  aliases: ['igdl', 'instagram'],
+  category: 'DOWNLOADER',
+  description: 'Download Instagram Reels/Videos',
+  async execute({ sock, from, args }) {
+    if (!args[0]) return sock.sendMessage(from, { text: '❌ Please provide an Instagram link.' });
+    await princeDownload(sock, from, args[0], 'ig', 'video');
+  }
+});
+
+register({
+  name: 'fb',
+  aliases: ['fbdl', 'facebook'],
+  category: 'DOWNLOADER',
+  description: 'Download Facebook Videos',
+  async execute({ sock, from, args }) {
+    if (!args[0]) return sock.sendMessage(from, { text: '❌ Please provide a Facebook link.' });
+    await princeDownload(sock, from, args[0], 'facebook', 'video');
+  }
+});
+
+register({
+  name: 'twitter',
+  aliases: ['x', 'xdl'],
+  category: 'DOWNLOADER',
+  description: 'Download X (Twitter) Videos',
+  async execute({ sock, from, args }) {
+    if (!args[0]) return sock.sendMessage(from, { text: '❌ Please provide an X/Twitter link.' });
+    await princeDownload(sock, from, args[0], 'twitter', 'video');
+  }
+});
+
+register({
+  name: 'spotify',
+  category: 'DOWNLOADER',
+  description: 'Download songs from Spotify',
+  async execute({ sock, from, args }) {
+    if (!args[0]) return sock.sendMessage(from, { text: '❌ Please provide a Spotify link.' });
+    await princeDownload(sock, from, args[0], 'spotify', 'audio');
+  }
+});
+
+register({
+  name: 'ytmp4',
+  category: 'DOWNLOADER',
+  description: 'Download YouTube Video',
+  async execute({ sock, from, args }) {
+    if (!args[0]) return sock.sendMessage(from, { text: '❌ Please provide a YouTube link.' });
+    await princeDownload(sock, from, args[0], 'ytmp4', 'video');
+  }
+});
+
+register({
+  name: 'mediafire',
+  category: 'DOWNLOADER',
+  description: 'Download Mediafire files',
+  async execute({ sock, from, args }) {
+    if (!args[0]) return sock.sendMessage(from, { text: '❌ Provide a Mediafire link.' });
+    await princeDownload(sock, from, args[0], 'mediafire', 'video');
+  }
+});
+
+// ==========================================
+//               SEARCH COMMANDS
+// ==========================================
+
+register({
+  name: 'google',
+  category: 'INFO',
+  description: 'Search Google for info',
+  async execute({ sock, from, text }) {
+    if (!text) return sock.sendMessage(from, { text: '❓ Search query?' });
+    const res = await fetch(`${P_BASE}/search/google?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
+    const data = await res.json();
+    let msg = `🔎 *Google Search:* ${text}\n\n`;
+    data.result.slice(0, 5).forEach(v => msg += `*${v.title}*\n🔗 ${v.link}\n\n`);
+    await sock.sendMessage(from, { text: msg });
+  }
+});
+
+register({
+  name: 'pinterest',
+  category: 'INFO',
+  description: 'Find images on Pinterest',
+  async execute({ sock, from, text }) {
+    if (!text) return sock.sendMessage(from, { text: '❓ Search query?' });
+    const res = await fetch(`${P_BASE}/search/pinterest?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
+    const data = await res.json();
+    const img = data.result[0];
+    await sock.sendMessage(from, { image: { url: img }, caption: `📌 Result for: ${text}` });
+  }
+});
+
+register({
+  name: 'lyrics',
+  category: 'INFO',
+  description: 'Find song lyrics',
+  async execute({ sock, from, text }) {
+    if (!text) return sock.sendMessage(from, { text: '❓ Song name?' });
+    const res = await fetch(`${P_BASE}/search/lyrics?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
+    const data = await res.json();
+    await sock.sendMessage(from, { text: `🎶 *Lyrics:* ${text}\n\n${data.result}` });
+  }
+});
+
+register({
+  name: 'wikipedia',
+  category: 'INFO',
+  description: 'Search Wikipedia',
+  async execute({ sock, from, text }) {
+    if (!text) return sock.sendMessage(from, { text: '❓ Search query?' });
+    const res = await fetch(`${P_BASE}/search/wiki?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
+    const data = await res.json();
+    await sock.sendMessage(from, { text: `📖 *Wikipedia:* ${text}\n\n${data.result}` });
+  }
+});
+
+register({
+  name: 'weather',
+  category: 'INFO',
+  description: 'Check weather of any city',
+  async execute({ sock, from, text }) {
+    if (!text) return sock.sendMessage(from, { text: '❓ Provide city name.' });
+    const res = await fetch(`${P_BASE}/search/weather?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
+    const data = await res.json();
+    const w = data.result;
+    await sock.sendMessage(from, { text: `🌡️ *Weather: ${text}*\n\n☁️ Condition: ${w.condition}\n🌡️ Temp: ${w.temp}°C\n💧 Humidity: ${w.humidity}` });
+  }
+});
+
+register({
+  name: 'github',
+  category: 'INFO',
+  description: 'Search GitHub user profiles',
+  async execute({ sock, from, text }) {
+    if (!text) return sock.sendMessage(from, { text: '❓ GitHub username?' });
+    const res = await fetch(`${P_BASE}/search/github?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
+    const data = await res.json();
+    const v = data.result;
+    const info = `👤 *User:* ${v.login}\n📂 *Repos:* ${v.public_repos}\n👥 *Followers:* ${v.followers}\n🔗 *Link:* ${v.html_url}`;
+    await sock.sendMessage(from, { image: { url: v.avatar_url }, caption: info });
+  }
+});
+
+// ==========================================
+//                TOOL COMMANDS
+// ==========================================
+
+register({
+  name: 'ssweb',
+  category: 'TOOLS',
+  description: 'Screenshot of a website',
+  async execute({ sock, from, args }) {
+    if (!args[0]) return sock.sendMessage(from, { text: '❓ Provide URL.' });
+    await sock.sendMessage(from, { image: { url: `${P_BASE}/tools/ssweb?apikey=${P_KEY}&url=${args[0]}` }, caption: '📸 Screenshot' });
+  }
+});
+
+register({
+  name: 'shorturl',
+  category: 'TOOLS',
+  description: 'Shorten a long URL',
+  async execute({ sock, from, args }) {
+    if (!args[0]) return sock.sendMessage(from, { text: '❓ Provide URL.' });
+    const res = await fetch(`${P_BASE}/tools/tinyurl?apikey=${P_KEY}&url=${args[0]}`);
+    const data = await res.json();
+    await sock.sendMessage(from, { text: `🔗 *Shortened:* ${data.result}` });
+  }
+});
+
+register({
+  name: 'translate',
+  category: 'TOOLS',
+  description: 'Translate text to English',
+  async execute({ sock, from, text }) {
+    if (!text) return sock.sendMessage(from, { text: '❓ Text to translate?' });
+    const res = await fetch(`${P_BASE}/tools/translate?apikey=${P_KEY}&query=${encodeURIComponent(text)}&lang=en`);
+    const data = await res.json();
+    await sock.sendMessage(from, { text: `🌍 *Translation:* ${data.result}` });
+  }
+});
+
+register({
+  name: 'meme',
+  category: 'TOOLS',
+  description: 'Get a random meme',
+  async execute({ sock, from }) {
+    await sock.sendMessage(from, { image: { url: `${P_BASE}/tools/meme?apikey=${P_KEY}` }, caption: '😂' });
+  }
+});
+
+register({
+  name: 'waifu',
+  category: 'TOOLS',
+  description: 'Random Waifu Anime Image',
+  async execute({ sock, from }) {
+    await sock.sendMessage(from, { image: { url: `${P_BASE}/anime/waifu?apikey=${P_KEY}` }, caption: '❤️' });
+  }
+});
+
+register({
+  name: 'fact',
+  category: 'TOOLS',
+  description: 'Get a random interesting fact',
+  async execute({ sock, from }) {
+    const res = await fetch(`${P_BASE}/tools/fact?apikey=${P_KEY}`);
+    const data = await res.json();
+    await sock.sendMessage(from, { text: `💡 *Did you know?*\n\n${data.result}` });
+  }
+});
+
+register({
+  name: 'quote',
+  category: 'TOOLS',
+  description: 'Get a random motivational quote',
+  async execute({ sock, from }) {
+    const res = await fetch(`${P_BASE}/tools/quote?apikey=${P_KEY}`);
+    const data = await res.json();
+    await sock.sendMessage(from, { text: `💬 "${data.result.quote}"\n\n— *${data.result.author}*` });
+  }
+});
+
+register({
+  name: 'define',
+  category: 'INFO',
+  description: 'Dictionary definition',
+  async execute({ sock, from, text }) {
+    if (!text) return sock.sendMessage(from, { text: '❓ Word to define?' });
+    const res = await fetch(`${P_BASE}/search/dictionary?apikey=${P_KEY}&query=${text}`);
+    const data = await res.json();
+    await sock.sendMessage(from, { text: `📖 *Definition:* ${text}\n\n${data.result}` });
+  }
+});
 register({
   name: 'ping',
   category: 'MAIN',
@@ -127,47 +461,56 @@ register({
     }
 
     const input = args.join(" ");
-    const isUrl = input.match(/https?:\/\/(www\.)?xnxx\.(com|health)\/[^\s]+/gi);
-    const apiKey = 'prince';
-    const baseUrl = 'https://api.princetechn.com/api';
+    // Regular expression to detect if the input is an XNXX link
+    const isUrl = input.match(/https?:\/\/(www\.)?xnxx\.(com|health|net)\/[^\s]+/gi);
 
     try {
       if (isUrl) {
-        // --- DOWNLOAD MODE ---
-        await sock.sendMessage(from, { text: '📥 *Downloading video...*' });
-        const res = await fetch(`${baseUrl}/download/xnxxdl?apikey=${apiKey}&url=${encodeURIComponent(isUrl[0])}`);
+        // --- DOWNLOAD MODE (using davidcyril.name.ng/download/xnxx) ---
+        await sock.sendMessage(from, { text: '📥 *Downloading video...* Please wait.' });
+        
+        const dlApi = `https://apis.davidcyril.name.ng/download/xnxx?url=${encodeURIComponent(isUrl[0])}`;
+        const res = await fetch(dlApi);
         const data = await res.json();
-        const video = data.result?.url || data.url;
 
-        if (!video) throw new Error("Could not find download link.");
+        // David Cyril API usually returns link in result.dl or result.video_url
+        const video = data.result?.dl || data.result?.video_url || data.result?.url;
+
+        if (!video) throw new Error("Could not find download link. The video might be too large or private.");
 
         await sock.sendMessage(from, {
           video: { url: video },
-          caption: `✅ *Success*`,
+          caption: `✅ *NEXUS-MD Success*`,
           mimetype: 'video/mp4'
         });
 
       } else {
-        // --- SEARCH MODE ---
-        await sock.sendMessage(from, { text: `🔍 Searching: *${input}*...` });
-        const res = await fetch(`${baseUrl}/search/xnxxsearch?apikey=${apiKey}&query=${encodeURIComponent(input)}`);
+        // --- SEARCH MODE (using davidcyril.name.ng/xxx/xnxx) ---
+        await sock.sendMessage(from, { text: `🔍 Searching for: *${input}*...` });
+        
+        const searchApi = `https://apis.davidcyril.name.ng/xxx/xnxx?query=${encodeURIComponent(input)}`;
+        const res = await fetch(searchApi);
         const data = await res.json();
         
-        // Find the array in the response
-        const results = data.result || data.data || (Array.isArray(data) ? data : []);
+        // Find the array in the response (result or results)
+        const results = data.result || data.results || (Array.isArray(data) ? data : []);
 
-        if (!results.length) return await sock.sendMessage(from, { text: "❌ No results found." });
+        if (!results.length) return await sock.sendMessage(from, { text: "❌ No results found for your query." });
 
-        let msg = `🔞 *XNXX SEARCH*\n\n`;
+        let msg = `🔞 *XNXX SEARCH RESULTS*\n\n`;
         results.slice(0, 10).forEach((v, i) => {
-          msg += `*${i + 1}.* ${v.title}\n🔗 ${v.link || v.url}\n\n`;
+          const title = v.title || "No Title";
+          const link = v.link || v.url;
+          msg += `*${i + 1}.* ${title}\n🔗 ${link}\n\n`;
         });
-        msg += `_Copy a link and send ${prefix}${command} <link> to download._`;
+        
+        msg += `💡 *Tip:* Copy one of the links above and send \`${prefix}${command} <link>\` to download the video file.`;
         
         await sock.sendMessage(from, { text: msg });
       }
     } catch (e) {
-      await sock.sendMessage(from, { text: "⚠️ Error: " + e.message });
+      console.error("XNXX Error:", e);
+      await sock.sendMessage(from, { text: "⚠️ API Error: " + (e.message || "Request failed") });
     }
   }
 });
@@ -180,44 +523,101 @@ register({
     if (!args[0]) return await sock.sendMessage(from, { text: `*Example:* ${prefix}${command} Faded` });
 
     const query = args.join(" ");
-    const apiKey = 'prince';
-    const baseUrl = 'https://api.princetechn.com/api';
+    const baseUrl = 'https://omegatech-api.dixonomega.tech';
 
     try {
       await sock.sendMessage(from, { text: `🎧 Processing: *${query}*...` });
 
-      // 1. Search for the video
-      const searchRes = await fetch(`${baseUrl}/search/ytsearch?apikey=${apiKey}&query=${encodeURIComponent(query)}`);
-      const searchData = await searchRes.json();
-      const results = searchData.result || searchData.data || (Array.isArray(searchData) ? searchData : []);
+      // 1. Search for the video using yt-search (local)
+      const yts = require('yt-search');
+      const searchResults = await yts(query);
+      
+      if (!searchResults || !searchResults.videos || searchResults.videos.length === 0) {
+        return await sock.sendMessage(from, { text: "❌ No results found." });
+      }
 
-      if (!results.length) return await sock.sendMessage(from, { text: "❌ Song not found." });
+      const target = searchResults.videos[0];
+      const videoUrl = target.url;
 
-      const target = results[0];
-      const videoUrl = target.url || target.link;
-
-      // 2. Download the audio
-      const dlRes = await fetch(`${baseUrl}/download/ytmp3?apikey=${apiKey}&url=${encodeURIComponent(videoUrl)}`);
-      const dlData = await dlRes.json();
-      const audio = dlData.result?.download_url || dlData.result?.url || dlData.url;
-
-      if (!audio) throw new Error("Download link extraction failed.");
-
-      // 3. Send
-      await sock.sendMessage(from, {
-        image: { url: target.thumbnail || target.image },
-        caption: `🎵 *Now Playing:* ${target.title}\n⏱️ *Duration:* ${target.timestamp || target.duration || 'N/A'}`
+      // 2. Download audio via OmegaTech API
+      const apiUrl = `${baseUrl}/api/download/play?url=${encodeURIComponent(videoUrl)}`;
+      const res = await fetch(apiUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
       });
 
+      if (!res.ok) throw new Error(`API returned ${res.status}`);
+
+      const data = await res.json();
+      
+      // Extract download URL (handle different response structures)
+      let audioUrl = data.download_url || data.download || data.url || 
+                     data.result?.download_url || data.result?.download || data.result?.url;
+
+      if (!audioUrl) {
+        // Fallback: try to find any URL in the response
+        const jsonString = JSON.stringify(data);
+        const urlMatch = jsonString.match(/https?:\/\/[^\s"',]+\.(mp3|m4a|ogg|wav)/i);
+        if (urlMatch) audioUrl = urlMatch[0];
+      }
+
+      if (!audioUrl) {
+        throw new Error("Could not extract download URL from API response.");
+      }
+
+      // 3. Send thumbnail first
+      if (target.thumbnail) {
+        await sock.sendMessage(from, {
+          image: { url: target.thumbnail },
+          caption: `🎵 *${target.title}*\n⏱️ *Duration:* ${target.timestamp || 'N/A'}`
+        });
+      }
+
+      // 4. Download and send audio
+      const audioRes = await fetch(audioUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
+
+      if (!audioRes.ok) throw new Error(`Audio download failed: ${audioRes.status}`);
+
+      const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
+
+      if (audioBuffer.length < 10000) {
+        throw new Error("Downloaded file is too small. The link may be invalid.");
+      }
+
+      // Detect if it's MP3 or needs conversion
+      const isMP3 = audioBuffer.toString('ascii', 0, 3) === 'ID3' ||
+                    (audioBuffer[0] === 0xFF && (audioBuffer[1] & 0xE0) === 0xE0);
+
+      if (!isMP3) {
+        // Try to convert using the existing converter if available
+        try {
+          const { toAudio } = require('../lib/converter');
+          const converted = await toAudio(audioBuffer);
+          if (converted && converted.length > 1000) {
+            await sock.sendMessage(from, {
+              audio: converted,
+              mimetype: 'audio/mpeg',
+              fileName: `${target.title}.mp3`
+            });
+            return;
+          }
+        } catch (convErr) {
+          console.warn('Conversion skipped:', convErr.message);
+        }
+      }
+
       await sock.sendMessage(from, {
-        audio: { url: audio },
+        audio: audioBuffer,
         mimetype: 'audio/mpeg',
-        fileName: `${target.title}.mp3`
-      }, { quoted: null });
+        fileName: `${target.title.replace(/[^a-zA-Z0-9]/g, '_')}.mp3`
+      });
 
     } catch (e) {
-      console.error(e);
-      await sock.sendMessage(from, { text: "⚠️ API Error: " + e.message });
+      console.error('Play error:', e);
+      await sock.sendMessage(from, { 
+        text: `⚠️ API Error: ${e.message || 'Unknown error'}` 
+      });
     }
   }
 });
