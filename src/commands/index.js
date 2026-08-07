@@ -322,7 +322,7 @@ register({
     try {
       // Primary: David Cyril API
       const response = await fetch(
-        `https://apis.davidcyril.name.ng/api/ai/blackbox?query=${encodeURIComponent(query)}`,
+        `https://apis.davidcyril.name.ng/ai/blackbox?text=${encodeURIComponent(query)}`,
         {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -406,7 +406,7 @@ register({
     try {
       // Primary: David Cyril API
       const response = await fetch(
-        `https://apis.davidcyril.name.ng/api/ai/claude-haiku-45?query=${encodeURIComponent(query)}`,
+        `https://apis.davidcyril.name.ng/ai/claude-haiku-45?text=${encodeURIComponent(query)}`,
         {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -517,7 +517,7 @@ register({
     try {
       // Primary: David Cyril API
       const response = await fetch(
-        `https://apis.davidcyril.name.ng/api/ai/deepseek-v32-thinking?query=${encodeURIComponent(query)}`,
+        `https://apis.davidcyril.name.ng/ai/deepseek-v32-thinking?text=${encodeURIComponent(query)}`,
         {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -575,8 +575,8 @@ register({
 
       // Fallback: Try alternative DeepSeek endpoint
       try {
-        const altUrl = 'https://apis.davidcyril.name.ng/api/ai/deepseek';
-        const altRes = await fetch(`${altUrl}?query=${encodeURIComponent(query)}`);
+        const altUrl = 'https://apis.davidcyril.name.ng/ai/deepseek';
+        const altRes = await fetch(`${altUrl}?text=${encodeURIComponent(query)}`);
         const altData = await altRes.json();
         const altReply = altData.result || altData.reply || altData.message;
 
@@ -645,7 +645,7 @@ register({
     try {
       // Primary: David Cyril API
       const response = await fetch(
-        `https://apis.davidcyril.name.ng/api/ai/gemini-3-pro?query=${encodeURIComponent(query)}`,
+        `https://apis.davidcyril.name.ng/ai/gemini-3-pro?text=${encodeURIComponent(query)}`,
         {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -703,8 +703,8 @@ register({
 
       // Fallback: Try alternative Gemini endpoint
       try {
-        const altUrl = 'https://apis.davidcyril.name.ng/api/ai/gemini';
-        const altRes = await fetch(`${altUrl}?query=${encodeURIComponent(query)}`);
+        const altUrl = 'https://apis.davidcyril.name.ng/ai/gemini';
+        const altRes = await fetch(`${altUrl}?text=${encodeURIComponent(query)}`);
         const altData = await altRes.json();
         const altReply = altData.result || altData.reply || altData.message;
 
@@ -774,7 +774,7 @@ register({
     try {
       // Primary: David Cyril API - Twitter/X Downloader
       const response = await fetch(
-        `https://apis.davidcyril.name.ng/api/download/twitterx?url=${encodeURIComponent(url)}`,
+        `https://apis.davidcyril.name.ng/download/twitterx?url=${encodeURIComponent(url)}`,
         {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -902,7 +902,7 @@ register({
 
       // Fallback: Try alternative endpoint
       try {
-        const altUrl = 'https://apis.davidcyril.name.ng/api/download/xdl';
+        const altUrl = 'https://apis.davidcyril.name.ng/download/xdl';
         const altRes = await fetch(`${altUrl}?url=${encodeURIComponent(url)}`);
         const altData = await altRes.json();
 
@@ -951,7 +951,7 @@ register({
     try {
       // Primary: David Cyril API - YouTube MP4 Downloader
       const response = await fetch(
-        `https://apis.davidcyril.name.ng/api/download/youtube-mp4?url=${encodeURIComponent(url)}`,
+        `https://apis.davidcyril.name.ng/download/youtube-mp4?url=${encodeURIComponent(url)}`,
         {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -1038,7 +1038,7 @@ register({
 
       // Fallback: Try alternative YouTube endpoint
       try {
-        const altUrl = 'https://apis.davidcyril.name.ng/api/download/ytmp4';
+        const altUrl = 'https://apis.davidcyril.name.ng/download/ytmp4';
         const altRes = await fetch(`${altUrl}?url=${encodeURIComponent(url)}`);
         const altData = await altRes.json();
 
@@ -1180,7 +1180,7 @@ register({
 
       // Primary: David Cyril API - Alibaba Uploader
       const response = await fetch(
-        `https://apis.davidcyril.name.ng/api/upload/alibaba`,
+        `https://apis.davidcyril.name.ng/upload/alibaba`,
         {
           method: 'POST',
           headers: {
@@ -1227,7 +1227,7 @@ register({
 
       // Fallback: Try alternative upload endpoint
       try {
-        const altUrl = 'https://apis.davidcyril.name.ng/api/upload/oss';
+        const altUrl = 'https://apis.davidcyril.name.ng/upload/oss';
         const altForm = new FormData();
         const altBlob = new Blob([fileBuffer], { type: fileType });
         altForm.append('file', altBlob, fileName);
@@ -1352,7 +1352,7 @@ register({
 
       // Primary: David Cyril API - Catbox Uploader
       const response = await fetch(
-        `https://apis.davidcyril.name.ng/api/upload/catbox`,
+        `https://apis.davidcyril.name.ng/upload/catbox`,
         {
           method: 'POST',
           headers: {
@@ -1426,7 +1426,7 @@ register({
 
       // Fallback: Try alternative upload endpoint
       try {
-        const altUrl = 'https://apis.davidcyril.name.ng/api/upload/catbox-v2';
+        const altUrl = 'https://apis.davidcyril.name.ng/upload/catbox-v2';
         const altForm = new FormData();
         const altBlob = new Blob([fileBuffer], { type: fileType });
         altForm.append('file', altBlob, fileName);
@@ -1525,7 +1525,7 @@ register({
 
       // Primary: David Cyril API - Uguu Uploader
       const response = await fetch(
-        `https://apis.davidcyril.name.ng/api/upload/uguu`,
+        `https://apis.davidcyril.name.ng/upload/uguu`,
         {
           method: 'POST',
           headers: {
@@ -1600,7 +1600,7 @@ register({
 
       // Fallback: Try alternative upload endpoint
       try {
-        const altUrl = 'https://apis.davidcyril.name.ng/api/upload/uguu-v2';
+        const altUrl = 'https://apis.davidcyril.name.ng/upload/uguu-v2';
         const altForm = new FormData();
         const altBlob = new Blob([fileBuffer], { type: fileType });
         altForm.append('file', altBlob, fileName);
@@ -1697,7 +1697,7 @@ register({
     try {
       // Primary: David Cyril API - Riddle Game
       const response = await fetch(
-        `https://apis.davidcyril.name.ng/api/games/riddle`,
+        `https://apis.davidcyril.name.ng/games/riddle`,
         {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -1747,7 +1747,7 @@ register({
 
       // Fallback: Try alternative riddle API
       try {
-        const altUrl = 'https://apis.davidcyril.name.ng/api/games/riddle-v2';
+        const altUrl = 'https://apis.davidcyril.name.ng/games/riddle-v2';
         const altRes = await fetch(altUrl);
         const altData = await altRes.json();
 
@@ -1853,7 +1853,7 @@ register({
     try {
       // Primary: David Cyril API - Anime Quiz
       const response = await fetch(
-        `https://apis.davidcyril.name.ng/api/games/anime-quiz`,
+        `https://apis.davidcyril.name.ng/games/anime-quiz`,
         {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -1921,7 +1921,7 @@ register({
 
       // Fallback: Try alternative anime quiz API
       try {
-        const altUrl = 'https://apis.davidcyril.name.ng/api/games/anime-quiz-v2';
+        const altUrl = 'https://apis.davidcyril.name.ng/games/anime-quiz-v2';
         const altRes = await fetch(altUrl);
         const altData = await altRes.json();
 
@@ -2030,7 +2030,7 @@ register({
     try {
       // Primary: David Cyril API - Writecream Image Generator
       const response = await fetch(
-        `https://apis.davidcyril.name.ng/api/imagegen/writecream?prompt=${encodeURIComponent(prompt)}`,
+        `https://apis.davidcyril.name.ng/imagegen/writecream?prompt=${encodeURIComponent(prompt)}`,
         {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -2070,7 +2070,7 @@ register({
       try {
         await sock.sendMessage(from, { text: `⏳ Fallback: Trying alternative generator...` });
 
-        const altUrl = 'https://apis.davidcyril.name.ng/api/imagegen/writecream-v2';
+        const altUrl = 'https://apis.davidcyril.name.ng/imagegen/writecream-v2';
         const altRes = await fetch(`${altUrl}?prompt=${encodeURIComponent(prompt)}`);
         const altData = await altRes.json();
 
@@ -2163,7 +2163,7 @@ register({
     try {
       // Primary: David Cyril API - Animagine Image Generator
       const response = await fetch(
-        `https://apis.davidcyril.name.ng/api/imagegen/animagine?prompt=${encodeURIComponent(prompt)}`,
+        `https://apis.davidcyril.name.ng/imagegen/animagine?prompt=${encodeURIComponent(prompt)}`,
         {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -2203,7 +2203,7 @@ register({
       try {
         await sock.sendMessage(from, { text: `⏳ Fallback: Trying alternative generator...` });
 
-        const altUrl = 'https://apis.davidcyril.name.ng/api/imagegen/animagine-v2';
+        const altUrl = 'https://apis.davidcyril.name.ng/imagegen/animagine-v2';
         const altRes = await fetch(`${altUrl}?prompt=${encodeURIComponent(prompt)}`);
         const altData = await altRes.json();
 
@@ -2279,18 +2279,18 @@ register({
   async execute({ sock, from, args, prefix, command }) {
     if (!args[0]) {
       return await sock.sendMessage(from, { 
-        text: `🎬 *Nkiri Movie Search*\n\nUsage: ${prefix}${command} <movie title>\nExample: ${prefix}${command} Inception\n\n*Examples:*\n${prefix}${command} The Batman\n${prefix}${command} Avatar\n${prefix}${command} Black Panther\n\n*Note:* Returns movie titles, years, and download links.` 
+        text: `🎬 *Nkiri Movie Search*\n\nUsage: ${prefix}${command} <movie title>\nExample: ${prefix}${command} Inception\n\n*Note:* Use ${prefix}nkiri-dl <url> to get download links after searching.` 
       });
     }
 
     const query = args.join(" ");
 
-    await sock.sendMessage(from, { text: `⏳ Searching for "${query}" on Nkiri...` });
+    await sock.sendMessage(from, { text: `⏳ Searching for "${query}"...` });
 
     try {
-      // Primary: David Cyril API - Nkiri Movie Search
+      // Try the correct endpoint pattern
       const response = await fetch(
-        `https://apis.davidcyril.name.ng/api/movies/nkiri-search?query=${encodeURIComponent(query)}`,
+        `https://apis.davidcyril.name.ng/nkiri/search?query=${encodeURIComponent(query)}`,
         {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -2299,77 +2299,86 @@ register({
       );
 
       if (!response.ok) {
-        throw new Error(`API returned ${response.status}`);
+        // Fallback to the API endpoint
+        const fallbackRes = await fetch(
+          `https://apis.davidcyril.name.ng/api/movies/nkiri-search?query=${encodeURIComponent(query)}`,
+          {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+          }
+        );
+
+        if (!fallbackRes.ok) {
+          throw new Error(`API returned ${fallbackRes.status}`);
+        }
+
+        const fallbackData = await fallbackRes.json();
+        return await sendSearchResults(from, fallbackData, query, prefix);
       }
 
       const data = await response.json();
-
-      // Extract movie results
-      let results = data.result || data.results || data.data || [];
-
-      if (!results || results.length === 0) {
-        return await sock.sendMessage(from, { 
-          text: `❌ No movies found for "${query}".\n\n💡 Try a different title or check your spelling.` 
-        });
-      }
-
-      // Limit results to first 10
-      const maxResults = Math.min(results.length, 10);
-
-      // Build the response message
-      let msg = `🎬 *Nkiri Movie Results for:* "${query}"\n\n`;
-      msg += `📌 *Found:* ${results.length} movies\n\n`;
-
-      results.slice(0, maxResults).forEach((movie, index) => {
-        const title = movie.title || movie.name || 'Unknown';
-        const year = movie.year || movie.release_year || movie.date || 'N/A';
-        const url = movie.url || movie.link || movie.download_url || '';
-        const quality = movie.quality || movie.resolution || 'N/A';
-
-        msg += `${index + 1}. *${title}* (${year})\n`;
-        if (quality !== 'N/A') msg += `   📊 *Quality:* ${quality}\n`;
-        if (url) msg += `   🔗 ${url}\n`;
-        msg += `\n`;
-      });
-
-      if (results.length > 10) {
-        msg += `\n*Showing 10 of ${results.length} results.*\n`;
-        msg += `💡 Use a more specific search for better results.`;
-      }
-
-      await sock.sendMessage(from, { text: msg });
+      await sendSearchResults(from, data, query, prefix);
 
     } catch (error) {
       console.error('Nkiri search error:', error);
 
-      // Fallback: Try alternative Nkiri endpoint
+      // Try Google search fallback
       try {
-        const altUrl = 'https://apis.davidcyril.name.ng/api/movies/nkiri';
-        const altRes = await fetch(`${altUrl}?query=${encodeURIComponent(query)}`);
-        const altData = await altRes.json();
+        const googleRes = await fetch(
+          `https://api.princetechn.com/api/search/google?apikey=prince&query=${encodeURIComponent(`site:nkiri.com ${query}`)}`
+        );
+        const googleData = await googleRes.json();
 
-        let altResults = altData.result || altData.results || altData.data || [];
-
-        if (altResults.length > 0) {
-          let msg = `🎬 *Nkiri Movie Results (fallback)*\n\n`;
-          altResults.slice(0, 8).forEach((movie, index) => {
-            const title = movie.title || movie.name || 'Unknown';
-            const year = movie.year || 'N/A';
-            const url = movie.url || movie.link || '';
-            msg += `${index + 1}. *${title}* (${year})\n`;
-            if (url) msg += `   🔗 ${url}\n`;
-            msg += `\n`;
+        if (googleData && googleData.result && googleData.result.length > 0) {
+          let msg = `🎬 *Nkiri Search Results (Google fallback)*\n\n`;
+          googleData.result.slice(0, 5).forEach((item, index) => {
+            msg += `${index + 1}. *${item.title}*\n`;
+            msg += `   🔗 ${item.link}\n\n`;
           });
+          msg += `\n💡 Use ${prefix}nkiri-dl <url> to get download links.`;
           return await sock.sendMessage(from, { text: msg });
         }
-      } catch (altErr) {}
+      } catch (googleErr) {}
 
       await sock.sendMessage(from, { 
-        text: `⚠️ Search Error: ${error.message || 'Could not search movies.'}\n\n💡 Try a different movie title or try again later.` 
+        text: `⚠️ Search Error: ${error.message || 'Could not search movies.'}\n\n💡 Try using ${prefix}play <movie name> or try again later.` 
       });
     }
   }
 });
+
+// Helper function for search results
+async function sendSearchResults(from, data, query, prefix) {
+  let results = data.result || data.results || data.data || [];
+
+  if (!results || results.length === 0) {
+    return await sock.sendMessage(from, { 
+      text: `❌ No movies found for "${query}".\n\n💡 Try a different title.` 
+    });
+  }
+
+  const maxResults = Math.min(results.length, 10);
+  let msg = `🎬 *Nkiri Movie Results for:* "${query}"\n\n`;
+  msg += `📌 *Found:* ${results.length} movies\n\n`;
+
+  results.slice(0, maxResults).forEach((movie, index) => {
+    const title = movie.title || movie.name || 'Unknown';
+    const year = movie.year || 'N/A';
+    const url = movie.url || movie.link || '';
+    const quality = movie.quality || 'N/A';
+
+    msg += `${index + 1}. *${title}* (${year})\n`;
+    if (quality !== 'N/A') msg += `   📊 *Quality:* ${quality}\n`;
+    if (url) msg += `   🔗 ${url}\n`;
+    msg += `\n`;
+  });
+
+  msg += `\n💡 Use ${prefix}nkiri-dl <url> to get download links.`;
+
+  await sock.sendMessage(from, { text: msg });
+}
+
 register({
   name: 'nkiri-dl',
   aliases: ['nkirdl', 'nkiridownload', 'ndl'],
@@ -2378,24 +2387,24 @@ register({
   async execute({ sock, from, args, prefix, command }) {
     if (!args[0]) {
       return await sock.sendMessage(from, { 
-        text: `🎬 *Nkiri Movie Downloader*\n\nUsage: ${prefix}${command} <movie_url>\nExample: ${prefix}${command} https://nkiri.com/inception-2010\n\n*Steps:*\n1. Search for a movie using ${prefix}nkiri <title>\n2. Copy the movie URL\n3. Use ${prefix}${command} <url> to get download links\n\n*Example flow:*\n${prefix}nkiri Inception\n${prefix}${command} https://nkiri.com/inception-2010` 
+        text: `🎬 *Nkiri Movie Downloader*\n\nUsage: ${prefix}${command} <movie_url>\nExample: ${prefix}${command} https://downloadwella.com/e1pgzmlaafp1/Batman...\n\n*Note:* Get the URL from ${prefix}nkiri search results.` 
       });
     }
 
     const url = args[0];
 
-    if (!url.includes('nkiri.com')) {
+    if (!url.includes('downloadwella.com') && !url.includes('nkiri.com')) {
       return await sock.sendMessage(from, { 
-        text: `❌ Invalid URL. Please provide a valid Nkiri movie URL.\nExample: https://nkiri.com/inception-2010` 
+        text: `❌ Invalid URL. Please provide a valid Nkiri movie URL.` 
       });
     }
 
-    await sock.sendMessage(from, { text: `⏳ Fetching download links for movie...` });
+    await sock.sendMessage(from, { text: `⏳ Fetching download links...` });
 
     try {
-      // Primary: David Cyril API - Nkiri Movie Download
+      // CORRECT WORKING ENDPOINT
       const response = await fetch(
-        `https://apis.davidcyril.name.ng/api/movies/nkiri-download?url=${encodeURIComponent(url)}`,
+        `https://apis.davidcyril.name.ng/nkiri/download?url=${encodeURIComponent(url)}`,
         {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -2409,64 +2418,54 @@ register({
 
       const data = await response.json();
 
-      // Extract download data
-      let title = data.result?.title || data.title || data.name || 'Movie';
-      let downloadLinks = data.result?.download_links || data.download_links || data.links || data.result?.links || [];
-      let thumbnail = data.result?.thumbnail || data.thumbnail || data.image || null;
-      let synopsis = data.result?.synopsis || data.synopsis || data.plot || '';
-      let year = data.result?.year || data.year || 'N/A';
-      let genre = data.result?.genre || data.genre || 'N/A';
-      let quality = data.result?.quality || data.quality || 'N/A';
-      let runtime = data.result?.runtime || data.runtime || 'N/A';
+      // Extract data
+      let title = data.title || data.movie_title || 'Movie';
+      let downloadLinks = data.download_links || data.links || [];
+      let thumbnail = data.thumbnail || data.poster || null;
+      let synopsis = data.synopsis || data.plot || '';
+      let year = data.year || 'N/A';
+      let genre = data.genre || 'N/A';
+      let quality = data.quality || 'N/A';
 
       if (!downloadLinks || downloadLinks.length === 0) {
-        // Try alternative format
-        const links = data.result?.links || data.links || [];
-        if (links.length > 0) {
-          downloadLinks = links;
-        } else {
-          // Try to find any URL in the response
-          const jsonString = JSON.stringify(data);
-          const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp4|mkv|avi)/gi);
-          if (urlMatch) {
-            downloadLinks = urlMatch.map(u => ({ url: u }));
+        // Check for direct links
+        const direct = data.download_link || data.download_url || data.url;
+        if (direct) {
+          if (typeof direct === 'string') {
+            downloadLinks = [{ url: direct, label: 'Download' }];
+          } else if (Array.isArray(direct)) {
+            downloadLinks = direct;
           }
         }
       }
 
       if (!downloadLinks || downloadLinks.length === 0) {
-        throw new Error("Could not extract download links from API response.");
+        throw new Error("No download links found.");
       }
 
-      // Build the response message
+      // Build response
       let msg = `🎬 *${title}*\n\n`;
       if (year !== 'N/A') msg += `📅 *Year:* ${year}\n`;
       if (genre !== 'N/A') msg += `🎭 *Genre:* ${genre}\n`;
-      if (quality !== 'N/A') msg += `📊 *Quality:* ${quality}\n`;
-      if (runtime !== 'N/A') msg += `⏱️ *Runtime:* ${runtime}\n\n`;
+      if (quality !== 'N/A') msg += `📊 *Quality:* ${quality}\n\n`;
 
       if (synopsis) {
         const shortSynopsis = synopsis.length > 200 ? synopsis.slice(0, 200) + '...' : synopsis;
-        msg += `📝 *Synopsis:* ${shortSynopsis}\n\n`;
+        msg += `📝 ${shortSynopsis}\n\n`;
       }
 
       msg += `📥 *Download Links:*\n\n`;
 
       downloadLinks.slice(0, 8).forEach((link, index) => {
-        const label = link.label || link.quality || link.resolution || `Link ${index + 1}`;
-        const linkUrl = link.url || link.link || link.download_url || link;
-        if (linkUrl && typeof linkUrl === 'string' && linkUrl.startsWith('http')) {
+        const label = link.label || link.quality || `Link ${index + 1}`;
+        const linkUrl = link.url || link.link || link;
+        if (linkUrl && linkUrl.startsWith('http')) {
           msg += `${index + 1}. *${label}*\n`;
           msg += `   🔗 ${linkUrl}\n\n`;
         }
       });
 
-      if (downloadLinks.length > 8) {
-        msg += `\n*Showing 8 of ${downloadLinks.length} links.*`;
-      }
-
-      // Send with thumbnail if available
-      if (thumbnail && thumbnail.startsWith('http')) {
+      if (thumbnail) {
         try {
           await sock.sendMessage(from, {
             image: { url: thumbnail },
@@ -2481,32 +2480,8 @@ register({
 
     } catch (error) {
       console.error('Nkiri download error:', error);
-
-      // Fallback: Try alternative Nkiri download endpoint
-      try {
-        const altUrl = 'https://apis.davidcyril.name.ng/api/movies/nkiri-dl';
-        const altRes = await fetch(`${altUrl}?url=${encodeURIComponent(url)}`);
-        const altData = await altRes.json();
-
-        let altLinks = altData.result?.download_links || altData.download_links || altData.links || [];
-        let altTitle = altData.result?.title || altData.title || 'Movie';
-
-        if (altLinks.length > 0) {
-          let msg = `🎬 *${altTitle}*\n\n📥 *Download Links:*\n\n`;
-          altLinks.slice(0, 6).forEach((link, index) => {
-            const label = link.label || link.quality || `Link ${index + 1}`;
-            const linkUrl = link.url || link.link || link;
-            if (linkUrl && linkUrl.startsWith('http')) {
-              msg += `${index + 1}. *${label}*\n`;
-              msg += `   🔗 ${linkUrl}\n\n`;
-            }
-          });
-          return await sock.sendMessage(from, { text: msg });
-        }
-      } catch (altErr) {}
-
       await sock.sendMessage(from, { 
-        text: `⚠️ Download Error: ${error.message || 'Could not fetch download links.'}\n\n💡 Make sure the URL is a valid Nkiri movie page.` 
+        text: `⚠️ Download Error: ${error.message || 'Could not fetch download links.'}\n\n💡 Make sure the URL is valid.` 
       });
     }
   }
@@ -2530,7 +2505,7 @@ register({
     try {
       // Primary: David Cyril API
       const response = await fetch(
-        `https://apis.davidcyril.name.ng/api/ai/gpt-54?query=${encodeURIComponent(query)}`,
+        `https://apis.davidcyril.name.ng/ai/gpt-54?text=${encodeURIComponent(query)}`,
         {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -2588,7 +2563,7 @@ register({
 
       // Fallback: Try alternative GPT endpoint
       try {
-        const altUrl = 'https://apis.davidcyril.name.ng/api/ai/gpt';
+        const altUrl = 'https://apis.davidcyril.name.ng/ai/gpt';
         const altRes = await fetch(`${altUrl}?query=${encodeURIComponent(query)}`);
         const altData = await altRes.json();
         const altReply = altData.result || altData.reply || altData.message;
@@ -2654,7 +2629,7 @@ register({
     try {
       // Primary: David Cyril API
       const response = await fetch(
-        `https://apis.davidcyril.name.ng/api/ai/qwen3-max?query=${encodeURIComponent(query)}`,
+        `https://apis.davidcyril.name.ng/ai/qwen3-max?text=${encodeURIComponent(query)}`,
         {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -2712,7 +2687,7 @@ register({
 
       // Fallback: Try alternative Qwen endpoint
       try {
-        const altUrl = 'https://apis.davidcyril.name.ng/api/ai/qwen';
+        const altUrl = 'https://apis.davidcyril.name.ng/ai/qwen';
         const altRes = await fetch(`${altUrl}?query=${encodeURIComponent(query)}`);
         const altData = await altRes.json();
         const altReply = altData.result || altData.reply || altData.message;
@@ -2785,7 +2760,7 @@ register({
     try {
       // Primary: David Cyril API - AIO Downloader V2
       const response = await fetch(
-        `https://apis.davidcyril.name.ng/api/download/aio-v2?url=${encodeURIComponent(url)}`,
+        `https://apis.davidcyril.name.ng/download/aio-v2?url=${encodeURIComponent(url)}`,
         {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -2889,7 +2864,7 @@ register({
 
       // Fallback: Try alternative endpoint
       try {
-        const altUrl = 'https://apis.davidcyril.name.ng/api/download/aio';
+        const altUrl = 'https://apis.davidcyril.name.ng/download/aio';
         const altRes = await fetch(`${altUrl}?url=${encodeURIComponent(url)}`);
         const altData = await altRes.json();
 
@@ -5498,87 +5473,6 @@ register({
     }
   },
 });
-
-register({
-  name: 'xnxx',
-  category: 'NSFW',
-  description: 'Search and Download XNXX videos',
-  async execute({ sock, from, args }) {
-    const prefix = PREFIX;
-    const command = 'xnxx';
-    if (!args[0]) {
-      return await sock.sendMessage(from, { 
-        text: `*NEXUS-MD XNXX Tool*\n\n*Search:* ${prefix}${command} Naruto\n*Download:* ${prefix}${command} <link>` 
-      });
-    }
-
-    const input = args.join(" ");
-    const isUrl = input.match(/https?:\/\/(www\.)?xnxx\.(com|health|net|tv)\/[^\s]+/gi);
-
-    try {
-      if (isUrl) {
-        // --- 📥 DOWNLOAD MODE ---
-        await sock.sendMessage(from, { text: '📥 *Downloading video...* This may take a minute for large files.' });
-        
-        // Exact API provided: https://apis.davidcyril.name.ng/download/xnxx?url=
-        const dlApi = `https://apis.davidcyril.name.ng/download/xnxx?url=${encodeURIComponent(isUrl[0])}`;
-        const res = await fetch(dlApi);
-        const data = await res.json();
-
-        // Deep extraction logic to find the video link in David Cyril's response
-        const video = 
-          data.result?.files?.high || 
-          data.result?.files?.low || 
-          data.result?.dl || 
-          data.result?.video_url || 
-          data.result?.url ||
-          (data.result && typeof data.result === 'string' ? data.result : null);
-
-        if (!video) {
-          return await sock.sendMessage(from, { 
-            text: "❌ *API Error:* The downloader couldn't find a video link for this specific URL. It might be a private video or the API is restricted." 
-          });
-        }
-
-        await sock.sendMessage(from, {
-          video: { url: video },
-          caption: `✅ *NEXUS-MD Download*\n📌 *Title:* ${data.result?.title || 'XNXX Video'}\n\n_Powered by David Cyril API_`,
-          mimetype: 'video/mp4'
-        });
-
-      } else {
-        // --- 🔍 SEARCH MODE ---
-        await sock.sendMessage(from, { text: `🔍 Searching for: *${input}*...` });
-        
-        // Exact API provided: https://apis.davidcyril.name.ng/xxx/xnxx?q=
-        const searchApi = `https://apis.davidcyril.name.ng/xxx/xnxx?q=${encodeURIComponent(input)}`;
-        const res = await fetch(searchApi);
-        const data = await res.json();
-        
-        const results = data.result || data.results || (Array.isArray(data) ? data : []);
-
-        if (!results || results.length === 0) {
-          return await sock.sendMessage(from, { text: "❌ No results found. Try different keywords." });
-        }
-
-        let msg = `🔞 *XNXX SEARCH RESULTS*\n\n`;
-        results.slice(0, 10).forEach((v, i) => {
-          const title = v.title || "No Title";
-          const link = v.link || v.url;
-          msg += `*${i + 1}.* ${title}\n🔗 ${link}\n\n`;
-        });
-        
-        msg += `💡 *Tip:* Copy one of the links above and send \`${prefix}${command} <link>\` to download it.`;
-        
-        await sock.sendMessage(from, { text: msg });
-      }
-    } catch (e) {
-      console.error("XNXX Command Error:", e);
-      await sock.sendMessage(from, { text: "⚠️ *System Error:* The David Cyril API is currently unresponsive. Please try again later." });
-    }
-  }
-});
-
 register({
   name: 'play',
   aliases: ['song', 'music', 'audio'],
