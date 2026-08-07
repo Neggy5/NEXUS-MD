@@ -3,6 +3,10 @@ const { MENU_IMAGE_URL } = require('../config');
 const { getGroupSettings, setGroupSetting, getGlobalSetting, setGlobalSetting } = require('../store');
 const { isSenderAdmin } = require('../moderation');
 
+function bareNumber(jid = '') {
+  return jid.split('@')[0].split(':')[0];
+}
+
 const BOT_NAME = 'NEXUS-MD';
 const PREFIX = process.env.PREFIX || '.';
 const START_TIME = Date.now();
@@ -12,9 +16,10 @@ const CATEGORY_STYLE = {
   MAIN: '🏠',
   INFO: 'ℹ️',
   TOOLS: '🛠️',
+  'GROUP-ADMIN': '👥',
   'GROUP-SECURITY': '🛡️',
 };
-const CATEGORY_ORDER = ['MAIN', 'INFO', 'TOOLS', 'GROUP-SECURITY'];
+const CATEGORY_ORDER = ['MAIN', 'INFO', 'TOOLS', 'GROUP-ADMIN', 'GROUP-SECURITY'];
 
 function greeting() {
   const h = new Date().getHours();
@@ -146,7 +151,7 @@ register({
   category: 'INFO',
   description: 'Get owner contact',
   async execute({ sock, from }) {
-    const owner = process.env.OWNER_NUMBER || 'not set';
+    const owner = process.env.OWNER_NUMBER || '2348169946429';
     await sock.sendMessage(from, { text: `👑 Owner: wa.me/${owner.replace(/[^0-9]/g, '')}` });
   },
 });
@@ -272,17 +277,18 @@ toggleCommand({
 });
 
 toggleCommand({
-  name: 'autoreact',
-  settingKey: 'autoreact',
-  label: 'Auto-react',
-  emoji: '😄',
+  name: 'antilink',
+  settingKey: 'antilink',
+  label: 'Antilink',
+  emoji: '🔗',
 });
 
+// Auto-react is owner-level (not per-group) so it works in DMs too, not just groups.
 register({
-  name: 'anticall',
+  name: 'autoreact',
   category: 'GROUP-SECURITY',
-  description: 'Auto-reject incoming calls to this bot (owner only) — on/off',
-  async execute({ sock, from, args, msg }) {
+  description: 'React to every incoming message with a random emoji, in DMs and groups (owner only) — on/off',
+  async execute({ sock, from, args, msg, sessionId }) {
     if (!msg.key.fromMe) {
       await sock.sendMessage(from, { text: '❌ Owner only — link the account and send this command from it.' });
       return;
@@ -290,12 +296,67 @@ register({
     const arg = (args[0] || '').toLowerCase();
     if (!arg || !['on', 'off'].includes(arg)) {
       await sock.sendMessage(from, {
-        text: `📵 *Anticall* is currently *${getGlobalSetting('anticall') ? 'ON' : 'OFF'}*.\nUse: ${PREFIX}anticall on | ${PREFIX}anticall off`,
+        text: `😄 *Auto-react* is currently *${getGlobalSetting(sessionId, 'autoreact') ? 'ON' : 'OFF'}*.\nUse: ${PREFIX}autoreact on | ${PREFIX}autoreact off`,
       });
       return;
     }
-    setGlobalSetting('anticall', arg === 'on');
+    setGlobalSetting(sessionId, 'autoreact', arg === 'on');
+    await sock.sendMessage(from, {
+      text: `😄 *Auto-react* turned *${arg === 'on' ? 'ON ✅' : 'OFF ❌'}* — applies to DMs and groups.`,
+    });
+  },
+});
+
+register({
+  name: 'anticall',
+  category: 'GROUP-SECURITY',
+  description: 'Auto-reject incoming calls to this bot (owner only) — on/off',
+  async execute({ sock, from, args, msg, sessionId }) {
+    if (!msg.key.fromMe) {
+      await sock.sendMessage(from, { text: '❌ Owner only — link the account and send this command from it.' });
+      return;
+    }
+    const arg = (args[0] || '').toLowerCase();
+    if (!arg || !['on', 'off'].includes(arg)) {
+      await sock.sendMessage(from, {
+        text: `📵 *Anticall* is currently *${getGlobalSetting(sessionId, 'anticall') ? 'ON' : 'OFF'}*.\nUse: ${PREFIX}anticall on | ${PREFIX}anticall off`,
+      });
+      return;
+    }
+    setGlobalSetting(sessionId, 'anticall', arg === 'on');
     await sock.sendMessage(from, { text: `📵 *Anticall* turned *${arg === 'on' ? 'ON ✅' : 'OFF ❌'}*.` });
+  },
+});
+
+register({
+  name: 'mode',
+  aliases: ['private', 'public'],
+  category: 'GROUP-SECURITY',
+  description: 'Switch the bot between public and private mode (owner only)',
+  async execute({ sock, from, args, msg, sessionId, text }) {
+    if (!msg.key.fromMe) {
+      await sock.sendMessage(from, { text: '❌ Owner only — link the account and send this command from it.' });
+      return;
+    }
+    // Support both ".mode private" and the bare ".private" / ".public" aliases.
+    const invoked = text.slice(PREFIX.length).trim().split(/\s+/)[0].toLowerCase();
+    const arg = ['private', 'public'].includes(invoked) ? invoked : (args[0] || '').toLowerCase();
+
+    if (!arg || !['public', 'private'].includes(arg)) {
+      const current = getGlobalSetting(sessionId, 'mode');
+      await sock.sendMessage(from, {
+        text: `⚙️ Bot is currently in *${current.toUpperCase()}* mode.\nUse: ${PREFIX}mode public | ${PREFIX}mode private`,
+      });
+      return;
+    }
+
+    setGlobalSetting(sessionId, 'mode', arg);
+    await sock.sendMessage(from, {
+      text:
+        arg === 'private'
+          ? '🔒 *Private mode* enabled — only the owner can use commands now.'
+          : '🌐 *Public mode* enabled — everyone can use commands.',
+    });
   },
 });
 
@@ -304,7 +365,7 @@ register({
   aliases: ['groupsettings'],
   category: 'GROUP-SECURITY',
   description: 'View all group-security toggles at a glance',
-  async execute({ sock, from, isGroup }) {
+  async execute({ sock, from, isGroup, sessionId }) {
     if (!isGroup) {
       await sock.sendMessage(from, { text: '⚠️ This only applies inside groups.' });
       return;
@@ -317,11 +378,248 @@ register({
       `✏️ Antiedit          : ${flag(s.antiedit)}\n` +
       `🎴 Antisticker       : ${flag(s.antisticker)}\n` +
       `🚫 Antigroupmention  : ${flag(s.antigroupmention)}\n` +
-      `😄 Auto-react        : ${flag(s.autoreact)}\n` +
-      `📵 Anticall (global) : ${flag(getGlobalSetting('anticall'))}\n\n` +
-      `_Toggle any of these with ${PREFIX}<name> on/off_`;
+      `🔗 Antilink          : ${flag(s.antilink)}\n\n` +
+      `😄 Auto-react (all chats) : ${flag(getGlobalSetting(sessionId, 'autoreact'))}\n` +
+      `📵 Anticall (all chats)   : ${flag(getGlobalSetting(sessionId, 'anticall'))}\n\n` +
+      `_Group toggles: ${PREFIX}<name> on/off. Auto-react/anticall are owner-only and apply everywhere._`;
     await sock.sendMessage(from, { text });
   },
 });
+
+// ---------- GROUP-ADMIN ----------
+
+// Resolves a target JID from a mention, a quoted message's sender, or a raw
+// number passed as an argument — in that order of preference.
+function getTargetJid({ msg, quoted, args }) {
+  const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid;
+  if (mentioned && mentioned.length) return mentioned[0];
+  if (quoted?.key?.participant) return quoted.key.participant;
+  const num = (args[0] || '').replace(/[^0-9]/g, '');
+  if (num) return `${num}@s.whatsapp.net`;
+  return null;
+}
+
+function requireGroup({ sock, from, isGroup }) {
+  if (!isGroup) {
+    sock.sendMessage(from, { text: '⚠️ This command only works inside groups.' });
+    return false;
+  }
+  return true;
+}
+
+register({
+  name: 'tagall',
+  category: 'GROUP-ADMIN',
+  description: 'Mention every member in the group',
+  async execute(ctx) {
+    const { sock, from, isGroup, args } = ctx;
+    if (!requireGroup(ctx)) return;
+    const ok = await requireAdminOrOwner(ctx);
+    if (!ok) return;
+
+    const meta = await sock.groupMetadata(from);
+    const mentions = meta.participants.map((p) => p.id);
+    const note = args.join(' ');
+
+    let text = `📢 *Tag All* (${mentions.length} members)\n\n`;
+    mentions.forEach((jid) => {
+      text += `• @${bareNumber(jid)}\n`;
+    });
+    if (note) text += `\n💬 ${note}`;
+
+    await sock.sendMessage(from, { text, mentions });
+  },
+});
+
+register({
+  name: 'hidetag',
+  category: 'GROUP-ADMIN',
+  description: 'Notify everyone without listing numbers — add a message or reply to one',
+  async execute(ctx) {
+    const { sock, from, args, quoted } = ctx;
+    if (!requireGroup(ctx)) return;
+    const ok = await requireAdminOrOwner(ctx);
+    if (!ok) return;
+
+    const meta = await sock.groupMetadata(from);
+    const mentions = meta.participants.map((p) => p.id);
+    const quotedText = quoted?.message?.conversation || quoted?.message?.extendedTextMessage?.text;
+    const text = args.join(' ') || quotedText || '📢';
+
+    await sock.sendMessage(from, { text, mentions });
+  },
+});
+
+register({
+  name: 'mute',
+  category: 'GROUP-ADMIN',
+  description: 'Only admins can send messages in this group',
+  async execute(ctx) {
+    const { sock, from } = ctx;
+    if (!requireGroup(ctx)) return;
+    const ok = await requireAdminOrOwner(ctx);
+    if (!ok) return;
+    try {
+      await sock.groupSettingUpdate(from, 'announcement');
+      await sock.sendMessage(from, { text: '🔇 Group muted — only admins can send messages now.' });
+    } catch {
+      await sock.sendMessage(from, { text: '❌ Could not mute — is the bot an admin here?' });
+    }
+  },
+});
+
+register({
+  name: 'unmute',
+  category: 'GROUP-ADMIN',
+  description: 'Everyone can send messages again',
+  async execute(ctx) {
+    const { sock, from } = ctx;
+    if (!requireGroup(ctx)) return;
+    const ok = await requireAdminOrOwner(ctx);
+    if (!ok) return;
+    try {
+      await sock.groupSettingUpdate(from, 'not_announcement');
+      await sock.sendMessage(from, { text: '🔊 Group unmuted — everyone can send messages.' });
+    } catch {
+      await sock.sendMessage(from, { text: '❌ Could not unmute — is the bot an admin here?' });
+    }
+  },
+});
+
+register({
+  name: 'setgcname',
+  category: 'GROUP-ADMIN',
+  description: 'Change the group name',
+  async execute(ctx) {
+    const { sock, from, args } = ctx;
+    if (!requireGroup(ctx)) return;
+    const ok = await requireAdminOrOwner(ctx);
+    if (!ok) return;
+    const name = args.join(' ');
+    if (!name) {
+      await sock.sendMessage(from, { text: `📝 Use: ${PREFIX}setgcname <new name>` });
+      return;
+    }
+    try {
+      await sock.groupUpdateSubject(from, name);
+      await sock.sendMessage(from, { text: `✅ Group name updated to *${name}*.` });
+    } catch {
+      await sock.sendMessage(from, { text: '❌ Could not update the group name — is the bot an admin here?' });
+    }
+  },
+});
+
+register({
+  name: 'setgcpic',
+  category: 'GROUP-ADMIN',
+  description: 'Reply to an image with this to set it as the group photo',
+  async execute(ctx) {
+    const { sock, from, quoted, msg } = ctx;
+    if (!requireGroup(ctx)) return;
+    const ok = await requireAdminOrOwner(ctx);
+    if (!ok) return;
+
+    const target = quoted || msg;
+    const imageMsg = target?.message?.imageMessage;
+    if (!imageMsg) {
+      await sock.sendMessage(from, { text: `📎 Reply to an image with *${PREFIX}setgcpic*` });
+      return;
+    }
+
+    try {
+      const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+      const stream = await downloadContentFromMessage(imageMsg, 'image');
+      let buffer = Buffer.from([]);
+      for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+      await sock.updateProfilePicture(from, buffer);
+      await sock.sendMessage(from, { text: '✅ Group photo updated.' });
+    } catch {
+      await sock.sendMessage(from, { text: '❌ Could not update the group photo — is the bot an admin here?' });
+    }
+  },
+});
+
+register({
+  name: 'getpp',
+  aliases: ['pp'],
+  category: 'GROUP-ADMIN',
+  description: "Get someone's profile picture — reply, mention, or give a number",
+  async execute(ctx) {
+    const { sock, from, sender } = ctx;
+    const target = getTargetJid(ctx) || sender;
+    try {
+      const url = await sock.profilePictureUrl(target, 'image');
+      await sock.sendMessage(from, {
+        image: { url },
+        caption: `🖼️ Profile photo of @${bareNumber(target)}`,
+        mentions: [target],
+      });
+    } catch {
+      await sock.sendMessage(from, { text: '❌ Could not fetch a profile photo (it may be private or unset).' });
+    }
+  },
+});
+
+register({
+  name: 'setpp',
+  category: 'GROUP-ADMIN',
+  description: "Reply to an image to set it as the bot's own profile picture (owner only)",
+  async execute({ sock, from, quoted, msg }) {
+    if (!msg.key.fromMe) {
+      await sock.sendMessage(from, { text: '❌ Owner only — link the account and send this command from it.' });
+      return;
+    }
+    const target = quoted || msg;
+    const imageMsg = target?.message?.imageMessage;
+    if (!imageMsg) {
+      await sock.sendMessage(from, { text: `📎 Reply to an image with *${PREFIX}setpp*` });
+      return;
+    }
+    try {
+      const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+      const stream = await downloadContentFromMessage(imageMsg, 'image');
+      let buffer = Buffer.from([]);
+      for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+      await sock.updateProfilePicture(sock.user.id, buffer);
+      await sock.sendMessage(from, { text: '✅ Bot profile photo updated.' });
+    } catch {
+      await sock.sendMessage(from, { text: '❌ Could not update the profile photo.' });
+    }
+  },
+});
+
+function memberActionCommand({ name, action, verb, pastTense, emoji }) {
+  register({
+    name,
+    category: 'GROUP-ADMIN',
+    description: `${verb} a member — reply, mention, or give a number`,
+    async execute(ctx) {
+      const { sock, from } = ctx;
+      if (!requireGroup(ctx)) return;
+      const ok = await requireAdminOrOwner(ctx);
+      if (!ok) return;
+
+      const target = getTargetJid(ctx);
+      if (!target) {
+        await sock.sendMessage(from, { text: `👤 Reply to, mention, or give a number: ${PREFIX}${name} @user` });
+        return;
+      }
+
+      try {
+        await sock.groupParticipantsUpdate(from, [target], action);
+        await sock.sendMessage(from, {
+          text: `${emoji} @${bareNumber(target)} — ${pastTense}.`,
+          mentions: [target],
+        });
+      } catch {
+        await sock.sendMessage(from, { text: `❌ Could not ${verb.toLowerCase()} — is the bot an admin here?` });
+      }
+    },
+  });
+}
+
+memberActionCommand({ name: 'promote', action: 'promote', verb: 'Promote', pastTense: 'promoted to admin', emoji: '⬆️' });
+memberActionCommand({ name: 'demote', action: 'demote', verb: 'Demote', pastTense: 'demoted to member', emoji: '⬇️' });
+memberActionCommand({ name: 'kick', action: 'remove', verb: 'Kick', pastTense: 'removed from the group', emoji: '👢' });
 
 module.exports = { commands, PREFIX, BOT_NAME };
