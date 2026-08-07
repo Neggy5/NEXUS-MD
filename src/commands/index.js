@@ -1156,7 +1156,7 @@ register({
   async execute({ sock, from, args, prefix, command }) {
     if (!args[0]) {
       return await sock.sendMessage(from, { 
-        text: `📥 *Facebook Downloader*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://www.facebook.com/reel/402579285704851\n\n*Supports:*\n• Facebook Reels\n• Facebook Videos\n• Facebook Watch\n\n*Note:* Returns HD video if available.` 
+        text: `📥 *Facebook Downloader*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://www.facebook.com/reel/402579285704851` 
       });
     }
 
@@ -1187,7 +1187,6 @@ register({
 
       const data = await response.json();
 
-      // Extract video data
       let title = data.result?.title || 'Facebook Video';
       let duration = data.result?.duration || 'N/A';
       let thumbnail = data.result?.thumbnail || null;
@@ -1198,55 +1197,155 @@ register({
         throw new Error("Could not extract video URL from API response.");
       }
 
-      // Use HD if available, otherwise SD
-      const videoUrl = hdVideo || sdVideo;
-      const quality = hdVideo ? 'HD' : 'SD';
+      let videoUrl = hdVideo || sdVideo;
+      let quality = hdVideo ? 'HD' : 'SD';
+
+      if (!videoUrl || !videoUrl.startsWith('http')) {
+        throw new Error("Invalid video URL received.");
+      }
 
       // Send thumbnail if available
       if (thumbnail) {
         try {
           await sock.sendMessage(from, {
             image: { url: thumbnail },
-            caption: `🎬 *${title}*\n⏱️ *Duration:* ${duration}\n📊 *Quality:* ${quality}\n\n⬇️ *Downloading video...*`
+            caption: `🎬 *${title}*\n⏱️ *Duration:* ${duration}\n📊 *Quality:* ${quality}\n\n⬇️ *Downloading and converting video...*`
           });
-        } catch (thumbErr) {
-          await sock.sendMessage(from, { 
-            text: `🎬 *${title}*\n⏱️ *Duration:* ${duration}\n📊 *Quality:* ${quality}\n\n⬇️ *Downloading video...*` 
+        } catch (thumbErr) {}
+      }
+
+      // Download video
+      let videoBuffer = null;
+
+      // Try HD first
+      if (hdVideo) {
+        try {
+          const videoResponse = await fetch(hdVideo, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+            timeout: 30000
           });
+          if (videoResponse.ok) {
+            videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+            quality = 'HD';
+          }
+        } catch (err) {
+          console.warn('HD download failed:', err.message);
         }
       }
 
-      // Download and send the video
-      const videoResponse = await fetch(videoUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      // If HD failed, try SD
+      if (!videoBuffer || videoBuffer.length < 5000) {
+        if (sdVideo) {
+          try {
+            const sdResponse = await fetch(sdVideo, {
+              headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+              timeout: 30000
+            });
+            if (sdResponse.ok) {
+              videoBuffer = Buffer.from(await sdResponse.arrayBuffer());
+              quality = 'SD';
+            }
+          } catch (err) {
+            console.warn('SD download failed:', err.message);
+          }
         }
-      });
-
-      if (!videoResponse.ok) {
-        throw new Error(`Video download failed: ${videoResponse.status}`);
       }
 
-      const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
-
-      if (videoBuffer.length < 5000) {
-        throw new Error("Downloaded file is too small. The link may be invalid.");
+      if (!videoBuffer || videoBuffer.length < 5000) {
+        throw new Error("Video download failed. The link may be expired or corrupted.");
       }
 
-      const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
+      const originalSize = (videoBuffer.length / 1024 / 1024).toFixed(1);
+
+      // --- USE CONVERTER TO REPAIR THE VIDEO ---
+      let finalBuffer = videoBuffer;
+      let converted = false;
 
       try {
+        // Import the toVideo or converter function from your lib
+        const { toVideo, toMP4 } = require('../lib/converter');
+        
+        // Try to convert/re-encode the video
+        if (typeof toVideo === 'function') {
+          const convertedBuffer = await toVideo(videoBuffer);
+          if (convertedBuffer && convertedBuffer.length > 5000) {
+            finalBuffer = convertedBuffer;
+            converted = true;
+            console.log('Video converted successfully');
+          }
+        } else if (typeof toMP4 === 'function') {
+          const convertedBuffer = await toMP4(videoBuffer);
+          if (convertedBuffer && convertedBuffer.length > 5000) {
+            finalBuffer = convertedBuffer;
+            converted = true;
+            console.log('Video converted successfully');
+          }
+        } else {
+          // Try toAudio as fallback (if it can handle video)
+          const { toAudio } = require('../lib/converter');
+          // toAudio might only handle audio, but worth a try if no other function exists
+        }
+      } catch (convErr) {
+        console.warn('Video conversion skipped:', convErr.message);
+        // Fallback: Use ffmpeg directly if available
+        try {
+          const ffmpeg = require('ffmpeg-static');
+          const { exec } = require('child_process');
+          const fs = require('fs');
+          const path = require('path');
+          
+          const tmpDir = path.join(process.cwd(), 'tmp');
+          if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+          
+          const inputPath = path.join(tmpDir, `fb_${Date.now()}.mp4`);
+          const outputPath = path.join(tmpDir, `fb_converted_${Date.now()}.mp4`);
+          
+          fs.writeFileSync(inputPath, videoBuffer);
+          
+          await new Promise((resolve, reject) => {
+            exec(`"${ffmpeg}" -i "${inputPath}" -c:v libx264 -c:a aac -movflags +faststart "${outputPath}"`, (error) => {
+              if (error) reject(error);
+              else resolve();
+            });
+          });
+          
+          if (fs.existsSync(outputPath)) {
+            finalBuffer = fs.readFileSync(outputPath);
+            converted = true;
+            try { fs.unlinkSync(inputPath); } catch {}
+            try { fs.unlinkSync(outputPath); } catch {}
+          }
+        } catch (ffmpegErr) {
+          console.warn('FFmpeg conversion failed:', ffmpegErr.message);
+        }
+      }
+
+      const finalSize = (finalBuffer.length / 1024 / 1024).toFixed(1);
+
+      // Check file size
+      if (finalBuffer.length > 16 * 1024 * 1024) {
         await sock.sendMessage(from, {
-          video: videoBuffer,
-          caption: `🎬 *${title}*\n⏱️ *Duration:* ${duration}\n📊 *Quality:* ${quality}\n📦 *Size:* ${fileSizeMB} MB\n\n✅ *Facebook Download Success*`
-        });
-      } catch (sendErr) {
-        // Fallback: send as document
-        await sock.sendMessage(from, {
-          document: videoBuffer,
+          document: finalBuffer,
           mimetype: 'video/mp4',
           fileName: `facebook_${Date.now()}.mp4`,
-          caption: `🎬 *${title}*\n📊 *Quality:* ${quality}\n📦 *Size:* ${fileSizeMB} MB`
+          caption: `🎬 *${title}*\n⏱️ *Duration:* ${duration}\n📊 *Quality:* ${quality}\n📦 *Size:* ${finalSize} MB\n${converted ? '🔄 *Re-encoded for compatibility*\n' : ''}\n⚠️ *Sent as document due to size limit.*`
+        });
+        return;
+      }
+
+      // Send the video
+      try {
+        await sock.sendMessage(from, {
+          video: finalBuffer,
+          caption: `🎬 *${title}*\n⏱️ *Duration:* ${duration}\n📊 *Quality:* ${quality}\n📦 *Size:* ${finalSize} MB\n${converted ? '🔄 *Re-encoded for compatibility*\n' : ''}\n✅ *Facebook Download Success*`
+        });
+      } catch (sendErr) {
+        // If video send fails, send as document
+        await sock.sendMessage(from, {
+          document: finalBuffer,
+          mimetype: 'video/mp4',
+          fileName: `facebook_${Date.now()}.mp4`,
+          caption: `🎬 *${title}*\n📊 *Quality:* ${quality}\n📦 *Size:* ${finalSize} MB\n\n✅ *Facebook Download Success (sent as document)*`
         });
       }
 
@@ -1261,42 +1360,38 @@ register({
 
         let fallbackVideo = fallbackData.result?.video || fallbackData.result?.download_url || 
                             fallbackData.video || fallbackData.download_url || fallbackData.url;
-        let fallbackTitle = fallbackData.result?.title || fallbackData.title || 'Facebook Video';
 
         if (fallbackVideo) {
           const vRes = await fetch(fallbackVideo);
-          const vBuf = Buffer.from(await vRes.arrayBuffer());
+          let vBuf = Buffer.from(await vRes.arrayBuffer());
           if (vBuf.length > 5000) {
-            return await sock.sendMessage(from, { 
-              video: vBuf, 
-              caption: `🎬 *${fallbackTitle}*\n\n✅ *Facebook Download (fallback)*` 
-            });
+            // Try to convert fallback video too
+            try {
+              const { toMP4 } = require('../lib/converter');
+              const converted = await toMP4(vBuf);
+              if (converted && converted.length > 5000) vBuf = converted;
+            } catch (convErr) {}
+
+            try {
+              await sock.sendMessage(from, { 
+                video: vBuf, 
+                caption: `🎬 *Facebook Video (fallback)*\n\n✅ *Download Success*` 
+              });
+            } catch (sendErr) {
+              await sock.sendMessage(from, {
+                document: vBuf,
+                mimetype: 'video/mp4',
+                fileName: `facebook_fallback_${Date.now()}.mp4`,
+                caption: `🎬 *Facebook Video (fallback)*\n\n✅ *Download Success*`
+              });
+            }
+            return;
           }
         }
       } catch (fallbackErr) {}
 
-      // Fallback: Try alternative GiftedTech endpoint
-      try {
-        const altUrl = 'https://api.giftedtech.co.ke/api/download/fb';
-        const altRes = await fetch(`${altUrl}?apikey=gifted&url=${encodeURIComponent(url)}`);
-        const altData = await altRes.json();
-
-        let altVideo = altData.result?.hd_video || altData.result?.sd_video || altData.result?.video || altData.video;
-
-        if (altVideo) {
-          const vRes = await fetch(altVideo);
-          const vBuf = Buffer.from(await vRes.arrayBuffer());
-          if (vBuf.length > 5000) {
-            return await sock.sendMessage(from, { 
-              video: vBuf, 
-              caption: '✅ *Facebook Download (fallback)*' 
-            });
-          }
-        }
-      } catch (altErr) {}
-
       await sock.sendMessage(from, { 
-        text: `⚠️ Download Error: ${error.message || 'Could not download video.'}\n\n💡 Make sure the URL is valid and the video is public.` 
+        text: `⚠️ Download Error: ${error.message || 'Could not download video.'}\n\n💡 Try again or use a different link.` 
       });
     }
   }
@@ -1502,6 +1597,121 @@ register({
   }
 });
 register({
+  name: 'getid',
+  aliases: ['getjid', 'getchannelid', 'getnewsletter', 'channelid'],
+  category: 'INFO',
+  description: 'Get the newsletter ID from a forwarded channel message',
+  async execute({ sock, from, msg, quoted, args, prefix, command }) {
+    const target = quoted || msg;
+
+    const contextInfo = target?.message?.extendedTextMessage?.contextInfo ||
+                        target?.message?.imageMessage?.contextInfo ||
+                        target?.message?.videoMessage?.contextInfo ||
+                        target?.message?.documentMessage?.contextInfo ||
+                        target?.message?.audioMessage?.contextInfo ||
+                        target?.message?.stickerMessage?.contextInfo;
+
+    const newsletterJid = contextInfo?.newsletterJid || 
+                          contextInfo?.forwardedNewsletterMessageInfo?.newsletterJid;
+
+    if (newsletterJid) {
+      await sock.sendMessage(from, { 
+        text: newsletterJid 
+      });
+    } else {
+      await sock.sendMessage(from, { 
+        text: 'No newsletter ID found. Reply to a forwarded channel message.' 
+      });
+    }
+  }
+});
+// -------------------- WELCOME / GOODBYE --------------------
+
+register({
+  name: 'welcome',
+  category: 'GROUP-ADMIN',
+  description: 'Toggle welcome messages (on/off)',
+  async execute({ sock, from, args, isGroup, msg }) {
+    if (!isGroup) return sock.sendMessage(from, { text: '⚠️ Group only!' });
+    const isAdmin = await requireAdminOrOwner({ sock, from, isGroup, msg });
+    if (!isAdmin) return;
+    const state = args[0]?.toLowerCase();
+    if (!state || !['on', 'off'].includes(state)) {
+      return sock.sendMessage(from, { text: `📋 Usage: welcome on | off` });
+    }
+    setGroupSetting(from, 'welcome', state === 'on');
+    await sock.sendMessage(from, { text: `✅ Welcome ${state === 'on' ? 'enabled' : 'disabled'}.` });
+  }
+});
+
+register({
+  name: 'goodbye',
+  category: 'GROUP-ADMIN',
+  description: 'Toggle goodbye messages (on/off)',
+  async execute({ sock, from, args, isGroup, msg }) {
+    if (!isGroup) return sock.sendMessage(from, { text: '⚠️ Group only!' });
+    const isAdmin = await requireAdminOrOwner({ sock, from, isGroup, msg });
+    if (!isAdmin) return;
+    const state = args[0]?.toLowerCase();
+    if (!state || !['on', 'off'].includes(state)) {
+      return sock.sendMessage(from, { text: `📋 Usage: goodbye on | off` });
+    }
+    setGroupSetting(from, 'goodbye', state === 'on');
+    await sock.sendMessage(from, { text: `✅ Goodbye ${state === 'on' ? 'enabled' : 'disabled'}.` });
+  }
+});
+
+register({
+  name: 'setwelcome',
+  category: 'GROUP-ADMIN',
+  description: 'Set custom welcome message (@user, @group)',
+  async execute({ sock, from, args, isGroup, msg }) {
+    if (!isGroup) return sock.sendMessage(from, { text: '⚠️ Group only!' });
+    const isAdmin = await requireAdminOrOwner({ sock, from, isGroup, msg });
+    if (!isAdmin) return;
+    const msgText = args.join(' ');
+    if (!msgText) return sock.sendMessage(from, { text: `📝 Usage: setwelcome <message> (use @user, @group)` });
+    setGroupSetting(from, 'welcomeMessage', msgText);
+    await sock.sendMessage(from, { text: `✅ Welcome message set.` });
+  }
+});
+
+register({
+  name: 'setgoodbye',
+  category: 'GROUP-ADMIN',
+  description: 'Set custom goodbye message (@user, @group)',
+  async execute({ sock, from, args, isGroup, msg }) {
+    if (!isGroup) return sock.sendMessage(from, { text: '⚠️ Group only!' });
+    const isAdmin = await requireAdminOrOwner({ sock, from, isGroup, msg });
+    if (!isAdmin) return;
+    const msgText = args.join(' ');
+    if (!msgText) return sock.sendMessage(from, { text: `📝 Usage: setgoodbye <message> (use @user)` });
+    setGroupSetting(from, 'goodbyeMessage', msgText);
+    await sock.sendMessage(from, { text: `✅ Goodbye message set.` });
+  }
+});
+
+// 13. Group info
+register({
+  name: 'groupinfo',
+  aliases: ['gcinfo', 'group'],
+  category: 'INFO',
+  description: 'Show group information',
+  async execute({ sock, from, isGroup }) {
+    if (!isGroup) return sock.sendMessage(from, { text: '⚠️ Group only!' });
+    const meta = await sock.groupMetadata(from);
+    const admins = meta.participants.filter(p => p.admin);
+    const total = meta.participants.length;
+    let msg = `📊 *Group Info*\n\n`;
+    msg += `📛 *Name:* ${meta.subject}\n`;
+    msg += `👥 *Members:* ${total}\n`;
+    msg += `👑 *Admins:* ${admins.length}\n`;
+    msg += `🆔 *JID:* ${from}\n`;
+    msg += `📅 *Created:* ${new Date(meta.creation * 1000).toLocaleDateString()}`;
+    await sock.sendMessage(from, { text: msg });
+  }
+});
+register({
   name: 'ytmp3',
   aliases: ['yt3', 'ytmusic', 'ytaudio'],
   category: 'DOWNLOADER',
@@ -1671,6 +1881,219 @@ register({
 
       await sock.sendMessage(from, { 
         text: `⚠️ Download Error: ${error.message || 'Could not download audio.'}\n\n💡 Make sure the URL is valid and try again.` 
+      });
+    }
+  }
+});
+register({
+  name: 'tgsticker',
+  aliases: ['tgstickers', 'tgs', 'teles'],
+  category: 'TOOLS',
+  description: 'Download stickers from Telegram sticker packs',
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🖼️ *Telegram Sticker Downloader*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://t.me/addstickers/StickerPackName\n\n*Supports:*\n• t.me/addstickers/... (sticker packs)\n• t.me/sticker/... (individual stickers)\n\n*Note:* Sends up to 10 stickers from the pack.` 
+      });
+    }
+
+    const url = args[0];
+
+    // Check if it's a Telegram sticker link
+    if (!url.includes('t.me/addstickers') && !url.includes('t.me/sticker')) {
+      return await sock.sendMessage(from, { 
+        text: `❌ Invalid URL. Please provide a Telegram sticker link.\nExample: https://t.me/addstickers/StickerPackName` 
+      });
+    }
+
+    // ==========================================================
+    // 🛑 REPLACE THIS WITH YOUR TELEGRAM BOT TOKEN
+    // Get token from @BotFather on Telegram
+    // ==========================================================
+    const BOT_TOKEN = '8837997340:AAFotvN_C0AqVzHdMzrtyWDhTbGhbWolaGw';
+    // ==========================================================
+
+    if (BOT_TOKEN === 'YOUR_TELEGRAM_BOT_TOKEN_HERE') {
+      return await sock.sendMessage(from, { 
+        text: `❌ Bot token not configured. Please set your token in the command.` 
+      });
+    }
+
+    // Extract pack name from URL
+    let packName = '';
+    if (url.includes('t.me/addstickers/')) {
+      packName = url.split('t.me/addstickers/')[1].split('?')[0].split('#')[0];
+    } else if (url.includes('t.me/sticker')) {
+      const match = url.match(/t\.me\/sticker\/([^\s?]+)/);
+      if (match) packName = match[1];
+    }
+
+    if (!packName) {
+      return await sock.sendMessage(from, { 
+        text: `❌ Could not extract sticker pack name from URL.` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `⏳ Fetching sticker pack: *${packName}*...` });
+
+    try {
+      // Use Telegram Bot API to get sticker set
+      const apiUrl = `https://api.telegram.org/bot${BOT_TOKEN}/getStickerSet?name=${encodeURIComponent(packName)}`;
+      const response = await fetch(apiUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (!data.ok) {
+        throw new Error(data.description || 'Sticker pack not found.');
+      }
+
+      const stickerSet = data.result;
+      const stickers = stickerSet.stickers || [];
+      const packTitle = stickerSet.title || packName;
+
+      if (stickers.length === 0) {
+        return await sock.sendMessage(from, { 
+          text: `❌ No stickers found in this pack.` 
+        });
+      }
+
+      const maxStickers = Math.min(stickers.length, 10);
+
+      await sock.sendMessage(from, { 
+        text: `🖼️ *${packTitle}*\n📊 *Total:* ${stickers.length} stickers\n📤 *Sending:* ${maxStickers} stickers\n\n⬇️ Downloading...` 
+      });
+
+      let sentCount = 0;
+
+      for (let i = 0; i < maxStickers; i++) {
+        try {
+          const sticker = stickers[i];
+          const fileId = sticker.file_id;
+
+          // Get file path from Telegram
+          const fileRes = await fetch(
+            `https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${fileId}`,
+            {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+              }
+            }
+          );
+
+          if (!fileRes.ok) continue;
+
+          const fileData = await fileRes.json();
+
+          if (!fileData.ok) continue;
+
+          const filePath = fileData.result?.file_path;
+          if (!filePath) continue;
+
+          // Download the sticker file
+          const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`;
+          const stickerRes = await fetch(fileUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+          });
+
+          if (!stickerRes.ok) continue;
+
+          const stickerBuffer = Buffer.from(await stickerRes.arrayBuffer());
+
+          if (stickerBuffer.length < 100) continue;
+
+          // Determine if it's a sticker (webp) or image
+          const isWebp = filePath.endsWith('.webp');
+
+          if (isWebp) {
+            await sock.sendMessage(from, {
+              sticker: stickerBuffer,
+              caption: `🖼️ ${i+1}/${maxStickers}`
+            });
+          } else {
+            await sock.sendMessage(from, {
+              image: stickerBuffer,
+              caption: `🖼️ ${i+1}/${maxStickers}`
+            });
+          }
+
+          sentCount++;
+          await new Promise(r => setTimeout(r, 300));
+
+        } catch (stickerErr) {
+          console.warn(`Sticker ${i+1} error:`, stickerErr.message);
+        }
+      }
+
+      if (sentCount === 0) {
+        await sock.sendMessage(from, { 
+          text: `❌ Failed to download any stickers.\n\n💡 The sticker pack may be private or unavailable.` 
+        });
+      } else {
+        await sock.sendMessage(from, { 
+          text: `✅ Downloaded and sent *${sentCount}*/${maxStickers} stickers from *${packTitle}*` 
+        });
+      }
+
+    } catch (error) {
+      console.error('Telegram sticker error:', error);
+
+      // Fallback: Try alternative method
+      try {
+        const fallbackUrl = `https://t.me/addstickers/${packName}`;
+        const fallbackRes = await fetch(fallbackUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        });
+
+        if (fallbackRes.ok) {
+          const html = await fallbackRes.text();
+          const urlMatches = html.match(/https?:\/\/[^\s"']+\.(webp|png|jpg)/gi) || [];
+          const uniqueImages = [...new Set(urlMatches)];
+
+          if (uniqueImages.length > 0) {
+            const maxFallback = Math.min(uniqueImages.length, 5);
+            let fallbackCount = 0;
+            for (let i = 0; i < maxFallback; i++) {
+              try {
+                const imgUrl = uniqueImages[i];
+                const imgRes = await fetch(imgUrl);
+                if (imgRes.ok) {
+                  const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+                  if (imgBuf.length > 1000) {
+                    await sock.sendMessage(from, {
+                      image: imgBuf,
+                      caption: `🖼️ ${i+1}/${maxFallback} (fallback)`
+                    });
+                    fallbackCount++;
+                    await new Promise(r => setTimeout(r, 400));
+                  }
+                }
+              } catch (imgErr) {}
+            }
+            if (fallbackCount > 0) {
+              return await sock.sendMessage(from, { 
+                text: `✅ Downloaded *${fallbackCount}* images (fallback method).` 
+              });
+            }
+          }
+        }
+      } catch (fallbackErr) {
+        console.warn('Fallback failed:', fallbackErr.message);
+      }
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Download Error: ${error.message || 'Could not fetch stickers.'}\n\n💡 Make sure the sticker pack exists and is public.` 
       });
     }
   }
