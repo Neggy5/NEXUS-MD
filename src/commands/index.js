@@ -493,40 +493,48 @@ register({
     }
 
     const input = args.join(" ");
-    const isUrl = input.match(/https?:\/\/(www\.)?xnxx\.(com|health|net)\/[^\s]+/gi);
+    const isUrl = input.match(/https?:\/\/(www\.)?xnxx\.(com|health|net|tv)\/[^\s]+/gi);
 
     try {
       if (isUrl) {
-        // --- DOWNLOAD MODE ---
-        await sock.sendMessage(from, { text: '📥 *Downloading video...* Please wait.' });
+        // --- 📥 DOWNLOAD MODE ---
+        await sock.sendMessage(from, { text: '📥 *Downloading video...* This may take a minute for large files.' });
         
-        // Using Vreden API for better stability
-        const dlApi = `https://api.vreden.my.id/api/xnxxdl?url=${encodeURIComponent(isUrl[0])}`;
+        // Exact API provided: https://apis.davidcyril.name.ng/download/xnxx?url=
+        const dlApi = `https://apis.davidcyril.name.ng/download/xnxx?url=${encodeURIComponent(isUrl[0])}`;
         const res = await fetch(dlApi);
         const data = await res.json();
 
-        // Check various possible locations for the video URL
-        const video = data.result?.url || data.result?.files?.high || data.result?.files?.low || data.url;
+        // Deep extraction logic to find the video link in David Cyril's response
+        const video = 
+          data.result?.files?.high || 
+          data.result?.files?.low || 
+          data.result?.dl || 
+          data.result?.video_url || 
+          data.result?.url ||
+          (data.result && typeof data.result === 'string' ? data.result : null);
 
         if (!video) {
-          return await sock.sendMessage(from, { text: "❌ API Error: Could not extract download link. The video might be too large or the link is invalid." });
+          return await sock.sendMessage(from, { 
+            text: "❌ *API Error:* The downloader couldn't find a video link for this specific URL. It might be a private video or the API is restricted." 
+          });
         }
 
         await sock.sendMessage(from, {
           video: { url: video },
-          caption: `✅ *NEXUS-MD Success*`,
+          caption: `✅ *NEXUS-MD Download*\n📌 *Title:* ${data.result?.title || 'XNXX Video'}\n\n_Powered by David Cyril API_`,
           mimetype: 'video/mp4'
         });
 
       } else {
-        // --- SEARCH MODE ---
+        // --- 🔍 SEARCH MODE ---
         await sock.sendMessage(from, { text: `🔍 Searching for: *${input}*...` });
         
-        const searchApi = `https://api.vreden.my.id/api/xnxxsearch?query=${encodeURIComponent(input)}`;
+        // Exact API provided: https://apis.davidcyril.name.ng/xxx/xnxx?q=
+        const searchApi = `https://apis.davidcyril.name.ng/xxx/xnxx?q=${encodeURIComponent(input)}`;
         const res = await fetch(searchApi);
         const data = await res.json();
         
-        // Extract results array
         const results = data.result || data.results || (Array.isArray(data) ? data : []);
 
         if (!results || results.length === 0) {
@@ -534,22 +542,19 @@ register({
         }
 
         let msg = `🔞 *XNXX SEARCH RESULTS*\n\n`;
-        
-        // Take top 10 results
         results.slice(0, 10).forEach((v, i) => {
           const title = v.title || "No Title";
           const link = v.link || v.url;
-          const info = v.info || v.duration || "";
-          msg += `*${i + 1}.* ${title} ${info ? `(${info})` : ''}\n🔗 ${link}\n\n`;
+          msg += `*${i + 1}.* ${title}\n🔗 ${link}\n\n`;
         });
         
-        msg += `💡 *Tip:* Copy one of the links above and send \`${prefix}${command} <link>\` to download the video.`;
+        msg += `💡 *Tip:* Copy one of the links above and send \`${prefix}${command} <link>\` to download it.`;
         
         await sock.sendMessage(from, { text: msg });
       }
     } catch (e) {
       console.error("XNXX Command Error:", e);
-      await sock.sendMessage(from, { text: "⚠️ System Error: The API is currently unresponsive. Please try again in a few minutes." });
+      await sock.sendMessage(from, { text: "⚠️ *System Error:* The David Cyril API is currently unresponsive. Please try again later." });
     }
   }
 });
