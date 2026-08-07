@@ -1,6 +1,6 @@
 const express = require('express');
 const path = require('path');
-const { startSession, getStatus, listSessions, sanitizeId } = require('./src/sessionManager');
+const { startSession, getStatus, listSessions, sanitizeId, resumeAllSessions } = require('./src/sessionManager');
 
 const app = express();
 app.use(express.json());
@@ -39,4 +39,5 @@ app.get('/api/sessions', (_req, res) => {
 
 app.listen(PORT, () => {
   console.log(`NEXUS-MD web server listening on port ${PORT}`);
+  resumeAllSessions().catch((e) => console.error('resumeAllSessions error:', e.message));
 });
