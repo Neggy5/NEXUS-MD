@@ -320,9 +320,9 @@ register({
     await sock.sendMessage(from, { text: `⏳ Analyzing code...` });
 
     try {
-      // Primary: David Cyril API
+      // Try the correct endpoint pattern: /ai/blackbox with query parameter
       const response = await fetch(
-        `https://apis.davidcyril.name.ng/ai/blackbox?text=${encodeURIComponent(query)}`,
+        `https://apis.davidcyril.name.ng/ai/blackbox?query=${encodeURIComponent(query)}`,
         {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -352,10 +352,8 @@ register({
         throw new Error("Could not extract response from Blackbox AI.");
       }
 
-      // Clean up
       reply = reply.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\t/g, '  ');
 
-      // Truncate if too long
       if (reply.length > 65000) {
         reply = reply.slice(0, 65000) + '\n\n... (truncated)';
       }
@@ -387,6 +385,7 @@ register({
     }
   }
 });
+
 register({
   name: 'claude',
   aliases: ['claudehaiku', 'haiku', 'claudeai'],
@@ -404,9 +403,9 @@ register({
     await sock.sendMessage(from, { text: `⏳ Thinking...` });
 
     try {
-      // Primary: David Cyril API
+      // Try the correct endpoint pattern: /ai/claude-haiku-45 with query parameter
       const response = await fetch(
-        `https://apis.davidcyril.name.ng/ai/claude-haiku-45?text=${encodeURIComponent(query)}`,
+        `https://apis.davidcyril.name.ng/ai/claude-haiku-45?query=${encodeURIComponent(query)}`,
         {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -420,7 +419,6 @@ register({
 
       const data = await response.json();
 
-      // Extract response from various formats
       let reply = data.result || data.reply || data.message || data.response || data.text || data.data;
 
       if (!reply) {
@@ -436,15 +434,12 @@ register({
         throw new Error("Could not extract response from Claude Haiku.");
       }
 
-      // Clean up
       reply = reply.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\t/g, '  ');
 
-      // Truncate if too long
       if (reply.length > 65000) {
         reply = reply.slice(0, 65000) + '\n\n... (truncated)';
       }
 
-      // Split into chunks if needed (WhatsApp message limit)
       if (reply.length > 1000) {
         const chunks = reply.match(/.{1,1000}/g) || [reply];
         for (let i = 0; i < Math.min(chunks.length, 5); i++) {
@@ -475,10 +470,7 @@ register({
         }
       } catch (fallbackErr) {}
 
-      // Fallback: Try GPT
       try {
-        await sock.sendMessage(from, { text: `⏳ Fallback: Trying GPT...` });
-
         const gptUrl = 'https://api.princetechn.com/api/ai/gpt';
         const gptRes = await fetch(`${gptUrl}?apikey=prince&query=${encodeURIComponent(query)}`);
         const gptData = await gptRes.json();
@@ -506,7 +498,7 @@ register({
   async execute({ sock, from, args, prefix, command }) {
     if (!args[0]) {
       return await sock.sendMessage(from, { 
-        text: `🧠 *DeepSeek V3.2 Thinking AI*\n\nUsage: ${prefix}${command} <your question>\nExample: ${prefix}${command} Explain quantum physics in simple terms\n\n*Examples:*\n${prefix}${command} Solve a complex math problem\n${prefix}${command} Explain the concept of entropy\n${prefix}${command} Write a detailed analysis of AI ethics\n\n*Features:*\n• Advanced reasoning\n• Deep thinking\n• Complex problem solving\n• Detailed explanations` 
+        text: `🧠 *DeepSeek V3.2 Thinking AI*\n\nUsage: ${prefix}${command} <your question>\nExample: ${prefix}${command} Explain quantum physics in simple terms` 
       });
     }
 
@@ -515,9 +507,8 @@ register({
     await sock.sendMessage(from, { text: `🧠 DeepSeek is thinking...` });
 
     try {
-      // Primary: David Cyril API
       const response = await fetch(
-        `https://apis.davidcyril.name.ng/ai/deepseek-v32-thinking?text=${encodeURIComponent(query)}`,
+        `https://apis.davidcyril.name.ng/ai/deepseek-v32-thinking?query=${encodeURIComponent(query)}`,
         {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -531,7 +522,6 @@ register({
 
       const data = await response.json();
 
-      // Extract response from various formats
       let reply = data.result || data.reply || data.message || data.response || data.text || data.data || data.answer;
 
       if (!reply) {
@@ -548,15 +538,12 @@ register({
         throw new Error("Could not extract response from DeepSeek.");
       }
 
-      // Clean up
       reply = reply.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\t/g, '  ');
 
-      // Truncate if too long
       if (reply.length > 65000) {
         reply = reply.slice(0, 65000) + '\n\n... (truncated)';
       }
 
-      // Split into chunks if needed
       if (reply.length > 1000) {
         const chunks = reply.match(/.{1,1000}/g) || [reply];
         for (let i = 0; i < Math.min(chunks.length, 5); i++) {
@@ -573,24 +560,7 @@ register({
     } catch (error) {
       console.error('DeepSeek error:', error);
 
-      // Fallback: Try alternative DeepSeek endpoint
       try {
-        const altUrl = 'https://apis.davidcyril.name.ng/ai/deepseek';
-        const altRes = await fetch(`${altUrl}?text=${encodeURIComponent(query)}`);
-        const altData = await altRes.json();
-        const altReply = altData.result || altData.reply || altData.message;
-
-        if (altReply) {
-          return await sock.sendMessage(from, { 
-            text: `🧠 *DeepSeek (fallback):*\n\n${altReply}` 
-          });
-        }
-      } catch (altErr) {}
-
-      // Fallback: Prince API (Mistral)
-      try {
-        await sock.sendMessage(from, { text: `⏳ Fallback: Trying Mistral...` });
-
         const mistralUrl = 'https://api.princetechn.com/api/ai/mistral';
         const mistralRes = await fetch(`${mistralUrl}?apikey=prince&query=${encodeURIComponent(query)}`);
         const mistralData = await mistralRes.json();
@@ -602,22 +572,6 @@ register({
           });
         }
       } catch (mistralErr) {}
-
-      // Fallback: Try GPT
-      try {
-        await sock.sendMessage(from, { text: `⏳ Fallback: Trying GPT...` });
-
-        const gptUrl = 'https://api.princetechn.com/api/ai/gpt';
-        const gptRes = await fetch(`${gptUrl}?apikey=prince&query=${encodeURIComponent(query)}`);
-        const gptData = await gptRes.json();
-        const gptReply = gptData.result || gptData.reply || gptData.message;
-
-        if (gptReply) {
-          return await sock.sendMessage(from, { 
-            text: `🧠 *GPT (fallback):*\n\n${gptReply}` 
-          });
-        }
-      } catch (gptErr) {}
 
       await sock.sendMessage(from, { 
         text: `⚠️ DeepSeek Error: ${error.message || 'Could not get response.'}\n\n💡 Try a different question or try again later.` 
@@ -634,7 +588,7 @@ register({
   async execute({ sock, from, args, prefix, command }) {
     if (!args[0]) {
       return await sock.sendMessage(from, { 
-        text: `✨ *Gemini 3 Pro AI*\n\nUsage: ${prefix}${command} <your question>\nExample: ${prefix}${command} Explain AI in simple terms\n\n*Examples:*\n${prefix}${command} Write a poem about stars\n${prefix}${command} Explain how rockets work\n${prefix}${command} Create a business plan outline\n\n*Features:*\n• Advanced reasoning\n• Creative writing\n• Complex problem solving\n• Detailed explanations` 
+        text: `✨ *Gemini 3 Pro AI*\n\nUsage: ${prefix}${command} <your question>\nExample: ${prefix}${command} Explain AI in simple terms` 
       });
     }
 
@@ -643,9 +597,8 @@ register({
     await sock.sendMessage(from, { text: `✨ Gemini 3 Pro is thinking...` });
 
     try {
-      // Primary: David Cyril API
       const response = await fetch(
-        `https://apis.davidcyril.name.ng/ai/gemini-3-pro?text=${encodeURIComponent(query)}`,
+        `https://apis.davidcyril.name.ng/ai/gemini-3-pro?query=${encodeURIComponent(query)}`,
         {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -659,7 +612,6 @@ register({
 
       const data = await response.json();
 
-      // Extract response from various formats
       let reply = data.result || data.reply || data.message || data.response || data.text || data.data || data.answer;
 
       if (!reply) {
@@ -676,15 +628,12 @@ register({
         throw new Error("Could not extract response from Gemini 3 Pro.");
       }
 
-      // Clean up
       reply = reply.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\t/g, '  ');
 
-      // Truncate if too long
       if (reply.length > 65000) {
         reply = reply.slice(0, 65000) + '\n\n... (truncated)';
       }
 
-      // Split into chunks if needed
       if (reply.length > 1000) {
         const chunks = reply.match(/.{1,1000}/g) || [reply];
         for (let i = 0; i < Math.min(chunks.length, 5); i++) {
@@ -701,21 +650,6 @@ register({
     } catch (error) {
       console.error('Gemini 3 Pro error:', error);
 
-      // Fallback: Try alternative Gemini endpoint
-      try {
-        const altUrl = 'https://apis.davidcyril.name.ng/ai/gemini';
-        const altRes = await fetch(`${altUrl}?text=${encodeURIComponent(query)}`);
-        const altData = await altRes.json();
-        const altReply = altData.result || altData.reply || altData.message;
-
-        if (altReply) {
-          return await sock.sendMessage(from, { 
-            text: `✨ *Gemini (fallback):*\n\n${altReply}` 
-          });
-        }
-      } catch (altErr) {}
-
-      // Fallback: Prince API Gemini
       try {
         const princeUrl = 'https://api.princetechn.com/api/ai/gemini';
         const princeRes = await fetch(`${princeUrl}?apikey=prince&query=${encodeURIComponent(query)}`);
@@ -729,26 +663,13 @@ register({
         }
       } catch (princeErr) {}
 
-      // Fallback: Try GPT
-      try {
-        const gptUrl = 'https://api.princetechn.com/api/ai/gpt';
-        const gptRes = await fetch(`${gptUrl}?apikey=prince&query=${encodeURIComponent(query)}`);
-        const gptData = await gptRes.json();
-        const gptReply = gptData.result || gptData.reply || gptData.message;
-
-        if (gptReply) {
-          return await sock.sendMessage(from, { 
-            text: `🧠 *GPT (fallback):*\n\n${gptReply}` 
-          });
-        }
-      } catch (gptErr) {}
-
       await sock.sendMessage(from, { 
         text: `⚠️ Gemini 3 Pro Error: ${error.message || 'Could not get response.'}\n\n💡 Try a different question or try again later.` 
       });
     }
   }
 });
+
 register({
   name: 'twdl',
   aliases: ['xdl2', 'twitterx', 'txdl'],
@@ -2494,7 +2415,7 @@ register({
   async execute({ sock, from, args, prefix, command }) {
     if (!args[0]) {
       return await sock.sendMessage(from, { 
-        text: `🤖 *GPT-54 AI Assistant*\n\nUsage: ${prefix}${command} <your question>\nExample: ${prefix}${command} Write a JavaScript function to reverse a string\n\n*Examples:*\n${prefix}${command} Explain black holes\n${prefix}${command} Write a poem about nature\n${prefix}${command} Create a business plan\n\n*Features:*\n• Advanced reasoning\n• Code generation\n• Creative writing\n• Problem solving` 
+        text: `🤖 *GPT-54 AI Assistant*\n\nUsage: ${prefix}${command} <your question>\nExample: ${prefix}${command} Write a JavaScript function to reverse a string` 
       });
     }
 
@@ -2503,9 +2424,8 @@ register({
     await sock.sendMessage(from, { text: `⏳ GPT-54 is thinking...` });
 
     try {
-      // Primary: David Cyril API
       const response = await fetch(
-        `https://apis.davidcyril.name.ng/ai/gpt-54?text=${encodeURIComponent(query)}`,
+        `https://apis.davidcyril.name.ng/ai/gpt-54?query=${encodeURIComponent(query)}`,
         {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -2519,7 +2439,6 @@ register({
 
       const data = await response.json();
 
-      // Extract response from various formats
       let reply = data.result || data.reply || data.message || data.response || data.text || data.data || data.answer;
 
       if (!reply) {
@@ -2536,15 +2455,12 @@ register({
         throw new Error("Could not extract response from GPT-54.");
       }
 
-      // Clean up
       reply = reply.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\t/g, '  ');
 
-      // Truncate if too long
       if (reply.length > 65000) {
         reply = reply.slice(0, 65000) + '\n\n... (truncated)';
       }
 
-      // Split into chunks if needed
       if (reply.length > 1000) {
         const chunks = reply.match(/.{1,1000}/g) || [reply];
         for (let i = 0; i < Math.min(chunks.length, 5); i++) {
@@ -2561,21 +2477,6 @@ register({
     } catch (error) {
       console.error('GPT-54 error:', error);
 
-      // Fallback: Try alternative GPT endpoint
-      try {
-        const altUrl = 'https://apis.davidcyril.name.ng/ai/gpt';
-        const altRes = await fetch(`${altUrl}?query=${encodeURIComponent(query)}`);
-        const altData = await altRes.json();
-        const altReply = altData.result || altData.reply || altData.message;
-
-        if (altReply) {
-          return await sock.sendMessage(from, { 
-            text: `🤖 *GPT (fallback):*\n\n${altReply}` 
-          });
-        }
-      } catch (altErr) {}
-
-      // Fallback: Prince API GPT
       try {
         const princeUrl = 'https://api.princetechn.com/api/ai/gpt';
         const princeRes = await fetch(`${princeUrl}?apikey=prince&query=${encodeURIComponent(query)}`);
@@ -2588,20 +2489,6 @@ register({
           });
         }
       } catch (princeErr) {}
-
-      // Fallback: Try Mistral
-      try {
-        const mistralUrl = 'https://api.princetechn.com/api/ai/mistral';
-        const mistralRes = await fetch(`${mistralUrl}?apikey=prince&query=${encodeURIComponent(query)}`);
-        const mistralData = await mistralRes.json();
-        const mistralReply = mistralData.result || mistralData.reply || mistralData.message;
-
-        if (mistralReply) {
-          return await sock.sendMessage(from, { 
-            text: `🧠 *Mistral (fallback):*\n\n${mistralReply}` 
-          });
-        }
-      } catch (mistralErr) {}
 
       await sock.sendMessage(from, { 
         text: `⚠️ GPT-54 Error: ${error.message || 'Could not get response.'}\n\n💡 Try a different question or try again later.` 
@@ -2618,7 +2505,7 @@ register({
   async execute({ sock, from, args, prefix, command }) {
     if (!args[0]) {
       return await sock.sendMessage(from, { 
-        text: `🧠 *Qwen3 Max AI Assistant*\n\nUsage: ${prefix}${command} <your question>\nExample: ${prefix}${command} Explain quantum computing\n\n*Examples:*\n${prefix}${command} Write a Python function\n${prefix}${command} Explain blockchain technology\n${prefix}${command} Create a business plan\n${prefix}${command} Write a poem about AI\n\n*Features:*\n• Advanced reasoning\n• Code generation\n• Creative writing\n• Problem solving\n• Multi-language support` 
+        text: `🧠 *Qwen3 Max AI Assistant*\n\nUsage: ${prefix}${command} <your question>\nExample: ${prefix}${command} Explain quantum computing` 
       });
     }
 
@@ -2627,9 +2514,8 @@ register({
     await sock.sendMessage(from, { text: `🧠 Qwen3 Max is thinking...` });
 
     try {
-      // Primary: David Cyril API
       const response = await fetch(
-        `https://apis.davidcyril.name.ng/ai/qwen3-max?text=${encodeURIComponent(query)}`,
+        `https://apis.davidcyril.name.ng/ai/qwen3-max?query=${encodeURIComponent(query)}`,
         {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -2643,7 +2529,6 @@ register({
 
       const data = await response.json();
 
-      // Extract response from various formats
       let reply = data.result || data.reply || data.message || data.response || data.text || data.data || data.answer;
 
       if (!reply) {
@@ -2660,15 +2545,12 @@ register({
         throw new Error("Could not extract response from Qwen3 Max.");
       }
 
-      // Clean up
       reply = reply.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\t/g, '  ');
 
-      // Truncate if too long
       if (reply.length > 65000) {
         reply = reply.slice(0, 65000) + '\n\n... (truncated)';
       }
 
-      // Split into chunks if needed
       if (reply.length > 1000) {
         const chunks = reply.match(/.{1,1000}/g) || [reply];
         for (let i = 0; i < Math.min(chunks.length, 5); i++) {
@@ -2685,21 +2567,6 @@ register({
     } catch (error) {
       console.error('Qwen3 Max error:', error);
 
-      // Fallback: Try alternative Qwen endpoint
-      try {
-        const altUrl = 'https://apis.davidcyril.name.ng/ai/qwen';
-        const altRes = await fetch(`${altUrl}?query=${encodeURIComponent(query)}`);
-        const altData = await altRes.json();
-        const altReply = altData.result || altData.reply || altData.message;
-
-        if (altReply) {
-          return await sock.sendMessage(from, { 
-            text: `🧠 *Qwen (fallback):*\n\n${altReply}` 
-          });
-        }
-      } catch (altErr) {}
-
-      // Fallback: Prince API GPT
       try {
         const princeUrl = 'https://api.princetechn.com/api/ai/gpt';
         const princeRes = await fetch(`${princeUrl}?apikey=prince&query=${encodeURIComponent(query)}`);
@@ -2712,20 +2579,6 @@ register({
           });
         }
       } catch (princeErr) {}
-
-      // Fallback: Try Mistral
-      try {
-        const mistralUrl = 'https://api.princetechn.com/api/ai/mistral';
-        const mistralRes = await fetch(`${mistralUrl}?apikey=prince&query=${encodeURIComponent(query)}`);
-        const mistralData = await mistralRes.json();
-        const mistralReply = mistralData.result || mistralData.reply || mistralData.message;
-
-        if (mistralReply) {
-          return await sock.sendMessage(from, { 
-            text: `🧠 *Mistral (fallback):*\n\n${mistralReply}` 
-          });
-        }
-      } catch (mistralErr) {}
 
       await sock.sendMessage(from, { 
         text: `⚠️ Qwen3 Max Error: ${error.message || 'Could not get response.'}\n\n💡 Try a different question or try again later.` 
@@ -2742,13 +2595,12 @@ register({
   async execute({ sock, from, args, prefix, command }) {
     if (!args[0]) {
       return await sock.sendMessage(from, { 
-        text: `📥 *AIO Downloader V2*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://www.tiktok.com/@user/video/xxxxx\n\n*Supported platforms:*\n• TikTok\n• Instagram\n• Facebook\n• Twitter/X\n• YouTube\n• And more!\n\n*Examples:*\n${prefix}${command} https://www.instagram.com/p/xxxxx\n${prefix}${command} https://twitter.com/user/status/xxxxx\n${prefix}${command} https://www.facebook.com/watch?v=xxxxx` 
+        text: `📥 *AIO Downloader V2*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://www.tiktok.com/@user/video/xxxxx\n\n*Supported platforms:*\n• TikTok\n• Instagram\n• Facebook\n• Twitter/X\n• YouTube\n• And more!` 
       });
     }
 
     const url = args[0];
 
-    // Check if URL is valid
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
       return await sock.sendMessage(from, { 
         text: `❌ Invalid URL. Please provide a valid link starting with http:// or https://` 
@@ -2758,7 +2610,7 @@ register({
     await sock.sendMessage(from, { text: `⏳ Processing media from URL...` });
 
     try {
-      // Primary: David Cyril API - AIO Downloader V2
+      // Fix: Use the correct endpoint
       const response = await fetch(
         `https://apis.davidcyril.name.ng/download/aio-v2?url=${encodeURIComponent(url)}`,
         {
@@ -2774,7 +2626,6 @@ register({
 
       const data = await response.json();
 
-      // Extract media URLs and metadata
       let videoUrl = data.result?.video || data.result?.download_url || data.result?.url || 
                      data.video || data.download_url || data.url;
       let imageUrls = data.result?.images || data.images || data.result?.urls || data.urls || [];
@@ -2782,13 +2633,11 @@ register({
       let platform = data.result?.platform || data.platform || 'Unknown';
       let username = data.result?.username || data.username || data.author || '';
 
-      // Handle single image case
       if (!videoUrl && !imageUrls.length) {
         const singleImage = data.result?.image || data.result?.url || data.image || data.url;
         if (singleImage) imageUrls = [singleImage];
       }
 
-      // Fallback: try to find any URL in the response
       if (!videoUrl && !imageUrls.length) {
         const jsonString = JSON.stringify(data);
         const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp4|mov|jpg|jpeg|png|gif|webp)/gi);
@@ -2800,7 +2649,7 @@ register({
       }
 
       if (!videoUrl && !imageUrls.length) {
-        throw new Error("Could not extract media from URL. The platform may not be supported.");
+        throw new Error("Could not extract media from URL.");
       }
 
       // Send info message
@@ -2812,7 +2661,6 @@ register({
 
       await sock.sendMessage(from, { text: infoMsg });
 
-      // Send video if available
       if (videoUrl) {
         const videoResponse = await fetch(videoUrl, {
           headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
@@ -2828,7 +2676,6 @@ register({
                 caption: `📥 *${title}*\n📌 *Platform:* ${platform}\n📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success*`
               });
             } catch (sendErr) {
-              // Fallback: send as document
               await sock.sendMessage(from, {
                 document: videoBuffer,
                 mimetype: 'video/mp4',
@@ -2840,7 +2687,6 @@ register({
         }
       }
 
-      // Send images (up to 10)
       if (imageUrls.length > 0) {
         const maxImages = Math.min(imageUrls.length, 10);
         for (let i = 0; i < maxImages; i++) {
@@ -2853,52 +2699,16 @@ register({
               });
               await new Promise(r => setTimeout(r, 500));
             }
-          } catch (imgErr) {
-            // Continue to next image
-          }
+          } catch (imgErr) {}
         }
       }
 
     } catch (error) {
       console.error('AIO Downloader error:', error);
 
-      // Fallback: Try alternative endpoint
+      // Fallback: Prince API
       try {
-        const altUrl = 'https://apis.davidcyril.name.ng/download/aio';
-        const altRes = await fetch(`${altUrl}?url=${encodeURIComponent(url)}`);
-        const altData = await altRes.json();
-
-        let altVideo = altData.result?.video || altData.video || altData.download_url || altData.url;
-        let altImages = altData.result?.images || altData.images || [];
-
-        if (altVideo || altImages.length > 0) {
-          if (altVideo) {
-            const vRes = await fetch(altVideo);
-            const vBuf = Buffer.from(await vRes.arrayBuffer());
-            if (vBuf.length > 5000) {
-              await sock.sendMessage(from, { 
-                video: vBuf, 
-                caption: '✅ Media Download (fallback)' 
-              });
-            }
-          }
-          if (altImages.length > 0) {
-            for (const img of altImages.slice(0, 5)) {
-              if (img && img.startsWith('http')) {
-                await sock.sendMessage(from, { image: { url: img } });
-                await new Promise(r => setTimeout(r, 500));
-              }
-            }
-          }
-          return;
-        }
-      } catch (altErr) {}
-
-      // Fallback: Prince API (try individual platform downloaders)
-      try {
-        let platformSpecific = false;
         const urlLower = url.toLowerCase();
-
         if (urlLower.includes('tiktok.com')) {
           const princeRes = await fetch(`https://api.princetechn.com/api/download/tiktok?apikey=prince&url=${encodeURIComponent(url)}`);
           const princeData = await princeRes.json();
@@ -2927,39 +2737,11 @@ register({
               });
             }
           }
-        } else if (urlLower.includes('facebook.com') || urlLower.includes('fb.watch')) {
-          const princeRes = await fetch(`https://api.princetechn.com/api/download/facebook?apikey=prince&url=${encodeURIComponent(url)}`);
-          const princeData = await princeRes.json();
-          const princeVideo = princeData.result?.video || princeData.video;
-          if (princeVideo) {
-            const vRes = await fetch(princeVideo);
-            const vBuf = Buffer.from(await vRes.arrayBuffer());
-            if (vBuf.length > 5000) {
-              return await sock.sendMessage(from, { 
-                video: vBuf, 
-                caption: '✅ Facebook Download (fallback)' 
-              });
-            }
-          }
-        } else if (urlLower.includes('twitter.com') || urlLower.includes('x.com')) {
-          const princeRes = await fetch(`https://api.princetechn.com/api/download/twitter?apikey=prince&url=${encodeURIComponent(url)}`);
-          const princeData = await princeRes.json();
-          const princeVideo = princeData.result?.video || princeData.video;
-          if (princeVideo) {
-            const vRes = await fetch(princeVideo);
-            const vBuf = Buffer.from(await vRes.arrayBuffer());
-            if (vBuf.length > 5000) {
-              return await sock.sendMessage(from, { 
-                video: vBuf, 
-                caption: '✅ Twitter/X Download (fallback)' 
-              });
-            }
-          }
         }
       } catch (princeErr) {}
 
       await sock.sendMessage(from, { 
-        text: `⚠️ Download Error: ${error.message || 'Could not download media.'}\n\n💡 Make sure the URL is valid and from a supported platform.\n\n*Supported platforms:*\nTikTok, Instagram, Facebook, Twitter/X, YouTube, and more.` 
+        text: `⚠️ Download Error: ${error.message || 'Could not download media.'}\n\n💡 Make sure the URL is valid.` 
       });
     }
   }
