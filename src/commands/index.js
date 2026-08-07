@@ -140,71 +140,323 @@ register({
 
 register({
   name: 'gpt',
+  aliases: ['ai', 'chatgpt', 'ask'],
   category: 'AI',
-  description: 'Chat with ChatGPT',
-  async execute({ sock, from, text }) {
-    if (!text) return sock.sendMessage(from, { text: '❓ Please provide a question.' });
+  description: 'Chat with GPT-4 powered AI assistant',
+  async execute({ sock, from, text, prefix, command }) {
+    if (!text) {
+      return await sock.sendMessage(from, { 
+        text: `🤖 *GPT Assistant*\n\nUsage: ${prefix}${command} <your question>\nExample: ${prefix}${command} What is the capital of France?` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `⏳ Thinking...` });
+
     try {
-      const res = await fetch(`${P_BASE}/ai/gpt?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
-      const data = await res.json();
-      const reply = data.result || data.reply;
-      if (!reply) return sock.sendMessage(from, { text: '❌ No response from the API. Try again shortly.' });
-      await sock.sendMessage(from, { text: `🤖 *GPT:* ${reply}` });
-    } catch (e) {
-      await sock.sendMessage(from, { text: '⚠️ GPT Error: ' + e.message });
+      // Use OmegaTech API for GPT
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const response = await fetch(`${baseUrl}/api/ai/gpt?q=${encodeURIComponent(text)}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Extract the response from various possible formats
+      let reply = data.result || data.reply || data.message || data.response || data.text;
+      
+      if (!reply) {
+        // Fallback: try to find any text in the response
+        const jsonString = JSON.stringify(data);
+        const textMatch = jsonString.match(/"result":"([^"]+)"/) || 
+                          jsonString.match(/"reply":"([^"]+)"/) ||
+                          jsonString.match(/"message":"([^"]+)"/);
+        if (textMatch) reply = textMatch[1];
+      }
+
+      if (!reply) {
+        throw new Error("Could not extract response from AI.");
+      }
+
+      // Clean up the response (remove extra quotes, escapes)
+      reply = reply.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+
+      // Truncate if too long (WhatsApp has message limits)
+      if (reply.length > 65000) {
+        reply = reply.slice(0, 65000) + '\n\n... (truncated)';
+      }
+
+      await sock.sendMessage(from, { 
+        text: `🤖 *GPT Response:*\n\n${reply}` 
+      });
+
+    } catch (error) {
+      console.error('GPT error:', error);
+      
+      // Fallback: try Prince API if OmegaTech fails
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/ai/gpt';
+        const fallbackRes = await fetch(`${princeUrl}?apikey=prince&query=${encodeURIComponent(text)}`);
+        const fallbackData = await fallbackRes.json();
+        const fallbackReply = fallbackData.result || fallbackData.reply;
+        
+        if (fallbackReply) {
+          return await sock.sendMessage(from, { 
+            text: `🤖 *GPT Response (fallback):*\n\n${fallbackReply}` 
+          });
+        }
+      } catch (fallbackErr) {
+        // Silent fail
+      }
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ GPT Error: ${error.message || 'Unknown error'}` 
+      });
     }
   }
 });
 
 register({
   name: 'gemini',
+  aliases: ['gmini', 'googleai'],
   category: 'AI',
-  description: 'Google Gemini AI Assistant',
-  async execute({ sock, from, text }) {
-    if (!text) return sock.sendMessage(from, { text: '❓ Ask me anything.' });
+  description: 'Chat with Google Gemini AI',
+  async execute({ sock, from, text, prefix, command }) {
+    if (!text) {
+      return await sock.sendMessage(from, { 
+        text: `✨ *Gemini AI Assistant*\n\nUsage: ${prefix}${command} <your question>\nExample: ${prefix}${command} Write a poem about cats` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `⏳ Generating response...` });
+
     try {
-      const res = await fetch(`${P_BASE}/ai/gemini?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
-      const data = await res.json();
-      if (!data.result) return sock.sendMessage(from, { text: '❌ No response from the API. Try again shortly.' });
-      await sock.sendMessage(from, { text: `✨ *Gemini:* ${data.result}` });
-    } catch (e) {
-      await sock.sendMessage(from, { text: '⚠️ Gemini Error: ' + e.message });
+      // Primary: OmegaTech API
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const response = await fetch(`${baseUrl}/api/ai/gemini?q=${encodeURIComponent(text)}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Extract response from various formats
+      let reply = data.result || data.reply || data.message || data.response || data.text;
+      
+      if (!reply) {
+        const jsonString = JSON.stringify(data);
+        const textMatch = jsonString.match(/"result":"([^"]+)"/) || 
+                          jsonString.match(/"reply":"([^"]+)"/) ||
+                          jsonString.match(/"message":"([^"]+)"/);
+        if (textMatch) reply = textMatch[1];
+      }
+
+      if (!reply) {
+        throw new Error("Could not extract response from AI.");
+      }
+
+      // Clean up
+      reply = reply.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+
+      // Truncate if too long
+      if (reply.length > 65000) {
+        reply = reply.slice(0, 65000) + '\n\n... (truncated)';
+      }
+
+      await sock.sendMessage(from, { 
+        text: `✨ *Gemini:*\n\n${reply}` 
+      });
+
+    } catch (error) {
+      console.error('Gemini error:', error);
+      
+      // Fallback: Prince API
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/ai/gemini';
+        const fallbackRes = await fetch(`${princeUrl}?apikey=prince&query=${encodeURIComponent(text)}`);
+        const fallbackData = await fallbackRes.json();
+        const fallbackReply = fallbackData.result || fallbackData.reply;
+        
+        if (fallbackReply) {
+          return await sock.sendMessage(from, { 
+            text: `✨ *Gemini (fallback):*\n\n${fallbackReply}` 
+          });
+        }
+      } catch (fallbackErr) {
+        // Silent fail
+      }
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Gemini Error: ${error.message || 'Unknown error'}` 
+      });
     }
   }
 });
 
 register({
   name: 'blackbox',
+  aliases: ['bb', 'codeai', 'codingai'],
   category: 'AI',
-  description: 'AI Coding and Logic Assistant',
-  async execute({ sock, from, text }) {
-    if (!text) return sock.sendMessage(from, { text: '❓ What code should I write?' });
+  description: 'AI Coding & Logic Assistant (Blackbox AI)',
+  async execute({ sock, from, text, prefix, command }) {
+    if (!text) {
+      return await sock.sendMessage(from, { 
+        text: `💻 *Blackbox AI Assistant*\n\nUsage: ${prefix}${command} <your question>\n\n*Examples:*\n${prefix}${command} Write a Python function to sort a list\n${prefix}${command} Explain the difference between let and const in JavaScript\n${prefix}${command} Debug this code: ...` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `⏳ Analyzing code...` });
+
     try {
-      const res = await fetch(`${P_BASE}/ai/blackbox?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
-      const data = await res.json();
-      if (!data.result) return sock.sendMessage(from, { text: '❌ No response from the API. Try again shortly.' });
-      await sock.sendMessage(from, { text: `💻 *Blackbox AI:*\n\n${data.result}` });
-    } catch (e) {
-      await sock.sendMessage(from, { text: '⚠️ Blackbox Error: ' + e.message });
+      // Primary: OmegaTech API
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const response = await fetch(`${baseUrl}/api/ai/blackbox?q=${encodeURIComponent(text)}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Extract response from various formats
+      let reply = data.result || data.reply || data.message || data.response || data.text || data.code;
+      
+      if (!reply) {
+        const jsonString = JSON.stringify(data);
+        const textMatch = jsonString.match(/"result":"([^"]+)"/) || 
+                          jsonString.match(/"reply":"([^"]+)"/) ||
+                          jsonString.match(/"message":"([^"]+)"/) ||
+                          jsonString.match(/"code":"([^"]+)"/);
+        if (textMatch) reply = textMatch[1];
+      }
+
+      if (!reply) {
+        throw new Error("Could not extract response from Blackbox AI.");
+      }
+
+      // Clean up
+      reply = reply.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\t/g, '  ');
+
+      // Truncate if too long
+      if (reply.length > 65000) {
+        reply = reply.slice(0, 65000) + '\n\n... (truncated)';
+      }
+
+      await sock.sendMessage(from, { 
+        text: `💻 *Blackbox AI:*\n\n${reply}` 
+      });
+
+    } catch (error) {
+      console.error('Blackbox error:', error);
+      
+      // Fallback: Prince API
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/ai/blackbox';
+        const fallbackRes = await fetch(`${princeUrl}?apikey=prince&query=${encodeURIComponent(text)}`);
+        const fallbackData = await fallbackRes.json();
+        const fallbackReply = fallbackData.result || fallbackData.reply || fallbackData.code;
+        
+        if (fallbackReply) {
+          return await sock.sendMessage(from, { 
+            text: `💻 *Blackbox AI (fallback):*\n\n${fallbackReply}` 
+          });
+        }
+      } catch (fallbackErr) {
+        // Silent fail
+      }
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Blackbox Error: ${error.message || 'Unknown error'}` 
+      });
     }
   }
 });
 
 register({
   name: 'dalle',
-  aliases: ['imagine', 'aiimg'],
+  aliases: ['imagine', 'aiimg', 'generate', 'dream'],
   category: 'AI',
-  description: 'Generate high-quality AI images',
-  async execute({ sock, from, text }) {
-    if (!text) return sock.sendMessage(from, { text: '❓ Describe the image you want to create.' });
-    await sock.sendMessage(from, { text: '🎨 *Creating your masterpiece...*' });
+  description: 'Generate AI images from text prompts',
+  async execute({ sock, from, text, prefix, command }) {
+    if (!text) {
+      return await sock.sendMessage(from, { 
+        text: `🎨 *DALL-E Image Generator*\n\nUsage: ${prefix}${command} <description>\n\n*Examples:*\n${prefix}${command} A futuristic city at sunset, cyberpunk style\n${prefix}${command} A cute cat eating pizza, cartoon style\n${prefix}${command} A realistic portrait of a robot\n\n*Tips:*\n• Be descriptive for better results\n• Include style (realistic, cartoon, anime, etc.)\n• Mention colors, lighting, mood` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `🎨 *Creating your masterpiece...*\n⏳ This may take 10-20 seconds...` });
+
     try {
-      const res = await fetch(`${P_BASE}/ai/dalle?apikey=${P_KEY}&prompt=${encodeURIComponent(text)}`);
-      const data = await res.json();
-      if (!data.result) return sock.sendMessage(from, { text: '❌ Could not generate an image. Try again shortly.' });
-      await sock.sendMessage(from, { image: { url: data.result }, caption: `✨ *Prompt:* ${text}` });
-    } catch (e) {
-      await sock.sendMessage(from, { text: '⚠️ Image Generation Error: ' + e.message });
+      // Primary: OmegaTech API
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const response = await fetch(`${baseUrl}/api/ai/dalle?prompt=${encodeURIComponent(text)}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Extract image URL from various formats
+      let imageUrl = data.result || data.url || data.image || data.data?.url || data.data?.result;
+      
+      if (!imageUrl) {
+        const jsonString = JSON.stringify(data);
+        const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(png|jpg|jpeg|gif|webp)/i);
+        if (urlMatch) imageUrl = urlMatch[0];
+      }
+
+      if (!imageUrl) {
+        throw new Error("Could not extract image URL from API response.");
+      }
+
+      // Send the generated image
+      await sock.sendMessage(from, {
+        image: { url: imageUrl },
+        caption: `🎨 *DALL-E Generated Image*\n\n📝 *Prompt:* ${text}\n\n✨ _Generated by NEXUS-MD_`
+      });
+
+    } catch (error) {
+      console.error('DALL-E error:', error);
+      
+      // Fallback: Prince API
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/ai/dalle';
+        const fallbackRes = await fetch(`${princeUrl}?apikey=prince&prompt=${encodeURIComponent(text)}`);
+        const fallbackData = await fallbackRes.json();
+        const fallbackImage = fallbackData.result || fallbackData.url || fallbackData.image;
+        
+        if (fallbackImage) {
+          return await sock.sendMessage(from, {
+            image: { url: fallbackImage },
+            caption: `🎨 *DALL-E Generated Image (fallback)*\n\n📝 *Prompt:* ${text}`
+          });
+        }
+      } catch (fallbackErr) {
+        // Silent fail
+      }
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ DALL-E Error: ${error.message || 'Unknown error'}\n\n💡 Try a different prompt or try again later.` 
+      });
     }
   }
 });
@@ -215,65 +467,894 @@ register({
 
 register({
   name: 'tiktok',
-  aliases: ['tt', 'ttdl'],
+  aliases: ['tt', 'ttdl', 'tiktokdl'],
   category: 'DOWNLOADER',
-  description: 'Download TikTok video (No Watermark)',
-  async execute({ sock, from, args }) {
-    if (!args[0]) return sock.sendMessage(from, { text: '❌ Please provide a TikTok link.' });
-    await princeDownload(sock, from, args[0], 'tiktok', 'video');
+  description: 'Download TikTok videos (no watermark)',
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `📥 *TikTok Downloader*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://vm.tiktok.com/xxxxx/\n\n*Supported URLs:*\n• vm.tiktok.com\n• www.tiktok.com\n• tiktok.com` 
+      });
+    }
+
+    const url = args[0];
+
+    if (!url.includes('tiktok.com')) {
+      return await sock.sendMessage(from, { 
+        text: `❌ Invalid URL. Please provide a valid TikTok link.\nExample: https://vm.tiktok.com/xxxxx/` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `⏳ Processing TikTok video...` });
+
+    try {
+      // Primary: OmegaTech API
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const response = await fetch(`${baseUrl}/api/download/tiktok?url=${encodeURIComponent(url)}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Extract video URL from various formats
+      let videoUrl = data.result?.video || data.result?.download_url || data.result?.url || 
+                     data.video || data.download_url || data.url;
+      
+      // Extract metadata
+      let title = data.title || data.result?.title || data.caption || 'TikTok Video';
+      let author = data.author || data.result?.author || data.username || 'Unknown';
+      let duration = data.duration || data.result?.duration || 'N/A';
+      let thumbnail = data.thumbnail || data.result?.thumbnail || data.cover || null;
+
+      if (!videoUrl) {
+        // Fallback: try to find any URL in the response
+        const jsonString = JSON.stringify(data);
+        const urlMatch = jsonString.match(/https?:\/\/[^\s"',]+\.(mp4|mov)/i);
+        if (urlMatch) videoUrl = urlMatch[0];
+      }
+
+      if (!videoUrl) {
+        throw new Error("Could not extract video URL from API response.");
+      }
+
+      // Send thumbnail first (if available)
+      if (thumbnail) {
+        try {
+          await sock.sendMessage(from, {
+            image: { url: thumbnail },
+            caption: `🎵 *${title}*\n👤 *Author:* ${author}\n⏱️ *Duration:* ${duration}s\n\n⬇️ *Downloading video...*`
+          });
+        } catch (thumbErr) {
+          // Continue even if thumbnail fails
+        }
+      }
+
+      // Download and send the video
+      const videoResponse = await fetch(videoUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!videoResponse.ok) {
+        throw new Error(`Video download failed: ${videoResponse.status}`);
+      }
+
+      const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+
+      if (videoBuffer.length < 5000) {
+        throw new Error("Downloaded file is too small. The link may be invalid.");
+      }
+
+      const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
+
+      // Send the video
+      try {
+        await sock.sendMessage(from, {
+          video: videoBuffer,
+          caption: `🎵 *${title}*\n👤 *Author:* ${author}\n⏱️ *Duration:* ${duration}s\n📦 *Size:* ${fileSizeMB} MB\n\n✅ *TikTok Download Success*`
+        });
+      } catch (sendErr) {
+        // Fallback: send as document
+        await sock.sendMessage(from, {
+          document: videoBuffer,
+          mimetype: 'video/mp4',
+          fileName: `tiktok_${author}_${Date.now()}.mp4`,
+          caption: `🎵 *${title}*\n👤 *Author:* ${author}\n📦 *Size:* ${fileSizeMB} MB`
+        });
+      }
+
+    } catch (error) {
+      console.error('TikTok download error:', error);
+      
+      // Fallback: Prince API
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/download/tiktok';
+        const fallbackRes = await fetch(`${princeUrl}?apikey=prince&url=${encodeURIComponent(url)}`);
+        const fallbackData = await fallbackRes.json();
+        
+        let fallbackVideo = fallbackData.result?.video || fallbackData.result?.url || 
+                            fallbackData.video || fallbackData.url;
+        
+        if (fallbackVideo) {
+          const videoRes = await fetch(fallbackVideo);
+          const videoBuf = Buffer.from(await videoRes.arrayBuffer());
+          
+          return await sock.sendMessage(from, {
+            video: videoBuf,
+            caption: `🎵 *TikTok Video (fallback)*\n✅ *Download Success*`
+          });
+        }
+      } catch (fallbackErr) {
+        // Silent fail
+      }
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Download Error: ${error.message || 'Unknown error'}\n\n💡 Try again or use a different video link.` 
+      });
+    }
   }
 });
 
 register({
-  name: 'ig',
-  aliases: ['igdl', 'instagram'],
+  name: 'instagram',
+  aliases: ['ig', 'igdl', 'insta'],
   category: 'DOWNLOADER',
-  description: 'Download Instagram Reels/Videos',
-  async execute({ sock, from, args }) {
-    if (!args[0]) return sock.sendMessage(from, { text: '❌ Please provide an Instagram link.' });
-    await princeDownload(sock, from, args[0], 'ig', 'video');
+  description: 'Download Instagram Reels, Videos, and Images',
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `📥 *Instagram Downloader*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://www.instagram.com/p/xxxxx/\n\n*Supports:*\n• Posts (images/videos)\n• Reels\n• IGTV` 
+      });
+    }
+
+    const url = args[0];
+
+    if (!url.includes('instagram.com') && !url.includes('instagr.am')) {
+      return await sock.sendMessage(from, { 
+        text: `❌ Invalid URL. Please provide a valid Instagram link.` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `⏳ Processing Instagram media...` });
+
+    try {
+      // Primary: OmegaTech API
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const response = await fetch(`${baseUrl}/api/download/instagram?url=${encodeURIComponent(url)}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Extract media URLs
+      let videoUrl = data.result?.video || data.result?.download_url || data.video || data.download_url;
+      let imageUrls = data.result?.images || data.images || data.result?.urls || data.urls || [];
+      let caption = data.result?.caption || data.caption || data.title || 'Instagram Media';
+      let username = data.result?.username || data.username || data.author || 'Unknown';
+
+      // Handle single image case
+      if (!videoUrl && !imageUrls.length) {
+        const singleImage = data.result?.image || data.result?.url || data.image || data.url;
+        if (singleImage) {
+          imageUrls = [singleImage];
+        }
+      }
+
+      // Fallback: try to find any URL in the response
+      if (!videoUrl && !imageUrls.length) {
+        const jsonString = JSON.stringify(data);
+        const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp4|mov|jpg|jpeg|png|gif)/gi);
+        if (urlMatch) {
+          const videoMatch = urlMatch.find(u => u.includes('.mp4') || u.includes('.mov'));
+          if (videoMatch) videoUrl = videoMatch;
+          else imageUrls = urlMatch;
+        }
+      }
+
+      if (!videoUrl && !imageUrls.length) {
+        throw new Error("Could not extract media from API response.");
+      }
+
+      // Send caption preview
+      await sock.sendMessage(from, { 
+        text: `📸 *${caption}*\n👤 *Author:* @${username}\n\n⬇️ *Downloading media...*` 
+      });
+
+      // Send video if available
+      if (videoUrl) {
+        const videoResponse = await fetch(videoUrl, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+        });
+
+        if (videoResponse.ok) {
+          const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+          if (videoBuffer.length > 5000) {
+            await sock.sendMessage(from, {
+              video: videoBuffer,
+              caption: `📸 *${caption}*\n👤 *Author:* @${username}\n\n✅ *Instagram Download Success*`
+            });
+          }
+        }
+      }
+
+      // Send images (up to 10)
+      if (imageUrls.length) {
+        const maxImages = Math.min(imageUrls.length, 10);
+        for (let i = 0; i < maxImages; i++) {
+          try {
+            const imgUrl = imageUrls[i];
+            if (imgUrl) {
+              await sock.sendMessage(from, {
+                image: { url: imgUrl },
+                caption: i === 0 ? `📸 *${caption}*\n👤 *Author:* @${username}\n📷 ${i+1}/${maxImages}` : `📷 ${i+1}/${maxImages}`
+              });
+              await new Promise(r => setTimeout(r, 500));
+            }
+          } catch (imgErr) {
+            // Continue to next image
+          }
+        }
+      }
+
+    } catch (error) {
+      console.error('Instagram download error:', error);
+      
+      // Fallback: Prince API
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/download/ig';
+        const fallbackRes = await fetch(`${princeUrl}?apikey=prince&url=${encodeURIComponent(url)}`);
+        const fallbackData = await fallbackRes.json();
+        
+        let fallbackVideo = fallbackData.result?.video || fallbackData.video;
+        let fallbackImages = fallbackData.result?.images || fallbackData.images || [];
+        
+        if (fallbackVideo || fallbackImages.length) {
+          if (fallbackVideo) {
+            const vRes = await fetch(fallbackVideo);
+            const vBuf = Buffer.from(await vRes.arrayBuffer());
+            if (vBuf.length > 5000) {
+              await sock.sendMessage(from, { video: vBuf, caption: '✅ Instagram Download (fallback)' });
+            }
+          }
+          if (fallbackImages.length) {
+            for (const img of fallbackImages.slice(0, 5)) {
+              await sock.sendMessage(from, { image: { url: img } });
+              await new Promise(r => setTimeout(r, 500));
+            }
+          }
+          return;
+        }
+      } catch (fallbackErr) {}
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Download Error: ${error.message || 'Unknown error'}\n\n💡 Try again or use a different link.` 
+      });
+    }
   }
 });
 
 register({
-  name: 'fb',
-  aliases: ['fbdl', 'facebook'],
+  name: 'facebook',
+  aliases: ['fb', 'fbdl', 'facebookdl'],
   category: 'DOWNLOADER',
   description: 'Download Facebook Videos',
-  async execute({ sock, from, args }) {
-    if (!args[0]) return sock.sendMessage(from, { text: '❌ Please provide a Facebook link.' });
-    await princeDownload(sock, from, args[0], 'facebook', 'video');
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `📥 *Facebook Downloader*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://www.facebook.com/watch?v=xxxxx\n\n*Supports:*\n• Public videos\n• Watch videos\n• Reels` 
+      });
+    }
+
+    const url = args[0];
+
+    if (!url.includes('facebook.com') && !url.includes('fb.watch')) {
+      return await sock.sendMessage(from, { 
+        text: `❌ Invalid URL. Please provide a valid Facebook link.` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `⏳ Processing Facebook video...` });
+
+    try {
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const response = await fetch(`${baseUrl}/api/download/facebook?url=${encodeURIComponent(url)}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      let videoUrl = data.result?.video || data.result?.download_url || data.result?.url || 
+                     data.video || data.download_url || data.url;
+      let title = data.result?.title || data.title || data.caption || 'Facebook Video';
+      let thumbnail = data.result?.thumbnail || data.thumbnail || data.cover || null;
+
+      if (!videoUrl) {
+        const jsonString = JSON.stringify(data);
+        const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp4|mov)/i);
+        if (urlMatch) videoUrl = urlMatch[0];
+      }
+
+      if (!videoUrl) {
+        throw new Error("Could not extract video URL from API response.");
+      }
+
+      if (thumbnail) {
+        try {
+          await sock.sendMessage(from, { image: { url: thumbnail }, caption: `🎬 *${title}*\n\n⬇️ *Downloading video...*` });
+        } catch (thumbErr) {}
+      }
+
+      const videoResponse = await fetch(videoUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
+
+      if (!videoResponse.ok) {
+        throw new Error(`Video download failed: ${videoResponse.status}`);
+      }
+
+      const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+
+      if (videoBuffer.length < 5000) {
+        throw new Error("Downloaded file is too small.");
+      }
+
+      const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
+
+      try {
+        await sock.sendMessage(from, {
+          video: videoBuffer,
+          caption: `🎬 *${title}*\n📦 *Size:* ${fileSizeMB} MB\n\n✅ *Facebook Download Success*`
+        });
+      } catch (sendErr) {
+        await sock.sendMessage(from, {
+          document: videoBuffer,
+          mimetype: 'video/mp4',
+          fileName: `facebook_${Date.now()}.mp4`,
+          caption: `🎬 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
+        });
+      }
+
+    } catch (error) {
+      console.error('Facebook download error:', error);
+      
+      // Fallback: Prince API
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/download/facebook';
+        const fallbackRes = await fetch(`${princeUrl}?apikey=prince&url=${encodeURIComponent(url)}`);
+        const fallbackData = await fallbackRes.json();
+        let fallbackVideo = fallbackData.result?.video || fallbackData.result?.download_url || fallbackData.video;
+        if (fallbackVideo) {
+          const vRes = await fetch(fallbackVideo);
+          const vBuf = Buffer.from(await vRes.arrayBuffer());
+          if (vBuf.length > 5000) {
+            return await sock.sendMessage(from, { video: vBuf, caption: '✅ Facebook Download (fallback)' });
+          }
+        }
+      } catch (fallbackErr) {}
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Download Error: ${error.message || 'Unknown error'}` 
+      });
+    }
   }
 });
 
 register({
   name: 'twitter',
-  aliases: ['x', 'xdl'],
+  aliases: ['x', 'xdl', 'twitterdl', 'tweet'],
   category: 'DOWNLOADER',
-  description: 'Download X (Twitter) Videos',
-  async execute({ sock, from, args }) {
-    if (!args[0]) return sock.sendMessage(from, { text: '❌ Please provide an X/Twitter link.' });
-    await princeDownload(sock, from, args[0], 'twitter', 'video');
+  description: 'Download Twitter/X Videos and Images',
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `📥 *Twitter/X Downloader*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://twitter.com/user/status/xxxxx\n\n*Supports:*\n• Videos\n• Images\n• GIFs` 
+      });
+    }
+
+    const url = args[0];
+
+    if (!url.includes('twitter.com') && !url.includes('x.com')) {
+      return await sock.sendMessage(from, { 
+        text: `❌ Invalid URL. Please provide a valid Twitter/X link.` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `⏳ Processing Twitter/X media...` });
+
+    try {
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const response = await fetch(`${baseUrl}/api/download/twitter?url=${encodeURIComponent(url)}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      let videoUrl = data.result?.video || data.result?.download_url || data.result?.url || 
+                     data.video || data.download_url || data.url;
+      let imageUrls = data.result?.images || data.images || data.result?.urls || data.urls || [];
+      let title = data.result?.title || data.title || data.caption || 'Twitter Post';
+      let username = data.result?.username || data.username || data.author || 'Unknown';
+
+      if (!videoUrl && !imageUrls.length) {
+        const singleImage = data.result?.image || data.result?.url || data.image || data.url;
+        if (singleImage) imageUrls = [singleImage];
+      }
+
+      if (!videoUrl && !imageUrls.length) {
+        const jsonString = JSON.stringify(data);
+        const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp4|mov|jpg|jpeg|png|gif)/gi);
+        if (urlMatch) {
+          const videoMatch = urlMatch.find(u => u.includes('.mp4') || u.includes('.mov'));
+          if (videoMatch) videoUrl = videoMatch;
+          else imageUrls = urlMatch;
+        }
+      }
+
+      if (!videoUrl && !imageUrls.length) {
+        throw new Error("Could not extract media from API response.");
+      }
+
+      await sock.sendMessage(from, { 
+        text: `🐦 *${title}*\n👤 *Author:* @${username}\n\n⬇️ *Downloading media...*` 
+      });
+
+      if (videoUrl) {
+        const videoResponse = await fetch(videoUrl, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+        });
+
+        if (videoResponse.ok) {
+          const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+          if (videoBuffer.length > 5000) {
+            const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
+            try {
+              await sock.sendMessage(from, {
+                video: videoBuffer,
+                caption: `🐦 *${title}*\n👤 *Author:* @${username}\n📦 *Size:* ${fileSizeMB} MB\n\n✅ *Twitter/X Download Success*`
+              });
+            } catch (sendErr) {
+              await sock.sendMessage(from, {
+                document: videoBuffer,
+                mimetype: 'video/mp4',
+                fileName: `twitter_${Date.now()}.mp4`,
+                caption: `🐦 *${title}*\n👤 *Author:* @${username}`
+              });
+            }
+          }
+        }
+      }
+
+      if (imageUrls.length) {
+        const maxImages = Math.min(imageUrls.length, 10);
+        for (let i = 0; i < maxImages; i++) {
+          try {
+            await sock.sendMessage(from, {
+              image: { url: imageUrls[i] },
+              caption: i === 0 ? `🐦 *${title}*\n👤 *Author:* @${username}\n📷 ${i+1}/${maxImages}` : `📷 ${i+1}/${maxImages}`
+            });
+            await new Promise(r => setTimeout(r, 500));
+          } catch (imgErr) {}
+        }
+      }
+
+    } catch (error) {
+      console.error('Twitter download error:', error);
+      
+      // Fallback: Prince API
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/download/twitter';
+        const fallbackRes = await fetch(`${princeUrl}?apikey=prince&url=${encodeURIComponent(url)}`);
+        const fallbackData = await fallbackRes.json();
+        let fallbackVideo = fallbackData.result?.video || fallbackData.video;
+        if (fallbackVideo) {
+          const vRes = await fetch(fallbackVideo);
+          const vBuf = Buffer.from(await vRes.arrayBuffer());
+          if (vBuf.length > 5000) {
+            return await sock.sendMessage(from, { video: vBuf, caption: '✅ Twitter/X Download (fallback)' });
+          }
+        }
+      } catch (fallbackErr) {}
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Download Error: ${error.message || 'Unknown error'}` 
+      });
+    }
   }
 });
 
 register({
   name: 'spotify',
+  aliases: ['sp', 'spotifydl', 'sptdl'],
   category: 'DOWNLOADER',
   description: 'Download songs from Spotify',
-  async execute({ sock, from, args }) {
-    if (!args[0]) return sock.sendMessage(from, { text: '❌ Please provide a Spotify link.' });
-    await princeDownload(sock, from, args[0], 'spotify', 'audio');
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🎵 *Spotify Downloader*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://open.spotify.com/track/xxxxx\n\n*Supports:*\n• Tracks (songs)\n• Playlists (coming soon)\n• Albums (coming soon)` 
+      });
+    }
+
+    const url = args[0];
+
+    if (!url.includes('spotify.com')) {
+      return await sock.sendMessage(from, { 
+        text: `❌ Invalid URL. Please provide a valid Spotify link.\nExample: https://open.spotify.com/track/xxxxx` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `⏳ Processing Spotify track...` });
+
+    try {
+      // Primary: OmegaTech API
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const response = await fetch(`${baseUrl}/api/download/spotify?url=${encodeURIComponent(url)}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Extract audio URL and metadata
+      let audioUrl = data.result?.download_url || data.result?.url || data.result?.audio || 
+                     data.download_url || data.url || data.audio;
+      
+      let title = data.result?.title || data.title || 'Spotify Track';
+      let artist = data.result?.artist || data.artist || data.result?.artists || data.artists || 'Unknown Artist';
+      let album = data.result?.album || data.album || 'Unknown Album';
+      let duration = data.result?.duration || data.duration || 'N/A';
+      let cover = data.result?.cover || data.cover || data.result?.thumbnail || data.thumbnail || null;
+
+      // Try to extract from nested result
+      if (!audioUrl && data.result) {
+        const result = data.result;
+        audioUrl = result.download_url || result.url || result.audio || result.link;
+        if (!title && result.title) title = result.title;
+        if (!artist && result.artist) artist = result.artist;
+      }
+
+      if (!audioUrl) {
+        const jsonString = JSON.stringify(data);
+        const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp3|m4a|ogg|wav)/i);
+        if (urlMatch) audioUrl = urlMatch[0];
+      }
+
+      if (!audioUrl) {
+        throw new Error("Could not extract audio URL from API response.");
+      }
+
+      // Send cover art if available
+      if (cover) {
+        try {
+          await sock.sendMessage(from, {
+            image: { url: cover },
+            caption: `🎵 *${title}*\n👤 *Artist:* ${artist}\n💿 *Album:* ${album}\n⏱️ *Duration:* ${duration}\n\n⬇️ *Downloading audio...*`
+          });
+        } catch (coverErr) {
+          await sock.sendMessage(from, { 
+            text: `🎵 *${title}*\n👤 *Artist:* ${artist}\n💿 *Album:* ${album}\n⏱️ *Duration:* ${duration}\n\n⬇️ *Downloading audio...*` 
+          });
+        }
+      } else {
+        await sock.sendMessage(from, { 
+          text: `🎵 *${title}*\n👤 *Artist:* ${artist}\n💿 *Album:* ${album}\n⏱️ *Duration:* ${duration}\n\n⬇️ *Downloading audio...*` 
+        });
+      }
+
+      // Download the audio
+      const audioResponse = await fetch(audioUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!audioResponse.ok) {
+        throw new Error(`Audio download failed: ${audioResponse.status}`);
+      }
+
+      const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+
+      if (audioBuffer.length < 5000) {
+        throw new Error("Downloaded file is too small. The link may be invalid.");
+      }
+
+      const fileSizeMB = (audioBuffer.length / 1024 / 1024).toFixed(1);
+
+      // Send the audio
+      try {
+        await sock.sendMessage(from, {
+          audio: audioBuffer,
+          mimetype: 'audio/mpeg',
+          fileName: `${title} - ${artist}.mp3`,
+          caption: `🎵 *${title}*\n👤 *Artist:* ${artist}\n💿 *Album:* ${album}\n📦 *Size:* ${fileSizeMB} MB\n\n✅ *Spotify Download Success*`
+        });
+      } catch (sendErr) {
+        // Fallback: send as document
+        await sock.sendMessage(from, {
+          document: audioBuffer,
+          mimetype: 'audio/mpeg',
+          fileName: `${title} - ${artist}.mp3`,
+          caption: `🎵 *${title}*\n👤 *Artist:* ${artist}\n💿 *Album:* ${album}\n📦 *Size:* ${fileSizeMB} MB`
+        });
+      }
+
+    } catch (error) {
+      console.error('Spotify download error:', error);
+      
+      // Fallback: Prince API
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/download/spotify';
+        const fallbackRes = await fetch(`${princeUrl}?apikey=prince&url=${encodeURIComponent(url)}`);
+        const fallbackData = await fallbackRes.json();
+        
+        let fallbackAudio = fallbackData.result?.download_url || fallbackData.result?.url || 
+                            fallbackData.result?.audio || fallbackData.download_url || fallbackData.url;
+        let fallbackTitle = fallbackData.result?.title || fallbackData.title || 'Spotify Track';
+        let fallbackArtist = fallbackData.result?.artist || fallbackData.artist || 'Unknown Artist';
+        
+        if (fallbackAudio) {
+          const aRes = await fetch(fallbackAudio);
+          const aBuf = Buffer.from(await aRes.arrayBuffer());
+          if (aBuf.length > 5000) {
+            return await sock.sendMessage(from, {
+              audio: aBuf,
+              mimetype: 'audio/mpeg',
+              fileName: `${fallbackTitle} - ${fallbackArtist}.mp3`,
+              caption: '✅ Spotify Download (fallback)'
+            });
+          }
+        }
+      } catch (fallbackErr) {
+        // Silent fail
+      }
+
+      // Fallback: Try using yt-search to find the song
+      try {
+        const searchQuery = `${title} ${artist} audio`;
+        const yts = require('yt-search');
+        const searchResults = await yts(searchQuery);
+        
+        if (searchResults && searchResults.videos && searchResults.videos.length > 0) {
+          const target = searchResults.videos[0];
+          const ytUrl = target.url;
+          
+          // Try OmegaTech play endpoint
+          const playRes = await fetch(`${baseUrl}/api/download/play?url=${encodeURIComponent(ytUrl)}`);
+          const playData = await playRes.json();
+          let fallbackYtUrl = playData.download_url || playData.download || playData.url;
+          
+          if (fallbackYtUrl) {
+            const ytAudioRes = await fetch(fallbackYtUrl);
+            const ytAudioBuf = Buffer.from(await ytAudioRes.arrayBuffer());
+            if (ytAudioBuf.length > 5000) {
+              return await sock.sendMessage(from, {
+                audio: ytAudioBuf,
+                mimetype: 'audio/mpeg',
+                fileName: `${target.title}.mp3`,
+                caption: `🎵 *${target.title}*\n👤 *Artist:* ${artist}\n\n✅ *Spotify Download (YouTube fallback)*`
+              });
+            }
+          }
+        }
+      } catch (ytErr) {
+        // Silent fail
+      }
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Download Error: ${error.message || 'Unknown error'}\n\n💡 Try again or use a different link.` 
+      });
+    }
   }
 });
 
 register({
   name: 'ytmp4',
+  aliases: ['ytv', 'youtube', 'ytdl', 'youtubedl'],
   category: 'DOWNLOADER',
-  description: 'Download YouTube Video',
-  async execute({ sock, from, args }) {
-    if (!args[0]) return sock.sendMessage(from, { text: '❌ Please provide a YouTube link.' });
-    await princeDownload(sock, from, args[0], 'ytmp4', 'video');
+  description: 'Download YouTube videos',
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🎬 *YouTube Video Downloader*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://youtu.be/xxxxx\n\n*Options:*\n${prefix}${command} <url> 720p\n${prefix}${command} <url> 1080p\n\n*Supports:*\n• YouTube URLs\n• YouTube Shorts\n• Quality selection (720p, 1080p)` 
+      });
+    }
+
+    let url = args[0];
+    let quality = '720p';
+
+    // Check if quality is specified
+    if (args[1] && ['720', '720p', '1080', '1080p', '480', '480p', '360', '360p'].includes(args[1].toLowerCase())) {
+      quality = args[1].toLowerCase().replace('p', '') + 'p';
+    }
+
+    if (!url.includes('youtube.com') && !url.includes('youtu.be')) {
+      return await sock.sendMessage(from, { 
+        text: `❌ Invalid URL. Please provide a valid YouTube link.\nExample: https://youtu.be/xxxxx` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `⏳ Processing YouTube video... (${quality})` });
+
+    try {
+      // Primary: OmegaTech API
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const response = await fetch(`${baseUrl}/api/download/ytmp4?url=${encodeURIComponent(url)}&quality=${quality}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Extract video URL and metadata
+      let videoUrl = data.result?.download_url || data.result?.url || data.result?.video || 
+                     data.download_url || data.url || data.video;
+      
+      let title = data.result?.title || data.title || 'YouTube Video';
+      let thumbnail = data.result?.thumbnail || data.thumbnail || data.cover || null;
+      let duration = data.result?.duration || data.duration || 'N/A';
+      let qualityReturned = data.result?.quality || data.quality || quality;
+
+      if (!videoUrl) {
+        const jsonString = JSON.stringify(data);
+        const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp4|mkv|webm)/i);
+        if (urlMatch) videoUrl = urlMatch[0];
+      }
+
+      if (!videoUrl) {
+        throw new Error("Could not extract video URL from API response.");
+      }
+
+      // Send thumbnail first
+      if (thumbnail) {
+        try {
+          await sock.sendMessage(from, {
+            image: { url: thumbnail },
+            caption: `🎬 *${title}*\n⏱️ *Duration:* ${duration}\n📊 *Quality:* ${qualityReturned}\n\n⬇️ *Downloading video...*`
+          });
+        } catch (thumbErr) {
+          await sock.sendMessage(from, { 
+            text: `🎬 *${title}*\n⏱️ *Duration:* ${duration}\n📊 *Quality:* ${qualityReturned}\n\n⬇️ *Downloading video...*` 
+          });
+        }
+      }
+
+      // Download the video
+      const videoResponse = await fetch(videoUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!videoResponse.ok) {
+        throw new Error(`Video download failed: ${videoResponse.status}`);
+      }
+
+      const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+
+      if (videoBuffer.length < 5000) {
+        throw new Error("Downloaded file is too small. The link may be invalid.");
+      }
+
+      const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
+
+      // Try to send as video
+      try {
+        await sock.sendMessage(from, {
+          video: videoBuffer,
+          caption: `🎬 *${title}*\n📊 *Quality:* ${qualityReturned}\n📦 *Size:* ${fileSizeMB} MB\n\n✅ *YouTube Download Success*`
+        });
+      } catch (sendErr) {
+        // Fallback: send as document
+        await sock.sendMessage(from, {
+          document: videoBuffer,
+          mimetype: 'video/mp4',
+          fileName: `${title.replace(/[^a-zA-Z0-9]/g, '_')}.mp4`,
+          caption: `🎬 *${title}*\n📊 *Quality:* ${qualityReturned}\n📦 *Size:* ${fileSizeMB} MB`
+        });
+      }
+
+    } catch (error) {
+      console.error('YouTube download error:', error);
+      
+      // Fallback: Prince API
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/download/ytmp4';
+        const fallbackRes = await fetch(`${princeUrl}?apikey=prince&url=${encodeURIComponent(url)}&quality=${quality}`);
+        const fallbackData = await fallbackRes.json();
+        
+        let fallbackVideo = fallbackData.result?.download_url || fallbackData.result?.url || 
+                            fallbackData.download_url || fallbackData.url;
+        let fallbackTitle = fallbackData.result?.title || fallbackData.title || 'YouTube Video';
+        
+        if (fallbackVideo) {
+          const vRes = await fetch(fallbackVideo);
+          const vBuf = Buffer.from(await vRes.arrayBuffer());
+          if (vBuf.length > 5000) {
+            return await sock.sendMessage(from, {
+              video: vBuf,
+              caption: `🎬 *${fallbackTitle}*\n✅ *YouTube Download (fallback)*`
+            });
+          }
+        }
+      } catch (fallbackErr) {
+        // Silent fail
+      }
+
+      // Fallback: Try using yt-search to find the video
+      try {
+        const searchQuery = url.includes('youtu.be') || url.includes('youtube.com') ? 
+          url : (args[0] || '');
+        
+        if (searchQuery) {
+          const yts = require('yt-search');
+          const searchResults = await yts(searchQuery);
+          
+          if (searchResults && searchResults.videos && searchResults.videos.length > 0) {
+            const target = searchResults.videos[0];
+            const ytUrl = target.url;
+            
+            // Try OmegaTech play endpoint for audio only
+            const playRes = await fetch(`${baseUrl}/api/download/play?url=${encodeURIComponent(ytUrl)}`);
+            const playData = await playRes.json();
+            let fallbackAudio = playData.download_url || playData.download || playData.url;
+            
+            if (fallbackAudio) {
+              const audioRes = await fetch(fallbackAudio);
+              const audioBuf = Buffer.from(await audioRes.arrayBuffer());
+              if (audioBuf.length > 5000) {
+                // Send audio as a fallback since video might not be available
+                return await sock.sendMessage(from, {
+                  audio: audioBuf,
+                  mimetype: 'audio/mpeg',
+                  fileName: `${target.title}.mp3`,
+                  caption: `🎵 *${target.title}*\n⏱️ *Duration:* ${target.timestamp || 'N/A'}\n\n✅ *YouTube Audio (video download failed, audio fallback)*`
+                });
+              }
+            }
+          }
+        }
+      } catch (ytErr) {
+        // Silent fail
+      }
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Download Error: ${error.message || 'Unknown error'}\n\n💡 Try a different quality or URL.` 
+      });
+    }
   }
 });
 
@@ -364,18 +1445,115 @@ register({
 
 register({
   name: 'weather',
+  aliases: ['wthr', 'forecast', 'temp'],
   category: 'INFO',
-  description: 'Check weather of any city',
-  async execute({ sock, from, text }) {
-    if (!text) return sock.sendMessage(from, { text: '❓ Provide city name.' });
+  description: 'Get current weather for any city',
+  async execute({ sock, from, text, prefix, command }) {
+    if (!text) {
+      return await sock.sendMessage(from, { 
+        text: `🌤️ *Weather Forecast*\n\nUsage: ${prefix}${command} <city name>\nExample: ${prefix}${command} London\n\n*Examples:*\n${prefix}${command} New York\n${prefix}${command} Tokyo\n${prefix}${command} Lagos` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `⏳ Fetching weather for *${text}*...` });
+
     try {
-      const res = await fetch(`${P_BASE}/search/weather?apikey=${P_KEY}&query=${encodeURIComponent(text)}`);
-      const data = await res.json();
-      const w = data.result;
-      if (!w) return sock.sendMessage(from, { text: '❌ City not found.' });
-      await sock.sendMessage(from, { text: `🌡️ *Weather: ${text}*\n\n☁️ Condition: ${w.condition}\n🌡️ Temp: ${w.temp}°C\n💧 Humidity: ${w.humidity}` });
-    } catch (e) {
-      await sock.sendMessage(from, { text: '⚠️ Weather Error: ' + e.message });
+      // Primary: OmegaTech API
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const response = await fetch(`${baseUrl}/api/weather?city=${encodeURIComponent(text)}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Extract weather data from various formats
+      let weather = data.result || data.data || data;
+
+      let city = weather.city || weather.name || weather.location || text;
+      let country = weather.country || weather.region || '';
+      let condition = weather.condition || weather.description || weather.weather || 'N/A';
+      let temp = weather.temp || weather.temperature || weather.temp_c || 'N/A';
+      let feelsLike = weather.feels_like || weather.feelslike || weather.feels || 'N/A';
+      let humidity = weather.humidity || 'N/A';
+      let wind = weather.wind || weather.wind_speed || weather.windspeed || 'N/A';
+      let pressure = weather.pressure || 'N/A';
+      let uv = weather.uv || weather.uv_index || 'N/A';
+      let icon = weather.icon || weather.condition_icon || null;
+
+      if (!city && !condition) {
+        throw new Error("Could not extract weather data from API response.");
+      }
+
+      // Build the weather message
+      let msg = `🌤️ *Weather in ${city}${country ? ', ' + country : ''}*\n\n`;
+      msg += `☁️ *Condition:* ${condition}\n`;
+      msg += `🌡️ *Temperature:* ${temp}°C\n`;
+      msg += `🤔 *Feels like:* ${feelsLike}°C\n`;
+      msg += `💧 *Humidity:* ${humidity}%\n`;
+      msg += `💨 *Wind:* ${wind} km/h\n`;
+      msg += `📊 *Pressure:* ${pressure} hPa\n`;
+      msg += `☀️ *UV Index:* ${uv}\n\n`;
+      msg += `🕐 *Last updated:* ${new Date().toLocaleString()}`;
+
+      // Send with icon if available
+      if (icon && icon.startsWith('http')) {
+        try {
+          await sock.sendMessage(from, {
+            image: { url: icon },
+            caption: msg
+          });
+        } catch (iconErr) {
+          await sock.sendMessage(from, { text: msg });
+        }
+      } else {
+        await sock.sendMessage(from, { text: msg });
+      }
+
+    } catch (error) {
+      console.error('Weather error:', error);
+      
+      // Fallback: Prince API
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/search/weather';
+        const fallbackRes = await fetch(`${princeUrl}?apikey=prince&query=${encodeURIComponent(text)}`);
+        const fallbackData = await fallbackRes.json();
+        
+        const w = fallbackData.result || fallbackData.data;
+        if (w) {
+          let msg = `🌤️ *Weather in ${w.city || w.name || text}*\n\n`;
+          msg += `☁️ *Condition:* ${w.condition || w.weather || 'N/A'}\n`;
+          msg += `🌡️ *Temperature:* ${w.temp || w.temperature || 'N/A'}°C\n`;
+          msg += `💧 *Humidity:* ${w.humidity || 'N/A'}%\n`;
+          msg += `💨 *Wind:* ${w.wind || w.windspeed || 'N/A'} km/h\n\n`;
+          msg += `🕐 *Last updated:* ${new Date().toLocaleString()}`;
+          return await sock.sendMessage(from, { text: msg });
+        }
+      } catch (fallbackErr) {
+        // Silent fail
+      }
+
+      // Fallback: Free OpenWeatherMap-like API (wttr.in)
+      try {
+        const wttrRes = await fetch(`https://wttr.in/${encodeURIComponent(text)}?format=%l:+%c+%t+%h+%w+%p`, {
+          headers: { 'User-Agent': 'curl' }
+        });
+        const wttrData = await wttrRes.text();
+        if (wttrData && !wttrData.includes('Unknown location')) {
+          return await sock.sendMessage(from, { 
+            text: `🌤️ *Weather Report*\n\n${wttrData}\n\n🕐 ${new Date().toLocaleString()}` 
+          });
+        }
+      } catch (wttrErr) {}
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Weather Error: Could not find weather for "${text}".\n\n💡 Try another city name or check your spelling.` 
+      });
     }
   }
 });
@@ -449,10 +1627,94 @@ register({
 
 register({
   name: 'meme',
+  aliases: ['memes', 'dank', 'funny'],
   category: 'TOOLS',
-  description: 'Get a random meme',
-  async execute({ sock, from }) {
-    await sock.sendMessage(from, { image: { url: `${P_BASE}/tools/meme?apikey=${P_KEY}` }, caption: '😂' });
+  description: 'Get a random meme from the internet',
+  async execute({ sock, from, prefix, command }) {
+    await sock.sendMessage(from, { text: `⏳ Fetching a meme...` });
+
+    try {
+      // Primary: OmegaTech API
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const response = await fetch(`${baseUrl}/api/meme`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Extract meme data from various formats
+      let imageUrl = data.result?.url || data.result?.image || data.result?.img || 
+                     data.url || data.image || data.img;
+      let title = data.result?.title || data.title || '😂 Meme';
+      let subreddit = data.result?.subreddit || data.subreddit || 'unknown';
+      let upvotes = data.result?.upvotes || data.upvotes || '?';
+
+      if (!imageUrl) {
+        // Fallback: try to find any URL in the response
+        const jsonString = JSON.stringify(data);
+        const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(png|jpg|jpeg|gif|webp)/i);
+        if (urlMatch) imageUrl = urlMatch[0];
+      }
+
+      if (!imageUrl) {
+        throw new Error("Could not extract meme image from API response.");
+      }
+
+      const caption = `😂 *${title}*\n\n📌 r/${subreddit}\n⬆️ ${upvotes} upvotes\n\n✨ _Powered by NEXUS-MD_`;
+
+      await sock.sendMessage(from, {
+        image: { url: imageUrl },
+        caption: caption
+      });
+
+    } catch (error) {
+      console.error('Meme error:', error);
+
+      // Fallback: Prince API
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/tools/meme';
+        const fallbackRes = await fetch(`${princeUrl}?apikey=prince`);
+        const fallbackData = await fallbackRes.json();
+
+        let fallbackImage = fallbackData.result?.url || fallbackData.result || fallbackData.url || fallbackData.image;
+
+        if (fallbackImage) {
+          return await sock.sendMessage(from, {
+            image: { url: fallbackImage },
+            caption: '😂 *Random Meme*\n\n✨ _Powered by NEXUS-MD_'
+          });
+        }
+      } catch (fallbackErr) {
+        // Silent fail
+      }
+
+      // Fallback: Reddit API directly
+      try {
+        const redditRes = await fetch('https://meme-api.com/gimme');
+        const redditData = await redditRes.json();
+
+        if (redditData && redditData.url) {
+          const caption = `😂 *${redditData.title || 'Meme'}*\n\n📌 r/${redditData.subreddit || 'memes'}\n⬆️ ${redditData.ups || '?'} upvotes\n\n✨ _Powered by NEXUS-MD_`;
+
+          return await sock.sendMessage(from, {
+            image: { url: redditData.url },
+            caption: caption
+          });
+        }
+      } catch (redditErr) {
+        // Silent fail
+      }
+
+      await sock.sendMessage(from, {
+        text: `⚠️ Meme Error: ${error.message || 'Could not fetch meme.'}\n\n💡 Try again later.`
+      });
+    }
   }
 });
 
@@ -467,32 +1729,215 @@ register({
 
 register({
   name: 'fact',
+  aliases: ['facts', 'didyouknow', 'trivia'],
   category: 'TOOLS',
   description: 'Get a random interesting fact',
-  async execute({ sock, from }) {
+  async execute({ sock, from, prefix, command }) {
+    await sock.sendMessage(from, { text: `⏳ Fetching a fact...` });
+
     try {
-      const res = await fetch(`${P_BASE}/tools/fact?apikey=${P_KEY}`);
-      const data = await res.json();
-      if (!data.result) return sock.sendMessage(from, { text: '❌ Could not fetch a fact right now.' });
-      await sock.sendMessage(from, { text: `💡 *Did you know?*\n\n${data.result}` });
-    } catch (e) {
-      await sock.sendMessage(from, { text: '⚠️ Fact Error: ' + e.message });
+      // Primary: OmegaTech API
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const response = await fetch(`${baseUrl}/api/fact`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Extract fact from various formats
+      let fact = data.result || data.fact || data.text || data.message || data.data;
+
+      if (!fact) {
+        const jsonString = JSON.stringify(data);
+        const textMatch = jsonString.match(/"fact":"([^"]+)"/) || 
+                          jsonString.match(/"text":"([^"]+)"/) ||
+                          jsonString.match(/"result":"([^"]+)"/);
+        if (textMatch) fact = textMatch[1];
+      }
+
+      if (!fact) {
+        throw new Error("Could not extract fact from API response.");
+      }
+
+      // Clean up the fact
+      fact = fact.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+
+      // Split long facts into chunks if needed
+      if (fact.length > 1000) {
+        const chunks = fact.match(/.{1,1000}/g) || [fact];
+        for (const chunk of chunks) {
+          await sock.sendMessage(from, { text: `💡 *Did you know?*\n\n${chunk}` });
+        }
+      } else {
+        await sock.sendMessage(from, { 
+          text: `💡 *Did you know?*\n\n${fact}` 
+        });
+      }
+
+    } catch (error) {
+      console.error('Fact error:', error);
+
+      // Fallback: Prince API
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/tools/fact';
+        const fallbackRes = await fetch(`${princeUrl}?apikey=prince`);
+        const fallbackData = await fallbackRes.json();
+
+        let fallbackFact = fallbackData.result || fallbackData.fact || fallbackData.text;
+
+        if (fallbackFact) {
+          return await sock.sendMessage(from, { 
+            text: `💡 *Did you know?*\n\n${fallbackFact}` 
+          });
+        }
+      } catch (fallbackErr) {
+        // Silent fail
+      }
+
+      // Fallback: Free API (Useless Facts)
+      try {
+        const uselessRes = await fetch('https://uselessfacts.jsph.pl/random.json?language=en');
+        const uselessData = await uselessRes.json();
+
+        if (uselessData && uselessData.text) {
+          return await sock.sendMessage(from, { 
+            text: `💡 *Did you know?*\n\n${uselessData.text}` 
+          });
+        }
+      } catch (uselessErr) {
+        // Silent fail
+      }
+
+      // Fallback: Another free API
+      try {
+        const anotherRes = await fetch('https://api.api-ninjas.com/v1/facts?limit=1', {
+          headers: { 'X-Api-Key': 'your-key-here' } // Note: requires API key
+        });
+        // This one needs an API key, so skip if not configured
+      } catch (anotherErr) {}
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Fact Error: ${error.message || 'Could not fetch a fact.'}\n\n💡 Try again later.` 
+      });
     }
   }
 });
 
 register({
   name: 'quote',
+  aliases: ['quotes', 'inspire', 'motivation'],
   category: 'TOOLS',
-  description: 'Get a random motivational quote',
-  async execute({ sock, from }) {
+  description: 'Get a random inspirational quote',
+  async execute({ sock, from, prefix, command }) {
+    await sock.sendMessage(from, { text: `⏳ Fetching a quote...` });
+
     try {
-      const res = await fetch(`${P_BASE}/tools/quote?apikey=${P_KEY}`);
-      const data = await res.json();
-      if (!data.result) return sock.sendMessage(from, { text: '❌ Could not fetch a quote right now.' });
-      await sock.sendMessage(from, { text: `💬 "${data.result.quote}"\n\n— *${data.result.author}*` });
-    } catch (e) {
-      await sock.sendMessage(from, { text: '⚠️ Quote Error: ' + e.message });
+      // Primary: OmegaTech API
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const response = await fetch(`${baseUrl}/api/quote`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Extract quote from various formats
+      let quote = data.result?.quote || data.quote || data.text || data.message || data.data;
+      let author = data.result?.author || data.author || data.by || 'Unknown';
+
+      if (!quote) {
+        const jsonString = JSON.stringify(data);
+        const quoteMatch = jsonString.match(/"quote":"([^"]+)"/) || 
+                           jsonString.match(/"text":"([^"]+)"/) ||
+                           jsonString.match(/"message":"([^"]+)"/);
+        if (quoteMatch) quote = quoteMatch[1];
+        
+        const authorMatch = jsonString.match(/"author":"([^"]+)"/) || 
+                            jsonString.match(/"by":"([^"]+)"/);
+        if (authorMatch) author = authorMatch[1];
+      }
+
+      if (!quote) {
+        throw new Error("Could not extract quote from API response.");
+      }
+
+      // Clean up the quote
+      quote = quote.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+
+      // Send the quote
+      await sock.sendMessage(from, { 
+        text: `💬 *"${quote}"*\n\n— *${author}*`
+      });
+
+    } catch (error) {
+      console.error('Quote error:', error);
+
+      // Fallback: Prince API
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/tools/quote';
+        const fallbackRes = await fetch(`${princeUrl}?apikey=prince`);
+        const fallbackData = await fallbackRes.json();
+
+        let fallbackQuote = fallbackData.result?.quote || fallbackData.quote || fallbackData.text;
+        let fallbackAuthor = fallbackData.result?.author || fallbackData.author || 'Unknown';
+
+        if (fallbackQuote) {
+          return await sock.sendMessage(from, { 
+            text: `💬 *"${fallbackQuote}"*\n\n— *${fallbackAuthor}*`
+          });
+        }
+      } catch (fallbackErr) {
+        // Silent fail
+      }
+
+      // Fallback: ZenQuotes API (free, no key required)
+      try {
+        const zenRes = await fetch('https://zenquotes.io/api/random');
+        const zenData = await zenRes.json();
+
+        if (zenData && zenData[0]) {
+          const q = zenData[0].q || zenData[0].quote;
+          const a = zenData[0].a || zenData[0].author || 'Unknown';
+          if (q) {
+            return await sock.sendMessage(from, { 
+              text: `💬 *"${q}"*\n\n— *${a}*`
+            });
+          }
+        }
+      } catch (zenErr) {
+        // Silent fail
+      }
+
+      // Fallback: Another free API
+      try {
+        const anotherRes = await fetch('https://api.quotable.io/random');
+        const anotherData = await anotherRes.json();
+
+        if (anotherData && anotherData.content) {
+          const q = anotherData.content;
+          const a = anotherData.author || 'Unknown';
+          return await sock.sendMessage(from, { 
+            text: `💬 *"${q}"*\n\n— *${a}*`
+          });
+        }
+      } catch (anotherErr) {
+        // Silent fail
+      }
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Quote Error: ${error.message || 'Could not fetch a quote.'}\n\n💡 Try again later.`
+      });
     }
   }
 });
@@ -644,48 +2089,99 @@ register({
 
 register({
   name: 'play',
+  aliases: ['song', 'music', 'audio'],
   category: 'DOWNLOADER',
-  description: 'Play audio from YouTube',
-  async execute({ sock, from, args }) {
-    const prefix = PREFIX;
-    const command = 'play';
-    if (!args[0]) return await sock.sendMessage(from, { text: `*Example:* ${prefix}${command} Faded` });
+  description: 'Search and play music from YouTube',
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🎵 *Music Player*\n\nUsage: ${prefix}${command} <song name or URL>\nExample: ${prefix}${command} Faded\n\n*Examples:*\n${prefix}${command} Shape of You\n${prefix}${command} https://youtu.be/60ItHLz5WEA\n\n*Options:*\n${prefix}${command} <song name> (plays best match)\n${prefix}${command} <url> (plays specific video)` 
+      });
+    }
 
     const query = args.join(" ");
-    const baseUrl = 'https://omegatech-api.dixonomega.tech';
+    const isUrl = query.includes('youtube.com') || query.includes('youtu.be');
+
+    await sock.sendMessage(from, { text: `⏳ Searching for "${query}"...` });
 
     try {
-      await sock.sendMessage(from, { text: `🎧 Processing: *${query}*...` });
+      let videoUrl = query;
+      let title = '';
+      let thumbnail = '';
+      let duration = '';
+      let artist = '';
 
-      // 1. Search for the video using yt-search (local)
-      const yts = require('yt-search');
-      const searchResults = await yts(query);
-      
-      if (!searchResults || !searchResults.videos || searchResults.videos.length === 0) {
-        return await sock.sendMessage(from, { text: "❌ No results found." });
+      // If it's not a URL, search for it
+      if (!isUrl) {
+        const yts = require('yt-search');
+        const searchResults = await yts(query);
+        
+        if (!searchResults || !searchResults.videos || searchResults.videos.length === 0) {
+          return await sock.sendMessage(from, { 
+            text: `❌ No results found for "${query}".\n\n💡 Try a different search term.` 
+          });
+        }
+
+        const target = searchResults.videos[0];
+        videoUrl = target.url;
+        title = target.title || 'YouTube Audio';
+        thumbnail = target.thumbnail || target.image || '';
+        duration = target.timestamp || target.duration || '';
+        artist = target.author?.name || target.author || '';
       }
 
-      const target = searchResults.videos[0];
-      const videoUrl = target.url;
+      // Try to extract metadata if not already set
+      if (!title && !isUrl) {
+        const yts = require('yt-search');
+        const searchResults = await yts(videoUrl);
+        if (searchResults && searchResults.videos && searchResults.videos.length > 0) {
+          const target = searchResults.videos[0];
+          title = target.title || 'YouTube Audio';
+          thumbnail = target.thumbnail || target.image || '';
+          duration = target.timestamp || target.duration || '';
+          artist = target.author?.name || target.author || '';
+        }
+      }
 
-      // 2. Download audio via OmegaTech API
-      const apiUrl = `${baseUrl}/api/download/play?url=${encodeURIComponent(videoUrl)}`;
-      const res = await fetch(apiUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      // If still no title, use a default
+      if (!title) title = 'YouTube Audio';
+
+      // Send thumbnail if available
+      if (thumbnail) {
+        try {
+          await sock.sendMessage(from, {
+            image: { url: thumbnail },
+            caption: `🎵 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}${duration ? `⏱️ *Duration:* ${duration}\n` : ''}\n\n⬇️ *Downloading audio...*`
+          });
+        } catch (thumbErr) {
+          await sock.sendMessage(from, { 
+            text: `🎵 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}${duration ? `⏱️ *Duration:* ${duration}\n` : ''}\n\n⬇️ *Downloading audio...*` 
+          });
+        }
+      }
+
+      // Download via OmegaTech API
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const response = await fetch(`${baseUrl}/api/download/play?url=${encodeURIComponent(videoUrl)}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
       });
 
-      if (!res.ok) throw new Error(`API returned ${res.status}`);
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
 
-      const data = await res.json();
-      
-      // Extract download URL (handle different response structures)
+      const data = await response.json();
+
+      // Extract audio URL
       let audioUrl = data.download_url || data.download || data.url || 
-                     data.result?.download_url || data.result?.download || data.result?.url;
+                     data.result?.download_url || data.result?.download || data.result?.url ||
+                     data.data?.download_url || data.data?.download || data.data?.url;
 
       if (!audioUrl) {
-        // Fallback: try to find any URL in the response
         const jsonString = JSON.stringify(data);
-        const urlMatch = jsonString.match(/https?:\/\/[^\s"',]+\.(mp3|m4a|ogg|wav)/i);
+        const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp3|m4a|ogg|wav)/i);
         if (urlMatch) audioUrl = urlMatch[0];
       }
 
@@ -693,63 +2189,131 @@ register({
         throw new Error("Could not extract download URL from API response.");
       }
 
-      // 3. Send thumbnail first
-      if (target.thumbnail) {
-        await sock.sendMessage(from, {
-          image: { url: target.thumbnail },
-          caption: `🎵 *${target.title}*\n⏱️ *Duration:* ${target.timestamp || 'N/A'}`
-        });
-      }
-
-      // 4. Download and send audio
-      const audioRes = await fetch(audioUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      // Download the audio
+      const audioResponse = await fetch(audioUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
       });
 
-      if (!audioRes.ok) throw new Error(`Audio download failed: ${audioRes.status}`);
+      if (!audioResponse.ok) {
+        throw new Error(`Audio download failed: ${audioResponse.status}`);
+      }
 
-      const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
+      const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
 
-      if (audioBuffer.length < 10000) {
+      if (audioBuffer.length < 5000) {
         throw new Error("Downloaded file is too small. The link may be invalid.");
       }
+
+      const fileSizeMB = (audioBuffer.length / 1024 / 1024).toFixed(1);
 
       // Detect if it's MP3 or needs conversion
       const isMP3 = audioBuffer.toString('ascii', 0, 3) === 'ID3' ||
                     (audioBuffer[0] === 0xFF && (audioBuffer[1] & 0xE0) === 0xE0);
 
+      let finalBuffer = audioBuffer;
       if (!isMP3) {
-        // Try to convert using the existing converter if available
         try {
           const { toAudio } = require('../lib/converter');
           const converted = await toAudio(audioBuffer);
           if (converted && converted.length > 1000) {
-            await sock.sendMessage(from, {
-              audio: converted,
-              mimetype: 'audio/mpeg',
-              fileName: `${target.title}.mp3`
-            });
-            return;
+            finalBuffer = converted;
           }
         } catch (convErr) {
           console.warn('Conversion skipped:', convErr.message);
         }
       }
 
-      await sock.sendMessage(from, {
-        audio: audioBuffer,
-        mimetype: 'audio/mpeg',
-        fileName: `${target.title.replace(/[^a-zA-Z0-9]/g, '_')}.mp3`
-      });
+      // Send the audio
+      const safeTitle = title.replace(/[^a-zA-Z0-9\s]/g, '').trim();
+      const fileName = `${safeTitle}.mp3`;
 
-    } catch (e) {
-      console.error('Play error:', e);
+      try {
+        await sock.sendMessage(from, {
+          audio: finalBuffer,
+          mimetype: 'audio/mpeg',
+          fileName: fileName,
+          caption: `🎵 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success*`
+        });
+      } catch (sendErr) {
+        // Fallback: send as document
+        await sock.sendMessage(from, {
+          document: finalBuffer,
+          mimetype: 'audio/mpeg',
+          fileName: fileName,
+          caption: `🎵 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
+        });
+      }
+
+    } catch (error) {
+      console.error('Play error:', error);
+
+      // Fallback: Prince API
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/download/ytmp3';
+        const fallbackRes = await fetch(`${princeUrl}?apikey=prince&url=${encodeURIComponent(query)}`);
+        const fallbackData = await fallbackRes.json();
+
+        let fallbackAudio = fallbackData.result?.download_url || fallbackData.result?.url || 
+                            fallbackData.download_url || fallbackData.url;
+        let fallbackTitle = fallbackData.result?.title || fallbackData.title || 'YouTube Audio';
+
+        if (fallbackAudio) {
+          const aRes = await fetch(fallbackAudio);
+          const aBuf = Buffer.from(await aRes.arrayBuffer());
+          if (aBuf.length > 5000) {
+            return await sock.sendMessage(from, {
+              audio: aBuf,
+              mimetype: 'audio/mpeg',
+              fileName: `${fallbackTitle}.mp3`,
+              caption: `🎵 *${fallbackTitle}*\n✅ *Download Success (fallback)*`
+            });
+          }
+        }
+      } catch (fallbackErr) {
+        // Silent fail
+      }
+
+      // Fallback: Try yt-search with Prince API
+      try {
+        if (!isUrl) {
+          const yts = require('yt-search');
+          const searchResults = await yts(query);
+          if (searchResults && searchResults.videos && searchResults.videos.length > 0) {
+            const target = searchResults.videos[0];
+            const ytUrl = target.url;
+            
+            const princeUrl = 'https://api.princetechn.com/api/download/ytmp3';
+            const fallbackRes = await fetch(`${princeUrl}?apikey=prince&url=${encodeURIComponent(ytUrl)}`);
+            const fallbackData = await fallbackRes.json();
+            
+            let fallbackAudio = fallbackData.result?.download_url || fallbackData.result?.url || 
+                                fallbackData.download_url || fallbackData.url;
+            
+            if (fallbackAudio) {
+              const aRes = await fetch(fallbackAudio);
+              const aBuf = Buffer.from(await aRes.arrayBuffer());
+              if (aBuf.length > 5000) {
+                return await sock.sendMessage(from, {
+                  audio: aBuf,
+                  mimetype: 'audio/mpeg',
+                  fileName: `${target.title}.mp3`,
+                  caption: `🎵 *${target.title}*\n✅ *Download Success (search fallback)*`
+                });
+              }
+            }
+          }
+        }
+      } catch (ytErr) {}
+
       await sock.sendMessage(from, { 
-        text: `⚠️ API Error: ${e.message || 'Unknown error'}` 
+        text: `⚠️ Play Error: ${error.message || 'Unknown error'}\n\n💡 Try again or use a different song name.` 
       });
     }
   }
 });
+
 register({
   name: 'alive',
   category: 'MAIN',
