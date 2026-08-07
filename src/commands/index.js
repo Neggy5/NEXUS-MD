@@ -114,6 +114,7 @@ register({
     await sock.sendMessage(from, { text: `🏓 Pong! *${ms}ms*` }, { quoted: sent });
   },
 });
+
 register({
   name: 'xnxx',
   category: 'NSFW',
@@ -138,11 +139,11 @@ register({
         const response = await fetch(dlApi);
         const data = await response.json();
 
-        // Extracting the high-quality URL from the API response
-        const downloadUrl = data.result?.url || data.url;
+        // The downloader API usually returns the link in data.result.url or data.url
+        const downloadUrl = data.result?.url || data.url || (data.result && typeof data.result === 'string' ? data.result : null);
 
         if (!downloadUrl) {
-          return await sock.sendMessage(from, { text: "❌ Link extraction failed." });
+          return await sock.sendMessage(from, { text: "❌ Link extraction failed. The API might be down or the link is invalid." });
         }
 
         await sock.sendMessage(from, {
@@ -163,29 +164,113 @@ register({
         const response = await fetch(searchApi);
         const data = await response.json();
         
-        const results = data.result || data;
+        // --- FIXED LOGIC TO FIND THE ARRAY ---
+        let results = [];
+        if (Array.isArray(data)) {
+            results = data;
+        } else if (data.result && Array.isArray(data.result)) {
+            results = data.result;
+        } else if (data.data && Array.isArray(data.data)) {
+            results = data.data;
+        }
 
-        if (!results || results.length === 0) {
-          return await sock.sendMessage(from, { text: "❌ No results found." });
+        if (results.length === 0) {
+          return await sock.sendMessage(from, { text: "❌ No results found or API format changed." });
         }
 
         let message = `🔞 *XNXX SEARCH RESULTS*\n\n`;
         
+        // Safely use slice now that we know 'results' is an array
         results.slice(0, 10).forEach((vid, i) => {
-          message += `*${i + 1}.* ${vid.title}\n`;
-          message += `🔗 ${vid.link}\n\n`;
+          const title = vid.title || "No Title";
+          const link = vid.link || vid.url || "No Link";
+          message += `*${i + 1}.* ${title}\n`;
+          message += `🔗 ${link}\n\n`;
         });
 
         message += `💡 *Tip:* Copy a link and send \`${prefix}${command} <link>\` to download it.`;
 
         await sock.sendMessage(from, { text: message });
       } catch (e) {
+        console.error(e);
         await sock.sendMessage(from, { text: "⚠️ Search Error: " + e.message });
       }
     }
   },
 });
 
+register({
+  name: 'play',
+  category: 'DOWNLOADER',
+  description: 'Search and play audio from YouTube',
+  async execute({ sock, from, args, prefix, command }) {
+    // 1. Check if a song name is provided
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `*Usage:* ${prefix}${command} <song name>\n*Example:* ${prefix}${command} Faded Alan Walker` 
+      });
+    }
+
+    const query = args.join(" ");
+
+    try {
+      // 2. Initial Notification
+      await sock.sendMessage(from, { text: `🎧 Searching for: *${query}*...` });
+
+      // 3. Step 1: Search YouTube for the video link
+      const searchApi = `https://omegatech-api.dixonomega.tech/api/search/ytsearch?query=${encodeURIComponent(query)}`;
+      const searchRes = await fetch(searchApi);
+      const searchData = await searchRes.json();
+
+      // Find results array (using the same "sniffer" logic from before)
+      let results = [];
+      if (Array.isArray(searchData)) results = searchData;
+      else if (searchData.result && Array.isArray(searchData.result)) results = searchData.result;
+      else if (searchData.data && Array.isArray(searchData.data)) results = searchData.data;
+
+      if (results.length === 0) {
+        return await sock.sendMessage(from, { text: "❌ No results found for that song." });
+      }
+
+      // Get the first result
+      const firstResult = results[0];
+      const videoUrl = firstResult.url || firstResult.link;
+      const title = firstResult.title || "YouTube Audio";
+      const thumb = firstResult.thumbnail || firstResult.image;
+
+      // 4. Step 2: Download Audio using Prince API
+      await sock.sendMessage(from, { text: `📥 Downloading: *${title}*...` });
+
+      const dlApi = `https://api.princetechn.com/api/download/ytmp3?apikey=prince&url=${encodeURIComponent(videoUrl)}`;
+      const dlRes = await fetch(dlApi);
+      const dlData = await dlRes.json();
+
+      // Adjust based on the API's actual response structure
+      const audioUrl = dlData.result?.download_url || dlData.result?.url || dlData.url;
+
+      if (!audioUrl) {
+        return await sock.sendMessage(from, { text: "❌ Failed to download the audio. Try again later." });
+      }
+
+      // 5. Send Thumbnail with Details (Optional but looks professional)
+      await sock.sendMessage(from, {
+        image: { url: thumb },
+        caption: `🎵 *NEXUS-MD PLAYER*\n\n📌 *Title:* ${title}\n🔗 *Link:* ${videoUrl}\n\n_Sending audio file now..._`
+      });
+
+      // 6. Send the actual Audio file
+      await sock.sendMessage(from, {
+        audio: { url: audioUrl },
+        mimetype: 'audio/mpeg',
+        fileName: `${title}.mp3`
+      }, { quoted: null }); // quoted: null makes it appear as a fresh message
+
+    } catch (e) {
+      console.error(e);
+      await sock.sendMessage(from, { text: "⚠️ Error: " + e.message });
+    }
+  },
+});
 register({
   name: 'alive',
   category: 'MAIN',
