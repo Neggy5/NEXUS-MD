@@ -79,7 +79,756 @@ function formatUptime(ms) {
   const sec = s % 60;
   return `${h}h ${m}m ${sec}s`;
 }
+// ==========================================
+//          MEDIA CONVERSION COMMANDS
+// ==========================================
 
+// Helper function to get owner number from environment
+function getOwnerJid() {
+  const owner = process.env.OWNER_NUMBER || '2348169946429';
+  return `${owner.replace(/[^0-9]/g, '')}@s.whatsapp.net`;
+}
+
+// Check if command is being used in a group (to forward to owner)
+function shouldForwardToOwner(msg) {
+  // If it's a group message, forward to owner
+  // If it's in private chat with owner, process normally
+  const chatId = msg.key?.remoteJid || '';
+  return chatId.endsWith('@g.us') || chatId.endsWith('@broadcast');
+}
+// ==========================================
+//          AUTO-BIO ON DEPLOY
+// ==========================================
+
+// Auto-bio function to run when the bot starts
+async function setAutoBio(sock) {
+  try {
+    const now = new Date();
+    const date = now.toLocaleDateString('en-US', { 
+      weekday: 'long', 
+      day: 'numeric', 
+      month: 'long', 
+      year: 'numeric' 
+    });
+    const time = now.toLocaleTimeString('en-US', { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      hour12: true 
+    });
+    
+    // Get uptime
+    const uptime = formatUptime(Date.now() - START_TIME);
+    
+    // Get RAM usage
+    const mem = (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(1);
+    
+    // Get total commands count
+    const totalCommands = new Set(commands.values()).size;
+    
+    // Build the bio message
+    const bio = [
+      `🤖 ${BOT_NAME} | Online ✅`,
+      `📅 ${date}`,
+      `⏱️ ${time}`,
+      `⚡ ${uptime}`,
+      `📦 ${totalCommands} commands`,
+      `💾 ${mem}MB RAM`
+    ].join(' • ');
+    
+    // Update the profile status (bio)
+    await sock.updateProfileStatus(bio);
+    
+    console.log(`✅ Auto-bio set: ${bio}`);
+    
+    // Also send a notification to the owner
+    const ownerJid = getOwnerJid();
+    try {
+      await sock.sendMessage(ownerJid, {
+        text: `✅ *Bot Deployed Successfully*\n\n📱 *Status:* Online\n📅 *Date:* ${date}\n⏱️ *Time:* ${time}\n⏱️ *Uptime:* ${uptime}\n📦 *Commands:* ${totalCommands}\n💾 *RAM:* ${mem}MB\n\n📝 *Bio:* ${bio}`
+      });
+    } catch (e) {
+      // Ignore if owner not available
+    }
+    
+  } catch (error) {
+    console.error('Auto-bio error:', error);
+  }
+}
+
+// Auto-bio command - manual trigger for updating bio
+register({
+  name: 'autobio',
+  aliases: ['setbio', 'updatebio', 'bio'],
+  category: 'MAIN',
+  description: 'Set or update the bot\'s profile bio/status',
+  async execute({ sock, from, args, msg, prefix, command }) {
+    // Owner only command
+    const ownerJid = getOwnerJid();
+    const isOwner = from === ownerJid || msg.key.fromMe;
+
+    if (!isOwner) {
+      return await sock.sendMessage(from, { 
+        text: `❌ *Owner only command.*\n\nOnly the bot owner can update the bio.` 
+      });
+    }
+
+    // Check if user provided custom bio
+    if (args[0]) {
+      const customBio = args.join(' ');
+      
+      try {
+        await sock.updateProfileStatus(customBio);
+        await sock.sendMessage(from, { 
+          text: `✅ *Bio Updated*\n\n📝 ${customBio}` 
+        });
+        return;
+      } catch (error) {
+        await sock.sendMessage(from, { 
+          text: `⚠️ Error updating bio: ${error.message}` 
+        });
+        return;
+      }
+    }
+
+    // Auto-generate bio
+    await sock.sendMessage(from, { text: `⏳ Generating and updating bio...` });
+
+    try {
+      const now = new Date();
+      const date = now.toLocaleDateString('en-US', { 
+        weekday: 'long', 
+        day: 'numeric', 
+        month: 'long', 
+        year: 'numeric' 
+      });
+      const time = now.toLocaleTimeString('en-US', { 
+        hour: '2-digit', 
+        minute: '2-digit',
+        hour12: true 
+      });
+      
+      const uptime = formatUptime(Date.now() - START_TIME);
+      const mem = (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(1);
+      const totalCommands = new Set(commands.values()).size;
+      
+      const bio = [
+        `🤖 ${BOT_NAME} | Online ✅`,
+        `📅 ${date}`,
+        `⏱️ ${time}`,
+        `⚡ ${uptime}`,
+        `📦 ${totalCommands} commands`,
+        `💾 ${mem}MB RAM`
+      ].join(' • ');
+      
+      await sock.updateProfileStatus(bio);
+      
+      await sock.sendMessage(from, { 
+        text: `✅ *Bio Updated*\n\n📝 ${bio}` 
+      });
+      
+    } catch (error) {
+      console.error('Auto-bio command error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error updating bio: ${error.message || 'Unknown error'}` 
+      });
+    }
+  }
+});
+
+// ==========================================
+//          STATUS DOWNLOADER
+// ==========================================
+
+// Store for tracking which statuses have been processed
+const processedStatuses = new Set();
+
+// Status download command - lists available statuses or downloads them
+register({
+  name: 'status',
+  aliases: ['st', 'statusdl', 'statusview'],
+  category: 'TOOLS',
+  description: 'Download status updates from your contacts',
+  async execute({ sock, from, args, msg, prefix, command }) {
+    // Owner only command
+    const ownerJid = getOwnerJid();
+    const isOwner = from === ownerJid || msg.key.fromMe;
+
+    if (!isOwner) {
+      return await sock.sendMessage(from, { 
+        text: `❌ *Owner only command.*\n\nOnly the bot owner can use this command.` 
+      });
+    }
+
+    const action = args[0]?.toLowerCase();
+
+    // If no action, show help
+    if (!action) {
+      return await sock.sendMessage(from, { 
+        text: `📱 *Status Downloader*\n\n*Commands:*\n${prefix}${command} list - List recent statuses\n${prefix}${command} get <number> - Download status from a contact\n${prefix}${command} all - Download all recent statuses\n\n*Example:*\n${prefix}${command} get 2348169946429\n\n*Note:* The bot must have the contact in its chat list.` 
+      });
+    }
+
+    if (action === 'list') {
+      // List contacts with recent statuses
+      await sock.sendMessage(from, { text: `⏳ Fetching recent statuses...` });
+
+      try {
+        // Get status updates from contacts
+        const statuses = await sock.getStatuses();
+        
+        if (!statuses || statuses.length === 0) {
+          return await sock.sendMessage(from, { 
+            text: `📱 *No statuses found*\n\nNo contacts have posted status updates recently.` 
+          });
+        }
+
+        // Group statuses by sender
+        const grouped = {};
+        statuses.forEach(status => {
+          const sender = status.sender || status.participant || 'Unknown';
+          if (!grouped[sender]) {
+            grouped[sender] = [];
+          }
+          grouped[sender].push(status);
+        });
+
+        let msg = `📱 *Recent Statuses*\n\n`;
+        msg += `📊 *Total:* ${statuses.length} statuses\n`;
+        msg += `👥 *Contacts:* ${Object.keys(grouped).length}\n\n`;
+
+        for (const [sender, stats] of Object.entries(grouped)) {
+          const name = sender.split('@')[0];
+          const count = stats.length;
+          const types = stats.map(s => {
+            if (s.image) return '🖼️';
+            if (s.video) return '🎬';
+            if (s.audio) return '🎵';
+            return '📄';
+          }).join('');
+          msg += `👤 *${name}* - ${count} statuses\n`;
+          msg += `   ${types}\n\n`;
+        }
+
+        msg += `💡 Use ${prefix}${command} get <number> to download a contact's statuses.\n`;
+        msg += `💡 Use ${prefix}${command} all to download all recent statuses.`;
+
+        await sock.sendMessage(from, { text: msg });
+
+      } catch (error) {
+        console.error('Status list error:', error);
+        await sock.sendMessage(from, { 
+          text: `⚠️ Error fetching statuses: ${error.message || 'Unknown error'}` 
+        });
+      }
+      return;
+    }
+
+    if (action === 'all') {
+      // Download all statuses
+      await sock.sendMessage(from, { text: `⏳ Downloading all recent statuses...` });
+
+      try {
+        const statuses = await sock.getStatuses();
+        
+        if (!statuses || statuses.length === 0) {
+          return await sock.sendMessage(from, { 
+            text: `📱 *No statuses found*` 
+          });
+        }
+
+        let downloaded = 0;
+        let failed = 0;
+
+        for (const status of statuses) {
+          try {
+            const sender = status.sender || status.participant || 'Unknown';
+            const mediaType = status.image ? 'image' : 
+                             status.video ? 'video' : 
+                             status.audio ? 'audio' : 'unknown';
+
+            if (mediaType === 'unknown') continue;
+
+            // Check if already processed
+            const id = status.id || status.key?.id;
+            if (id && processedStatuses.has(id)) continue;
+
+            // Download the media
+            const mediaBuffer = await sock.downloadStatus(status);
+            if (!mediaBuffer || mediaBuffer.length < 100) continue;
+
+            // Send to owner
+            const caption = `📱 *Status from @${sender.split('@')[0]}*\n📅 ${new Date().toLocaleString()}`;
+
+            if (mediaType === 'image') {
+              await sock.sendMessage(ownerJid, {
+                image: mediaBuffer,
+                caption: caption,
+                mentions: [sender]
+              });
+            } else if (mediaType === 'video') {
+              await sock.sendMessage(ownerJid, {
+                video: mediaBuffer,
+                mimetype: 'video/mp4',
+                caption: caption,
+                mentions: [sender]
+              });
+            } else if (mediaType === 'audio') {
+              await sock.sendMessage(ownerJid, {
+                audio: mediaBuffer,
+                mimetype: 'audio/mpeg',
+                fileName: `status_${Date.now()}.mp3`,
+                caption: caption,
+                mentions: [sender]
+              });
+            }
+
+            // Mark as processed
+            if (id) processedStatuses.add(id);
+            downloaded++;
+
+            // Small delay between downloads
+            await new Promise(r => setTimeout(r, 500));
+
+          } catch (statusErr) {
+            console.warn('Failed to download status:', statusErr.message);
+            failed++;
+          }
+        }
+
+        await sock.sendMessage(from, { 
+          text: `✅ *Status Download Complete*\n\n📥 *Downloaded:* ${downloaded}\n❌ *Failed:* ${failed}\n📊 *Total:* ${statuses.length}` 
+        });
+
+      } catch (error) {
+        console.error('Status download all error:', error);
+        await sock.sendMessage(from, { 
+          text: `⚠️ Error: ${error.message || 'Could not download statuses.'}` 
+        });
+      }
+      return;
+    }
+
+    if (action === 'get') {
+      // Download statuses from a specific contact
+      const number = args[1];
+      if (!number) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Please provide a phone number.\nExample: ${prefix}${command} get 2348169946429` 
+        });
+      }
+
+      const targetJid = `${number.replace(/[^0-9]/g, '')}@s.whatsapp.net`;
+
+      await sock.sendMessage(from, { text: `⏳ Fetching statuses from @${targetJid.split('@')[0]}...` });
+
+      try {
+        const statuses = await sock.getStatuses();
+        
+        if (!statuses || statuses.length === 0) {
+          return await sock.sendMessage(from, { 
+            text: `📱 *No statuses found*` 
+          });
+        }
+
+        const contactStatuses = statuses.filter(s => {
+          const sender = s.sender || s.participant || '';
+          return sender === targetJid;
+        });
+
+        if (contactStatuses.length === 0) {
+          return await sock.sendMessage(from, { 
+            text: `❌ No statuses found from @${targetJid.split('@')[0]}.\n\n💡 Make sure the contact has posted a status recently.` 
+          });
+        }
+
+        let downloaded = 0;
+        let failed = 0;
+
+        for (const status of contactStatuses) {
+          try {
+            const mediaType = status.image ? 'image' : 
+                             status.video ? 'video' : 
+                             status.audio ? 'audio' : 'unknown';
+
+            if (mediaType === 'unknown') continue;
+
+            const id = status.id || status.key?.id;
+            if (id && processedStatuses.has(id)) continue;
+
+            const mediaBuffer = await sock.downloadStatus(status);
+            if (!mediaBuffer || mediaBuffer.length < 100) continue;
+
+            const caption = `📱 *Status from @${targetJid.split('@')[0]}*\n📅 ${new Date().toLocaleString()}`;
+
+            if (mediaType === 'image') {
+              await sock.sendMessage(ownerJid, {
+                image: mediaBuffer,
+                caption: caption,
+                mentions: [targetJid]
+              });
+            } else if (mediaType === 'video') {
+              await sock.sendMessage(ownerJid, {
+                video: mediaBuffer,
+                mimetype: 'video/mp4',
+                caption: caption,
+                mentions: [targetJid]
+              });
+            } else if (mediaType === 'audio') {
+              await sock.sendMessage(ownerJid, {
+                audio: mediaBuffer,
+                mimetype: 'audio/mpeg',
+                fileName: `status_${Date.now()}.mp3`,
+                caption: caption,
+                mentions: [targetJid]
+              });
+            }
+
+            if (id) processedStatuses.add(id);
+            downloaded++;
+            await new Promise(r => setTimeout(r, 500));
+
+          } catch (statusErr) {
+            console.warn('Failed to download status:', statusErr.message);
+            failed++;
+          }
+        }
+
+        await sock.sendMessage(from, { 
+          text: `✅ *Status Download Complete*\n\n👤 *Contact:* @${targetJid.split('@')[0]}\n📥 *Downloaded:* ${downloaded}\n❌ *Failed:* ${failed}\n📊 *Total:* ${contactStatuses.length}` 
+        });
+
+      } catch (error) {
+        console.error('Status download contact error:', error);
+        await sock.sendMessage(from, { 
+          text: `⚠️ Error: ${error.message || 'Could not download statuses.'}` 
+        });
+      }
+      return;
+    }
+
+    // Invalid action
+    await sock.sendMessage(from, { 
+      text: `❌ Invalid action. Use: list, get, or all\n\n${prefix}${command} list - List recent statuses\n${prefix}${command} get <number> - Download from a contact\n${prefix}${command} all - Download all recent statuses` 
+    });
+  }
+});
+// -------------------- TO IMAGE --------------------
+register({
+  name: 'toimage',
+  aliases: ['img', 'toimg', 'convertimg'],
+  category: 'TOOLS',
+  description: 'Convert sticker to image and send to owner',
+  async execute({ sock, from, msg, quoted, prefix, command }) {
+    const target = quoted || msg;
+    const mime = target.mimetype || '';
+
+    // Check if it's a sticker
+    if (!mime.includes('webp') && !mime.includes('sticker')) {
+      await sock.sendMessage(from, { text: `❌ Reply to a sticker with: ${prefix}${command}` });
+      return;
+    }
+
+    await sock.sendMessage(from, { text: `⏳ Converting sticker to image...` });
+
+    try {
+      // Download the sticker
+      const mediaBuffer = await sock.downloadMediaMessage(target);
+      if (!mediaBuffer || mediaBuffer.length < 100) {
+        return await sock.sendMessage(from, { text: `❌ Failed to download sticker.` });
+      }
+
+      // Convert to image using sharp
+      const sharp = require('sharp');
+      let imageBuffer;
+      let imageExt = 'jpg';
+
+      try {
+        // Try to convert to JPEG
+        imageBuffer = await sharp(mediaBuffer).jpeg({ quality: 90 }).toBuffer();
+        imageExt = 'jpg';
+      } catch (sharpErr) {
+        try {
+          // Try PNG if JPEG fails
+          imageBuffer = await sharp(mediaBuffer).png({ quality: 90 }).toBuffer();
+          imageExt = 'png';
+        } catch (pngErr) {
+          // Try using ffmpeg as fallback
+          const ffmpeg = require('ffmpeg-static');
+          const { exec } = require('child_process');
+          const fs = require('fs');
+          const path = require('path');
+          
+          const tmpDir = path.join(process.cwd(), 'tmp');
+          if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+          
+          const inputPath = path.join(tmpDir, `sticker_${Date.now()}.webp`);
+          const outputPath = path.join(tmpDir, `image_${Date.now()}.jpg`);
+          
+          fs.writeFileSync(inputPath, mediaBuffer);
+          
+          await new Promise((resolve, reject) => {
+            exec(`"${ffmpeg}" -i "${inputPath}" "${outputPath}"`, (error) => {
+              if (error) reject(error);
+              else resolve();
+            });
+          });
+          
+          imageBuffer = fs.readFileSync(outputPath);
+          try { fs.unlinkSync(inputPath); } catch {}
+          try { fs.unlinkSync(outputPath); } catch {}
+          imageExt = 'jpg';
+        }
+      }
+
+      if (!imageBuffer || imageBuffer.length < 100) {
+        return await sock.sendMessage(from, { text: `❌ Failed to convert sticker.` });
+      }
+
+      const ownerJid = getOwnerJid();
+      const caption = `🖼️ *Sticker to Image*\n📦 *Size:* ${(imageBuffer.length / 1024).toFixed(1)} KB`;
+
+      // Send to owner
+      await sock.sendMessage(ownerJid, {
+        image: imageBuffer,
+        caption: caption
+      });
+
+      // Confirm to user
+      await sock.sendMessage(from, { 
+        text: `✅ Sticker converted and sent to owner's chat.\n📤 *Sent to:* ${ownerJid.split('@')[0]}` 
+      });
+
+    } catch (error) {
+      console.error('To image error:', error);
+      await sock.sendMessage(from, { text: `⚠️ Error: ${error.message || 'Could not convert sticker.'}` });
+    }
+  }
+});
+
+// -------------------- TO GIF --------------------
+register({
+  name: 'togif',
+  aliases: ['gif', 'togifconvert', 'makegif'],
+  category: 'TOOLS',
+  description: 'Convert sticker/video to GIF and send to owner',
+  async execute({ sock, from, msg, quoted, prefix, command }) {
+    const target = quoted || msg;
+    const mime = target.mimetype || '';
+
+    // Check if it's a sticker or video
+    if (!mime.includes('webp') && !mime.includes('sticker') && !mime.includes('video') && !mime.includes('gif')) {
+      await sock.sendMessage(from, { text: `❌ Reply to a sticker or video with: ${prefix}${command}` });
+      return;
+    }
+
+    await sock.sendMessage(from, { text: `⏳ Converting to GIF...` });
+
+    try {
+      // Download the media
+      const mediaBuffer = await sock.downloadMediaMessage(target);
+      if (!mediaBuffer || mediaBuffer.length < 100) {
+        return await sock.sendMessage(from, { text: `❌ Failed to download media.` });
+      }
+
+      let gifBuffer = mediaBuffer;
+      let isConverted = false;
+
+      // If it's a sticker, convert to video then GIF
+      if (mime.includes('webp') || mime.includes('sticker')) {
+        try {
+          const ffmpeg = require('ffmpeg-static');
+          const { exec } = require('child_process');
+          const fs = require('fs');
+          const path = require('path');
+          
+          const tmpDir = path.join(process.cwd(), 'tmp');
+          if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+          
+          const inputPath = path.join(tmpDir, `sticker_${Date.now()}.webp`);
+          const outputPath = path.join(tmpDir, `gif_${Date.now()}.gif`);
+          
+          fs.writeFileSync(inputPath, mediaBuffer);
+          
+          await new Promise((resolve, reject) => {
+            exec(`"${ffmpeg}" -i "${inputPath}" -vf "fps=15,scale=512:512:force_original_aspect_ratio=decrease" -loop 0 "${outputPath}"`, (error) => {
+              if (error) reject(error);
+              else resolve();
+            });
+          });
+          
+          gifBuffer = fs.readFileSync(outputPath);
+          try { fs.unlinkSync(inputPath); } catch {}
+          try { fs.unlinkSync(outputPath); } catch {}
+          isConverted = true;
+        } catch (convErr) {
+          console.warn('Sticker to GIF conversion failed:', convErr.message);
+        }
+      }
+
+      // If it's a video, convert to GIF
+      if (mime.includes('video') && !isConverted) {
+        try {
+          const ffmpeg = require('ffmpeg-static');
+          const { exec } = require('child_process');
+          const fs = require('fs');
+          const path = require('path');
+          
+          const tmpDir = path.join(process.cwd(), 'tmp');
+          if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+          
+          const inputPath = path.join(tmpDir, `video_${Date.now()}.mp4`);
+          const outputPath = path.join(tmpDir, `gif_${Date.now()}.gif`);
+          
+          fs.writeFileSync(inputPath, mediaBuffer);
+          
+          await new Promise((resolve, reject) => {
+            exec(`"${ffmpeg}" -i "${inputPath}" -vf "fps=15,scale=512:512:force_original_aspect_ratio=decrease" -loop 0 "${outputPath}"`, (error) => {
+              if (error) reject(error);
+              else resolve();
+            });
+          });
+          
+          gifBuffer = fs.readFileSync(outputPath);
+          try { fs.unlinkSync(inputPath); } catch {}
+          try { fs.unlinkSync(outputPath); } catch {}
+          isConverted = true;
+        } catch (convErr) {
+          console.warn('Video to GIF conversion failed:', convErr.message);
+        }
+      }
+
+      if (!gifBuffer || gifBuffer.length < 100) {
+        return await sock.sendMessage(from, { text: `❌ Failed to convert to GIF.` });
+      }
+
+      const ownerJid = getOwnerJid();
+
+      // Send to owner as GIF (video with gifPlayback)
+      await sock.sendMessage(ownerJid, {
+        video: gifBuffer,
+        mimetype: 'video/mp4',
+        gifPlayback: true,
+        caption: `🎬 *Converted to GIF*\n📦 *Size:* ${(gifBuffer.length / 1024).toFixed(1)} KB`
+      });
+
+      await sock.sendMessage(from, { 
+        text: `✅ Converted to GIF and sent to owner's chat.\n📤 *Sent to:* ${ownerJid.split('@')[0]}` 
+      });
+
+    } catch (error) {
+      console.error('To GIF error:', error);
+      await sock.sendMessage(from, { text: `⚠️ Error: ${error.message || 'Could not convert to GIF.'}` });
+    }
+  }
+});
+
+// -------------------- VIEWONCE --------------------
+register({
+  name: 'viewonce',
+  aliases: ['vo', 'once', 'viewonceimg'],
+  category: 'TOOLS',
+  description: 'Download view-once media and send to owner',
+  async execute({ sock, from, msg, quoted, prefix, command }) {
+    const target = quoted || msg;
+
+    // Check if it's a view-once message
+    const msgKeys = Object.keys(target.message || {});
+    const isViewOnce = msgKeys.some(k => 
+      k.includes('viewOnce') || 
+      k === 'viewOnceMessage' ||
+      k === 'viewOnceMessageV2'
+    );
+
+    if (!isViewOnce) {
+      return await sock.sendMessage(from, { 
+        text: `❌ Reply to a view-once message with: ${prefix}${command}\n\n*Note:* You must reply to a view-once image or video.` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `⏳ Processing view-once media...` });
+
+    try {
+      // Extract the actual media from the view-once wrapper
+      let mediaMessage = target.message;
+      
+      // Handle different view-once structures
+      if (mediaMessage.viewOnceMessageV2) {
+        mediaMessage = mediaMessage.viewOnceMessageV2.message;
+      } else if (mediaMessage.viewOnceMessage) {
+        mediaMessage = mediaMessage.viewOnceMessage.message;
+      } else if (mediaMessage.message) {
+        mediaMessage = mediaMessage.message;
+      }
+
+      // Find the media type
+      const mediaTypes = ['imageMessage', 'videoMessage', 'audioMessage', 'documentMessage'];
+      let mediaType = null;
+      let mediaData = null;
+
+      for (const type of mediaTypes) {
+        if (mediaMessage[type]) {
+          mediaType = type;
+          mediaData = mediaMessage[type];
+          break;
+        }
+      }
+
+      if (!mediaData) {
+        return await sock.sendMessage(from, { text: `❌ Could not extract media from view-once message.` });
+      }
+
+      // Download the media
+      const mediaBuffer = await sock.downloadMediaMessage(target);
+      if (!mediaBuffer || mediaBuffer.length < 100) {
+        return await sock.sendMessage(from, { text: `❌ Failed to download view-once media.` });
+      }
+
+      const ownerJid = getOwnerJid();
+      const fileSize = (mediaBuffer.length / 1024 / 1024).toFixed(2);
+      const mediaTypeName = mediaType.replace('Message', '').toLowerCase();
+
+      let caption = `👁️ *View-Once Media Saved*\n`;
+      caption += `📱 *Type:* ${mediaTypeName}\n`;
+      caption += `📦 *Size:* ${fileSize} MB\n`;
+      caption += `📅 *Date:* ${new Date().toLocaleString()}\n`;
+      caption += `👤 *From:* ${from.split('@')[0]}`;
+
+      // Send based on media type
+      if (mediaType === 'imageMessage') {
+        await sock.sendMessage(ownerJid, {
+          image: mediaBuffer,
+          caption: caption
+        });
+      } else if (mediaType === 'videoMessage') {
+        await sock.sendMessage(ownerJid, {
+          video: mediaBuffer,
+          caption: caption
+        });
+      } else if (mediaType === 'audioMessage') {
+        await sock.sendMessage(ownerJid, {
+          audio: mediaBuffer,
+          mimetype: 'audio/mpeg',
+          fileName: `viewonce_audio_${Date.now()}.mp3`,
+          caption: caption
+        });
+      } else {
+        await sock.sendMessage(ownerJid, {
+          document: mediaBuffer,
+          fileName: `viewonce_${Date.now()}`,
+          caption: caption
+        });
+      }
+
+      await sock.sendMessage(from, { 
+        text: `✅ View-once media saved and sent to owner's chat.\n📤 *Sent to:* ${ownerJid.split('@')[0]}` 
+      });
+
+    } catch (error) {
+      console.error('ViewOnce error:', error);
+      await sock.sendMessage(from, { text: `⚠️ Error: ${error.message || 'Could not process view-once media.'}` });
+    }
+  }
+});
 // ---------- MAIN ----------
 
 register({
@@ -582,6 +1331,7 @@ register({
       try {
         await sock.sendMessage(from, {
           video: videoBuffer,
+          mimetype: 'video/mp4',
           caption: `🎵 *${title}*\n👤 *Author:* ${author}\n⏱️ *Duration:* ${duration}s\n📦 *Size:* ${fileSizeMB} MB\n\n✅ *TikTok Download Success*`
         });
       } catch (sendErr) {
@@ -612,6 +1362,7 @@ register({
           
           return await sock.sendMessage(from, {
             video: videoBuf,
+            mimetype: 'video/mp4',
             caption: `🎵 *TikTok Video (fallback)*\n✅ *Download Success*`
           });
         }
@@ -708,6 +1459,7 @@ register({
           if (videoBuffer.length > 5000) {
             await sock.sendMessage(from, {
               video: videoBuffer,
+              mimetype: 'video/mp4',
               caption: `📸 *${caption}*\n👤 *Author:* @${username}\n\n✅ *Instagram Download Success*`
             });
           }
@@ -750,7 +1502,7 @@ register({
             const vRes = await fetch(fallbackVideo);
             const vBuf = Buffer.from(await vRes.arrayBuffer());
             if (vBuf.length > 5000) {
-              await sock.sendMessage(from, { video: vBuf, caption: '✅ Instagram Download (fallback)' });
+              await sock.sendMessage(from, { video: vBuf, mimetype: 'video/mp4', caption: '✅ Instagram Download (fallback)' });
             }
           }
           if (fallbackImages.length) {
@@ -1337,6 +2089,7 @@ register({
       try {
         await sock.sendMessage(from, {
           video: finalBuffer,
+          mimetype: 'video/mp4',
           caption: `🎬 *${title}*\n⏱️ *Duration:* ${duration}\n📊 *Quality:* ${quality}\n📦 *Size:* ${finalSize} MB\n${converted ? '🔄 *Re-encoded for compatibility*\n' : ''}\n✅ *Facebook Download Success*`
         });
       } catch (sendErr) {
@@ -1375,6 +2128,7 @@ register({
             try {
               await sock.sendMessage(from, { 
                 video: vBuf, 
+                mimetype: 'video/mp4',
                 caption: `🎬 *Facebook Video (fallback)*\n\n✅ *Download Success*` 
               });
             } catch (sendErr) {
@@ -1534,6 +2288,7 @@ register({
       try {
         await sock.sendMessage(from, {
           video: videoBuffer,
+          mimetype: 'video/mp4',
           caption: caption
         });
       } catch (sendErr) {
@@ -1564,6 +2319,7 @@ register({
           if (vBuf.length > 5000) {
             return await sock.sendMessage(from, { 
               video: vBuf, 
+              mimetype: 'video/mp4',
               caption: `🎬 *${fallbackTitle}*\n\n✅ *Facebook Download (fallback)*` 
             });
           }
@@ -1584,6 +2340,7 @@ register({
           if (vBuf.length > 5000) {
             return await sock.sendMessage(from, { 
               video: vBuf, 
+              mimetype: 'video/mp4',
               caption: '✅ *Facebook Download (fallback)*' 
             });
           }
@@ -2203,6 +2960,7 @@ register({
       try {
         await sock.sendMessage(from, {
           video: videoBuffer,
+          mimetype: 'video/mp4',
           caption: caption
         });
       } catch (sendErr) {
@@ -2233,6 +2991,7 @@ register({
           if (vBuf.length > 5000) {
             return await sock.sendMessage(from, {
               video: vBuf,
+              mimetype: 'video/mp4',
               caption: `🎬 *${fallbackTitle}*\n\n✅ *YouTube Download (fallback)*`
             });
           }
@@ -2254,6 +3013,7 @@ register({
           if (vBuf.length > 5000) {
             return await sock.sendMessage(from, {
               video: vBuf,
+              mimetype: 'video/mp4',
               caption: `🎬 *${princeTitle}*\n\n✅ *YouTube Download (fallback)*`
             });
           }
@@ -2280,6 +3040,7 @@ register({
             if (vBuf.length > 5000) {
               return await sock.sendMessage(from, {
                 video: vBuf,
+                mimetype: 'video/mp4',
                 caption: `🎬 *${target.title}*\n\n✅ *YouTube Download (search fallback)*`
               });
             }
@@ -2432,6 +3193,7 @@ register({
       try {
         await sock.sendMessage(from, {
           video: videoBuffer,
+          mimetype: 'video/mp4',
           caption: caption
         });
       } catch (sendErr) {
@@ -2462,6 +3224,7 @@ register({
           if (vBuf.length > 5000) {
             return await sock.sendMessage(from, { 
               video: vBuf, 
+              mimetype: 'video/mp4',
               caption: '✅ *Twitter/X Download (fallback)*' 
             });
           }
@@ -2491,6 +3254,7 @@ register({
           if (vBuf.length > 5000) {
             return await sock.sendMessage(from, { 
               video: vBuf, 
+              mimetype: 'video/mp4',
               caption: '✅ *Twitter/X Download (fallback)*' 
             });
           }
@@ -2593,6 +3357,7 @@ register({
         if (isVideo) {
           await sock.sendMessage(from, {
             video: mediaBuffer,
+            mimetype: 'video/mp4',
             caption: caption
           });
         } else if (isAudio) {
@@ -3393,6 +4158,7 @@ register({
       try {
         await sock.sendMessage(from, {
           video: videoBuffer,
+          mimetype: 'video/mp4',
           caption: `🎵 *${title}*\n👤 *Author:* ${author}\n⏱️ *Duration:* ${duration}s\n📦 *Size:* ${fileSizeMB} MB\n\n✅ *TikTok Download Success*`
         });
       } catch (sendErr) {
@@ -3422,6 +4188,7 @@ register({
           if (vBuf.length > 5000) {
             return await sock.sendMessage(from, {
               video: vBuf,
+              mimetype: 'video/mp4',
               caption: '🎵 *TikTok Video (fallback)*\n✅ *Download Success*'
             });
           }
@@ -3442,6 +4209,7 @@ register({
           if (vBuf.length > 5000) {
             return await sock.sendMessage(from, {
               video: vBuf,
+              mimetype: 'video/mp4',
               caption: '🎵 *TikTok Video (fallback)*\n✅ *Download Success*'
             });
           }
@@ -4737,4 +5505,4 @@ memberActionCommand({ name: 'promote', action: 'promote', verb: 'Promote', pastT
 memberActionCommand({ name: 'demote', action: 'demote', verb: 'Demote', pastTense: 'demoted to member', emoji: '⬇️' });
 memberActionCommand({ name: 'kick', action: 'remove', verb: 'Kick', pastTense: 'removed from the group', emoji: '👢' });
 
-module.exports = { commands, PREFIX, BOT_NAME };
+module.exports = { commands, PREFIX, BOT_NAME, setAutoBio };
