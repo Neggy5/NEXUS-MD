@@ -37,92 +37,114 @@ async function isSenderAdmin(sock, jid, sender) {
  * this does not require a command prefix — it watches all group traffic for
  * deletions, edits, stickers, mass-mentions, and (optionally) reacts to it.
  */
+const LINK_RE = /chat\.whatsapp\.com\/[A-Za-z0-9]+/i;
+
 async function handleModeration(sock, m, sessionId) {
   try {
     const msg = m.messages?.[0];
     if (!msg || !msg.message) return;
+    // Skip history-sync replay (m.type === 'append') — only act on live messages,
+    // otherwise a fresh connect floods reactions/deletes across old chat history.
+    if (m.type && m.type !== 'notify') return;
 
     const from = msg.key.remoteJid;
     const isGroup = from.endsWith('@g.us');
-    if (!isGroup) return; // all of these features are group-scoped
-
     const sender = msg.key.fromMe ? sock.user?.id || from : msg.key.participant || from;
-    const settings = getGroupSettings(from);
     const proto = msg.message.protocolMessage;
 
-    // --- Deleted-for-everyone message (REVOKE) ---
-    if (proto && proto.type === 0) {
-      if (settings.antidelete) {
-        const cached = getCachedMessage(proto.key.id);
-        if (cached && cached.jid === from) {
-          await sock.sendMessage(from, {
-            text:
-              `🗑️ *Antidelete*\n` +
-              `👤 @${bareNumber(cached.sender)} deleted:\n\n` +
-              `${cached.text || '[media message]'}`,
-            mentions: [cached.sender],
-          });
+    if (isGroup) {
+      const settings = getGroupSettings(from);
+
+      // --- Deleted-for-everyone message (REVOKE) ---
+      if (proto && proto.type === 0) {
+        if (settings.antidelete) {
+          const cached = getCachedMessage(proto.key.id);
+          if (cached && cached.jid === from) {
+            await sock.sendMessage(from, {
+              text:
+                `🗑️ *Antidelete*\n` +
+                `👤 @${bareNumber(cached.sender)} deleted:\n\n` +
+                `${cached.text || '[media message]'}`,
+              mentions: [cached.sender],
+            });
+          }
+        }
+        return;
+      }
+
+      // --- Edited message ---
+      if (proto && proto.type === 14 && proto.editedMessage) {
+        if (settings.antiedit) {
+          const cached = getCachedMessage(proto.key.id);
+          const newText = extractText(proto.editedMessage) || '[media]';
+          if (cached && cached.jid === from) {
+            await sock.sendMessage(from, {
+              text:
+                `✏️ *Antiedit*\n` +
+                `👤 @${bareNumber(cached.sender)} edited a message:\n\n` +
+                `*Before:* ${cached.text || '[media]'}\n` +
+                `*After:* ${newText}`,
+              mentions: [cached.sender],
+            });
+            cacheMessage(proto.key.id, { ...cached, text: newText });
+          }
+        }
+        return;
+      }
+
+      // Cache real (non-protocol) messages so a later delete/edit has something to show.
+      const text = extractText(msg.message);
+      if (text || msg.message.imageMessage || msg.message.videoMessage || msg.message.stickerMessage) {
+        cacheMessage(msg.key.id, { jid: from, sender, text, timestamp: Date.now() });
+      }
+
+      if (msg.key.fromMe) return; // never moderate the linked account's own messages
+
+      // --- Antisticker ---
+      if (settings.antisticker && msg.message.stickerMessage) {
+        const admin = await isSenderAdmin(sock, from, sender);
+        if (!admin) {
+          await sock.sendMessage(from, { delete: msg.key }).catch(() => {});
+        }
+        return;
+      }
+
+      // --- Antigroupmention (mass @mention spam) ---
+      if (settings.antigroupmention) {
+        const mentioned = msg.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
+        if (mentioned.length >= 5) {
+          const admin = await isSenderAdmin(sock, from, sender);
+          if (!admin) {
+            await sock.sendMessage(from, { delete: msg.key }).catch(() => {});
+            await sock.sendMessage(from, {
+              text: `⚠️ @${bareNumber(sender)}'s mass-mention message was removed.`,
+              mentions: [sender],
+            });
+            return;
+          }
         }
       }
-      return;
-    }
 
-    // --- Edited message ---
-    if (proto && proto.type === 14 && proto.editedMessage) {
-      if (settings.antiedit) {
-        const cached = getCachedMessage(proto.key.id);
-        const newText = extractText(proto.editedMessage) || '[media]';
-        if (cached && cached.jid === from) {
-          await sock.sendMessage(from, {
-            text:
-              `✏️ *Antiedit*\n` +
-              `👤 @${bareNumber(cached.sender)} edited a message:\n\n` +
-              `*Before:* ${cached.text || '[media]'}\n` +
-              `*After:* ${newText}`,
-            mentions: [cached.sender],
-          });
-          cacheMessage(proto.key.id, { ...cached, text: newText });
-        }
-      }
-      return;
-    }
-
-    // Cache real (non-protocol) messages so a later delete/edit has something to show.
-    const text = extractText(msg.message);
-    if (text || msg.message.imageMessage || msg.message.videoMessage || msg.message.stickerMessage) {
-      cacheMessage(msg.key.id, { jid: from, sender, text, timestamp: Date.now() });
-    }
-
-    if (msg.key.fromMe) return; // never moderate the linked account's own messages
-
-    // --- Auto-react ---
-    if (settings.autoreact) {
-      const emoji = REACT_EMOJIS[Math.floor(Math.random() * REACT_EMOJIS.length)];
-      sock.sendMessage(from, { react: { text: emoji, key: msg.key } }).catch(() => {});
-    }
-
-    // --- Antisticker ---
-    if (settings.antisticker && msg.message.stickerMessage) {
-      const admin = await isSenderAdmin(sock, from, sender);
-      if (!admin) {
-        await sock.sendMessage(from, { delete: msg.key }).catch(() => {});
-      }
-      return;
-    }
-
-    // --- Antigroupmention (mass @mention spam) ---
-    if (settings.antigroupmention) {
-      const mentioned = msg.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
-      if (mentioned.length >= 5) {
+      // --- Antilink (WhatsApp group invite links) ---
+      if (settings.antilink && LINK_RE.test(text)) {
         const admin = await isSenderAdmin(sock, from, sender);
         if (!admin) {
           await sock.sendMessage(from, { delete: msg.key }).catch(() => {});
           await sock.sendMessage(from, {
-            text: `⚠️ @${bareNumber(sender)}'s mass-mention message was removed.`,
+            text: `🔗 @${bareNumber(sender)}'s message contained a group invite link and was removed.`,
             mentions: [sender],
           });
+          return;
         }
       }
+    }
+
+    if (msg.key.fromMe) return; // never react to the linked account's own messages
+
+    // --- Auto-react (owner-level toggle — applies in DMs and groups alike) ---
+    if (getGlobalSetting(sessionId, 'autoreact')) {
+      const emoji = REACT_EMOJIS[Math.floor(Math.random() * REACT_EMOJIS.length)];
+      sock.sendMessage(from, { react: { text: emoji, key: msg.key } }).catch(() => {});
     }
   } catch (err) {
     console.error(`[moderation:${sessionId}] error:`, err.message);
@@ -134,7 +156,7 @@ async function handleModeration(sock, m, sessionId) {
  */
 function registerAnticall(sock, sessionId) {
   sock.ev.on('call', async (calls) => {
-    if (!getGlobalSetting('anticall')) return;
+    if (!getGlobalSetting(sessionId, 'anticall')) return;
     for (const call of calls) {
       if (call.status !== 'offer') continue;
       try {

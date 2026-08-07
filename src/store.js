@@ -29,7 +29,7 @@ const GROUP_DEFAULTS = {
   antiedit: true,
   antisticker: false,
   antigroupmention: false,
-  autoreact: false,
+  antilink: false,
 };
 
 function getGroupSettings(jid) {
@@ -43,13 +43,49 @@ function setGroupSetting(jid, key, value) {
   persist();
 }
 
-// ---- Global (account-level) toggles, e.g. anticall ----
-const globalSettings = { anticall: ANTICALL_ENABLED };
-function getGlobalSetting(key) {
-  return globalSettings[key];
+// ---- Account-level (per-session) toggles, e.g. mode, anticall, autoreact ----
+// Keyed by sessionId so each linked account has its own settings — this used
+// to be a single flat object shared by every user, which broke multi-user use
+// and also crashed `.mode` (called as getGlobalSetting(sessionId, key) against
+// a function that only took one argument).
+const ACCOUNT_SETTINGS_FILE = path.join(DATA_DIR, 'account-settings.json');
+let accountSettings = {};
+try {
+  accountSettings = JSON.parse(fs.readFileSync(ACCOUNT_SETTINGS_FILE, 'utf8'));
+} catch {
+  accountSettings = {};
 }
-function setGlobalSetting(key, value) {
-  globalSettings[key] = value;
+
+let accountSaveTimer = null;
+function persistAccount() {
+  clearTimeout(accountSaveTimer);
+  accountSaveTimer = setTimeout(() => {
+    fs.writeFile(ACCOUNT_SETTINGS_FILE, JSON.stringify(accountSettings, null, 2), (err) => {
+      if (err) console.error('account settings save failed:', err.message);
+    });
+  }, 250);
+}
+
+const ACCOUNT_DEFAULTS = {
+  mode: 'public',
+  anticall: ANTICALL_ENABLED,
+  autoreact: false,
+};
+
+function getAccountSettings(sessionId) {
+  if (!accountSettings[sessionId]) accountSettings[sessionId] = { ...ACCOUNT_DEFAULTS };
+  return accountSettings[sessionId];
+}
+
+function getGlobalSetting(sessionId, key) {
+  const s = getAccountSettings(sessionId);
+  return key ? s[key] : s;
+}
+
+function setGlobalSetting(sessionId, key, value) {
+  const s = getAccountSettings(sessionId);
+  s[key] = value;
+  persistAccount();
 }
 
 // ---- Short-lived cache of recent messages, keyed by message id ----

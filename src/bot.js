@@ -1,5 +1,6 @@
 const { commands, PREFIX } = require('./commands');
 const { checkForceJoin } = require('./forceJoin');
+const { getGlobalSetting } = require('./store');
 
 function extractText(message) {
   if (!message) return '';
@@ -37,6 +38,9 @@ async function handleMessage(sock, m, sessionId) {
 
     // The linked account itself (you) is always treated as the owner — never gated.
     if (!msg.key.fromMe) {
+      // Private mode: only the owner (fromMe) can trigger commands at all.
+      if (getGlobalSetting(sessionId, 'mode') === 'private') return;
+
       const allowed = await checkForceJoin(sock, from, sender);
       if (!allowed) return;
     }
