@@ -114,6 +114,77 @@ register({
     await sock.sendMessage(from, { text: `🏓 Pong! *${ms}ms*` }, { quoted: sent });
   },
 });
+register({
+  name: 'xnxx',
+  category: 'NSFW',
+  description: 'Search and Download XNXX videos',
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `*NEXUS-MD XNXX Tool*\n\n*1. Search:* ${prefix}${command} Naruto\n*2. Download:* ${prefix}${command} <video_link>` 
+      });
+    }
+
+    const input = args.join(" ");
+    const isUrl = input.match(/https?:\/\/(www\.)?xnxx\.(com|health)\/[^\s]+/gi);
+
+    // --- CASE 1: DOWNLOAD VIDEO ---
+    if (isUrl) {
+      const videoUrl = isUrl[0];
+      try {
+        await sock.sendMessage(from, { text: '📥 *Downloading video...* Please wait.' });
+
+        const dlApi = `https://api.princetechn.com/api/download/xnxxdl?apikey=prince&url=${encodeURIComponent(videoUrl)}`;
+        const response = await fetch(dlApi);
+        const data = await response.json();
+
+        // Extracting the high-quality URL from the API response
+        const downloadUrl = data.result?.url || data.url;
+
+        if (!downloadUrl) {
+          return await sock.sendMessage(from, { text: "❌ Link extraction failed." });
+        }
+
+        await sock.sendMessage(from, {
+          video: { url: downloadUrl },
+          caption: `✅ *Downloaded Successfully*`,
+          mimetype: 'video/mp4'
+        });
+      } catch (e) {
+        await sock.sendMessage(from, { text: "⚠️ Download Error: " + e.message });
+      }
+
+    // --- CASE 2: SEARCH VIDEOS ---
+    } else {
+      try {
+        await sock.sendMessage(from, { text: `🔍 Searching for: *${input}*...` });
+
+        const searchApi = `https://omegatech-api.dixonomega.tech/api/Porn/Xnxx?action=search&query=${encodeURIComponent(input)}`;
+        const response = await fetch(searchApi);
+        const data = await response.json();
+        
+        const results = data.result || data;
+
+        if (!results || results.length === 0) {
+          return await sock.sendMessage(from, { text: "❌ No results found." });
+        }
+
+        let message = `🔞 *XNXX SEARCH RESULTS*\n\n`;
+        
+        results.slice(0, 10).forEach((vid, i) => {
+          message += `*${i + 1}.* ${vid.title}\n`;
+          message += `🔗 ${vid.link}\n\n`;
+        });
+
+        message += `💡 *Tip:* Copy a link and send \`${prefix}${command} <link>\` to download it.`;
+
+        await sock.sendMessage(from, { text: message });
+      } catch (e) {
+        await sock.sendMessage(from, { text: "⚠️ Search Error: " + e.message });
+      }
+    }
+  },
+});
 
 register({
   name: 'alive',
