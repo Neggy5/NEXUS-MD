@@ -678,7 +678,7 @@ register({
   async execute({ sock, from, args, prefix, command }) {
     if (!args[0]) {
       return await sock.sendMessage(from, { 
-        text: `🐦 *Twitter/X Downloader*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://twitter.com/user/status/xxxxx\n\n*Supports:*\n• Videos\n• Images\n• GIFs\n\n*Examples:*\n${prefix}${command} https://x.com/user/status/xxxxx\n${prefix}${command} https://twitter.com/user/status/xxxxx` 
+        text: `🐦 *Twitter/X Downloader*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://twitter.com/user/status/xxxxx` 
       });
     }
 
@@ -693,7 +693,7 @@ register({
     await sock.sendMessage(from, { text: `⏳ Processing Twitter/X media...` });
 
     try {
-      // Primary: David Cyril API - Twitter/X Downloader
+      // Fixed: Use correct endpoint without /api/
       const response = await fetch(
         `https://apis.davidcyril.name.ng/download/twitterx?url=${encodeURIComponent(url)}`,
         {
@@ -709,20 +709,17 @@ register({
 
       const data = await response.json();
 
-      // Extract media URLs and metadata
       let videoUrl = data.result?.video || data.result?.download_url || data.result?.url || 
                      data.video || data.download_url || data.url;
       let imageUrls = data.result?.images || data.images || data.result?.urls || data.urls || [];
       let title = data.result?.title || data.title || data.caption || 'Twitter Post';
       let username = data.result?.username || data.username || data.author || 'Unknown';
 
-      // Handle single image case
       if (!videoUrl && !imageUrls.length) {
         const singleImage = data.result?.image || data.result?.url || data.image || data.url;
         if (singleImage) imageUrls = [singleImage];
       }
 
-      // Fallback: try to find any URL in the response
       if (!videoUrl && !imageUrls.length) {
         const jsonString = JSON.stringify(data);
         const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp4|mov|jpg|jpeg|png|gif|webp)/gi);
@@ -741,7 +738,6 @@ register({
         text: `🐦 *${title}*\n👤 *Author:* @${username}\n\n⬇️ *Downloading media...*` 
       });
 
-      // Send video if available
       if (videoUrl) {
         const videoResponse = await fetch(videoUrl, {
           headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
@@ -768,7 +764,6 @@ register({
         }
       }
 
-      // Send images (up to 10)
       if (imageUrls.length > 0) {
         const maxImages = Math.min(imageUrls.length, 10);
         for (let i = 0; i < maxImages; i++) {
@@ -821,32 +816,13 @@ register({
         }
       } catch (fallbackErr) {}
 
-      // Fallback: Try alternative endpoint
-      try {
-        const altUrl = 'https://apis.davidcyril.name.ng/download/xdl';
-        const altRes = await fetch(`${altUrl}?url=${encodeURIComponent(url)}`);
-        const altData = await altRes.json();
-
-        let altVideo = altData.result?.video || altData.video || altData.download_url || altData.url;
-
-        if (altVideo) {
-          const vRes = await fetch(altVideo);
-          const vBuf = Buffer.from(await vRes.arrayBuffer());
-          if (vBuf.length > 5000) {
-            return await sock.sendMessage(from, { 
-              video: vBuf, 
-              caption: '✅ Twitter/X Download (fallback)' 
-            });
-          }
-        }
-      } catch (altErr) {}
-
       await sock.sendMessage(from, { 
         text: `⚠️ Download Error: ${error.message || 'Could not download media.'}\n\n💡 Make sure the URL is valid and the post is public.` 
       });
     }
   }
 });
+
 register({
   name: 'ytmp42',
   aliases: ['ytv2', 'youtubemp4', 'ytdl2'],
@@ -855,7 +831,7 @@ register({
   async execute({ sock, from, args, prefix, command }) {
     if (!args[0]) {
       return await sock.sendMessage(from, { 
-        text: `🎬 *YouTube MP4 Downloader*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://youtu.be/xxxxx\n\n*Supports:*\n• YouTube videos\n• YouTube Shorts\n• High quality MP4\n\n*Examples:*\n${prefix}${command} https://www.youtube.com/watch?v=xxxxx\n${prefix}${command} https://youtu.be/xxxxx\n${prefix}${command} https://www.youtube.com/shorts/xxxxx` 
+        text: `🎬 *YouTube MP4 Downloader*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://youtu.be/xxxxx` 
       });
     }
 
@@ -870,7 +846,7 @@ register({
     await sock.sendMessage(from, { text: `⏳ Processing YouTube video...` });
 
     try {
-      // Primary: David Cyril API - YouTube MP4 Downloader
+      // Fixed: Use correct endpoint
       const response = await fetch(
         `https://apis.davidcyril.name.ng/download/youtube-mp4?url=${encodeURIComponent(url)}`,
         {
@@ -886,14 +862,12 @@ register({
 
       const data = await response.json();
 
-      // Extract video URL and metadata
       let videoUrl = data.result?.download_url || data.result?.url || data.result?.video || 
                      data.download_url || data.url || data.video;
       let title = data.result?.title || data.title || 'YouTube Video';
       let thumbnail = data.result?.thumbnail || data.thumbnail || data.cover || null;
       let duration = data.result?.duration || data.duration || 'N/A';
       let quality = data.result?.quality || data.quality || 'High';
-      let size = data.result?.size || data.size || 'N/A';
 
       if (!videoUrl) {
         const jsonString = JSON.stringify(data);
@@ -905,21 +879,19 @@ register({
         throw new Error("Could not extract video URL from API response.");
       }
 
-      // Send thumbnail if available
       if (thumbnail) {
         try {
           await sock.sendMessage(from, {
             image: { url: thumbnail },
-            caption: `🎬 *${title}*\n⏱️ *Duration:* ${duration}\n📊 *Quality:* ${quality}\n📦 *Size:* ${size}\n\n⬇️ *Downloading video...*`
+            caption: `🎬 *${title}*\n⏱️ *Duration:* ${duration}\n📊 *Quality:* ${quality}\n\n⬇️ *Downloading video...*`
           });
         } catch (thumbErr) {
           await sock.sendMessage(from, { 
-            text: `🎬 *${title}*\n⏱️ *Duration:* ${duration}\n📊 *Quality:* ${quality}\n📦 *Size:* ${size}\n\n⬇️ *Downloading video...*` 
+            text: `🎬 *${title}*\n⏱️ *Duration:* ${duration}\n📊 *Quality:* ${quality}\n\n⬇️ *Downloading video...*` 
           });
         }
       }
 
-      // Download the video
       const videoResponse = await fetch(videoUrl, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -938,45 +910,22 @@ register({
 
       const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
 
-      // Send the video
       try {
         await sock.sendMessage(from, {
           video: videoBuffer,
           caption: `🎬 *${title}*\n⏱️ *Duration:* ${duration}\n📊 *Quality:* ${quality}\n📦 *Size:* ${fileSizeMB} MB\n\n✅ *YouTube Download Success*`
         });
       } catch (sendErr) {
-        // Fallback: send as document
         await sock.sendMessage(from, {
           document: videoBuffer,
           mimetype: 'video/mp4',
           fileName: `${title.replace(/[^a-zA-Z0-9]/g, '_')}.mp4`,
-          caption: `🎬 *${title}*\n📦 *Size:* ${fileSizeMB} MB\n\n✅ *YouTube Download Success*`
+          caption: `🎬 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
         });
       }
 
     } catch (error) {
       console.error('YouTube MP4 download error:', error);
-
-      // Fallback: Try alternative YouTube endpoint
-      try {
-        const altUrl = 'https://apis.davidcyril.name.ng/download/ytmp4';
-        const altRes = await fetch(`${altUrl}?url=${encodeURIComponent(url)}`);
-        const altData = await altRes.json();
-
-        let altVideo = altData.result?.download_url || altData.result?.url || altData.download_url || altData.url;
-        let altTitle = altData.result?.title || altData.title || 'YouTube Video';
-
-        if (altVideo) {
-          const vRes = await fetch(altVideo);
-          const vBuf = Buffer.from(await vRes.arrayBuffer());
-          if (vBuf.length > 5000) {
-            return await sock.sendMessage(from, {
-              video: vBuf,
-              caption: `🎬 *${altTitle}*\n\n✅ *YouTube Download (fallback)*`
-            });
-          }
-        }
-      } catch (altErr) {}
 
       // Fallback: Prince API
       try {
@@ -998,37 +947,6 @@ register({
           }
         }
       } catch (princeErr) {}
-
-      // Fallback: Try YouTube search and download with yt-search
-      try {
-        const searchQuery = url.includes('youtu.be') || url.includes('youtube.com') ? 
-          url : (args[0] || '');
-        
-        if (searchQuery) {
-          const yts = require('yt-search');
-          const searchResults = await yts(searchQuery);
-          
-          if (searchResults && searchResults.videos && searchResults.videos.length > 0) {
-            const target = searchResults.videos[0];
-            const ytUrl = target.url;
-            
-            const altPrince = await fetch(`https://api.princetechn.com/api/download/ytmp4?apikey=prince&url=${encodeURIComponent(ytUrl)}`);
-            const altPrinceData = await altPrince.json();
-            let princeFallback = altPrinceData.result?.download_url || altPrinceData.result?.url || altPrinceData.download_url || altPrinceData.url;
-            
-            if (princeFallback) {
-              const vRes = await fetch(princeFallback);
-              const vBuf = Buffer.from(await vRes.arrayBuffer());
-              if (vBuf.length > 5000) {
-                return await sock.sendMessage(from, {
-                  video: vBuf,
-                  caption: `🎬 *${target.title}*\n\n✅ *YouTube Download (search fallback)*`
-                });
-              }
-            }
-          }
-        }
-      } catch (ytErr) {}
 
       await sock.sendMessage(from, { 
         text: `⚠️ Download Error: ${error.message || 'Could not download video.'}\n\n💡 Make sure the URL is valid and the video is available.` 
@@ -2209,7 +2127,7 @@ register({
     await sock.sendMessage(from, { text: `⏳ Searching for "${query}"...` });
 
     try {
-      // Try the correct endpoint pattern
+      // Use the working endpoint: /nkiri/search
       const response = await fetch(
         `https://apis.davidcyril.name.ng/nkiri/search?query=${encodeURIComponent(query)}`,
         {
@@ -2220,9 +2138,52 @@ register({
       );
 
       if (!response.ok) {
-        // Fallback to the API endpoint
-        const fallbackRes = await fetch(
-          `https://apis.davidcyril.name.ng/api/movies/nkiri-search?query=${encodeURIComponent(query)}`,
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Extract results
+      let results = data.result || data.results || data.data || [];
+
+      if (!results || results.length === 0) {
+        return await sock.sendMessage(from, { 
+          text: `❌ No movies found for "${query}".\n\n💡 Try a different title or check your spelling.` 
+        });
+      }
+
+      const maxResults = Math.min(results.length, 10);
+      let msg = `🎬 *Nkiri Movie Results for:* "${query}"\n\n`;
+      msg += `📌 *Found:* ${results.length} movies\n\n`;
+
+      results.slice(0, maxResults).forEach((movie, index) => {
+        const title = movie.title || movie.name || 'Unknown';
+        const year = movie.year || 'N/A';
+        const url = movie.url || movie.link || '';
+        const quality = movie.quality || 'N/A';
+
+        msg += `${index + 1}. *${title}* (${year})\n`;
+        if (quality !== 'N/A') msg += `   📊 *Quality:* ${quality}\n`;
+        if (url) msg += `   🔗 ${url}\n`;
+        msg += `\n`;
+      });
+
+      if (results.length > 10) {
+        msg += `\n*Showing 10 of ${results.length} results.*\n`;
+        msg += `💡 Use a more specific search for better results.`;
+      }
+
+      msg += `\n💡 Use ${prefix}nkiri-dl <url> to get download links.`;
+
+      await sock.sendMessage(from, { text: msg });
+
+    } catch (error) {
+      console.error('Nkiri search error:', error);
+
+      // Try alternative: /api/nkiri/search
+      try {
+        const altRes = await fetch(
+          `https://apis.davidcyril.name.ng/api/nkiri/search?query=${encodeURIComponent(query)}`,
           {
             headers: {
               'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -2230,21 +2191,27 @@ register({
           }
         );
 
-        if (!fallbackRes.ok) {
-          throw new Error(`API returned ${fallbackRes.status}`);
+        if (altRes.ok) {
+          const altData = await altRes.json();
+          let altResults = altData.result || altData.results || altData.data || [];
+
+          if (altResults.length > 0) {
+            let msg = `🎬 *Nkiri Movie Results (alt)*\n\n`;
+            altResults.slice(0, 8).forEach((movie, index) => {
+              const title = movie.title || movie.name || 'Unknown';
+              const year = movie.year || 'N/A';
+              const url = movie.url || movie.link || '';
+              msg += `${index + 1}. *${title}* (${year})\n`;
+              if (url) msg += `   🔗 ${url}\n`;
+              msg += `\n`;
+            });
+            msg += `\n💡 Use ${prefix}nkiri-dl <url> to get download links.`;
+            return await sock.sendMessage(from, { text: msg });
+          }
         }
+      } catch (altErr) {}
 
-        const fallbackData = await fallbackRes.json();
-        return await sendSearchResults(from, fallbackData, query, prefix);
-      }
-
-      const data = await response.json();
-      await sendSearchResults(from, data, query, prefix);
-
-    } catch (error) {
-      console.error('Nkiri search error:', error);
-
-      // Try Google search fallback
+      // Fallback: Google search
       try {
         const googleRes = await fetch(
           `https://api.princetechn.com/api/search/google?apikey=prince&query=${encodeURIComponent(`site:nkiri.com ${query}`)}`
@@ -2323,7 +2290,7 @@ register({
     await sock.sendMessage(from, { text: `⏳ Fetching download links...` });
 
     try {
-      // CORRECT WORKING ENDPOINT
+      // Use the working endpoint: /nkiri/download
       const response = await fetch(
         `https://apis.davidcyril.name.ng/nkiri/download?url=${encodeURIComponent(url)}`,
         {
@@ -2349,7 +2316,6 @@ register({
       let quality = data.quality || 'N/A';
 
       if (!downloadLinks || downloadLinks.length === 0) {
-        // Check for direct links
         const direct = data.download_link || data.download_url || data.url;
         if (direct) {
           if (typeof direct === 'string') {
@@ -2401,6 +2367,33 @@ register({
 
     } catch (error) {
       console.error('Nkiri download error:', error);
+
+      // Try alternative: /api/nkiri/download
+      try {
+        const altRes = await fetch(
+          `https://apis.davidcyril.name.ng/api/nkiri/download?url=${encodeURIComponent(url)}`
+        );
+
+        if (altRes.ok) {
+          const altData = await altRes.json();
+          let altLinks = altData.download_links || altData.links || [];
+          let altTitle = altData.title || 'Movie';
+
+          if (altLinks.length > 0) {
+            let msg = `🎬 *${altTitle}*\n\n📥 *Download Links:*\n\n`;
+            altLinks.slice(0, 6).forEach((link, index) => {
+              const label = link.label || link.quality || `Link ${index + 1}`;
+              const linkUrl = link.url || link.link || link;
+              if (linkUrl && linkUrl.startsWith('http')) {
+                msg += `${index + 1}. *${label}*\n`;
+                msg += `   🔗 ${linkUrl}\n\n`;
+              }
+            });
+            return await sock.sendMessage(from, { text: msg });
+          }
+        }
+      } catch (altErr) {}
+
       await sock.sendMessage(from, { 
         text: `⚠️ Download Error: ${error.message || 'Could not fetch download links.'}\n\n💡 Make sure the URL is valid.` 
       });
