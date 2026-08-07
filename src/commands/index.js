@@ -1,8 +1,28 @@
 const { Sticker, StickerTypes } = require('wa-sticker-formatter');
+const { MENU_IMAGE_URL } = require('../config');
+const { getGroupSettings, setGroupSetting, getGlobalSetting, setGlobalSetting } = require('../store');
+const { isSenderAdmin } = require('../moderation');
 
 const BOT_NAME = 'NEXUS-MD';
 const PREFIX = process.env.PREFIX || '.';
 const START_TIME = Date.now();
+
+// Category display order + icons for the menu.
+const CATEGORY_STYLE = {
+  MAIN: '🏠',
+  INFO: 'ℹ️',
+  TOOLS: '🛠️',
+  'GROUP-SECURITY': '🛡️',
+};
+const CATEGORY_ORDER = ['MAIN', 'INFO', 'TOOLS', 'GROUP-SECURITY'];
+
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 5) return 'Still up? 🌙';
+  if (h < 12) return 'Good morning ☀️';
+  if (h < 18) return 'Good afternoon 🌤️';
+  return 'Good evening 🌆';
+}
 
 /**
  * Each command: { name, aliases, category, description, execute(ctx) }
@@ -30,35 +50,51 @@ register({
   aliases: ['help', 'commands'],
   category: 'MAIN',
   description: 'Show the command menu',
-  async execute({ sock, from, sender }) {
+  async execute({ sock, from, sender, isGroup }) {
     const byCategory = {};
     for (const cmd of new Set(commands.values())) {
       byCategory[cmd.category] = byCategory[cmd.category] || [];
       if (!byCategory[cmd.category].includes(cmd.name)) byCategory[cmd.category].push(cmd.name);
     }
 
+    const totalCommands = new Set(commands.values()).size;
     const uptime = formatUptime(Date.now() - START_TIME);
     const name = sender.split('@')[0];
+    const date = new Date().toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long' });
 
     let menu = '';
-    menu += `╭───「 *${BOT_NAME}* 」\n`;
-    menu += `│ 👤 User    : wa:${name}\n`;
-    menu += `│ ⏱ Uptime  : ${uptime}\n`;
-    menu += `│ ⚙ Prefix  : ${PREFIX}\n`;
-    menu += `╰────────────────\n\n`;
+    menu += `╭━━━⟪ 🤖 *${BOT_NAME}* ⟫━━━╮\n`;
+    menu += `┃ ${greeting()}, *${name}*\n`;
+    menu += `┃ 📅 ${date}\n`;
+    menu += `┃ ⏱️ Uptime   : ${uptime}\n`;
+    menu += `┃ ⚙️ Prefix   : [ ${PREFIX} ]\n`;
+    menu += `┃ 📦 Commands : ${totalCommands}\n`;
+    menu += `┃ 🌐 Mode     : ${isGroup ? 'Group' : 'Private'}\n`;
+    menu += `╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n`;
 
-    for (const [cat, names] of Object.entries(byCategory)) {
-      menu += `╭─「 *${cat}* 」\n`;
+    const orderedCats = [
+      ...CATEGORY_ORDER.filter((c) => byCategory[c]),
+      ...Object.keys(byCategory).filter((c) => !CATEGORY_ORDER.includes(c)),
+    ];
+
+    for (const cat of orderedCats) {
+      const names = byCategory[cat];
+      const icon = CATEGORY_STYLE[cat] || '📁';
+      menu += `┌─❰ ${icon} *${cat}* ❱\n`;
       names.forEach((n, i) => {
         const last = i === names.length - 1;
-        menu += `│ ${last ? '╰' : '├'}✦ ${PREFIX}${n}\n`;
+        menu += `│ ${last ? '└' : '├'}⟢ ${PREFIX}${n}\n`;
       });
-      menu += `╰────────────────\n\n`;
+      menu += `└──────────────\n\n`;
     }
 
-    menu += `_Powered by ${BOT_NAME} · Baileys_`;
+    menu += `✨ _Powered by ${BOT_NAME} ·Lord zuko_`;
 
-    await sock.sendMessage(from, { text: menu });
+    if (MENU_IMAGE_URL) {
+      await sock.sendMessage(from, { image: { url: MENU_IMAGE_URL }, caption: menu });
+    } else {
+      await sock.sendMessage(from, { text: menu });
+    }
   },
 });
 
@@ -157,6 +193,134 @@ register({
 
     const stickerBuffer = await sticker.toBuffer();
     await sock.sendMessage(from, { sticker: stickerBuffer });
+  },
+});
+
+// ---------- GROUP-SECURITY ----------
+
+async function requireAdminOrOwner({ sock, from, sender, isGroup, msg }) {
+  if (msg.key.fromMe) return true; // the linked account itself
+  if (!isGroup) {
+    await sock.sendMessage(from, { text: '⚠️ This setting only applies inside groups.' });
+    return false;
+  }
+  const admin = await isSenderAdmin(sock, from, sender);
+  if (!admin) {
+    await sock.sendMessage(from, { text: '❌ Only group admins or the bot owner can change this.' });
+    return false;
+  }
+  return true;
+}
+
+function toggleCommand({ name, aliases, settingKey, label, emoji }) {
+  register({
+    name,
+    aliases,
+    category: 'GROUP-SECURITY',
+    description: `${label} — on/off`,
+    async execute(ctx) {
+      const { sock, from, args, isGroup } = ctx;
+      const ok = await requireAdminOrOwner(ctx);
+      if (!ok) return;
+
+      const state = getGroupSettings(from);
+      const arg = (args[0] || '').toLowerCase();
+
+      if (!arg || !['on', 'off'].includes(arg)) {
+        await sock.sendMessage(from, {
+          text: `${emoji} *${label}* is currently *${state[settingKey] ? 'ON' : 'OFF'}*.\nUse: ${PREFIX}${name} on | ${PREFIX}${name} off`,
+        });
+        return;
+      }
+
+      const enabled = arg === 'on';
+      setGroupSetting(from, settingKey, enabled);
+      await sock.sendMessage(from, {
+        text: `${emoji} *${label}* turned *${enabled ? 'ON ✅' : 'OFF ❌'}* for this group.`,
+      });
+    },
+  });
+}
+
+toggleCommand({
+  name: 'antidelete',
+  settingKey: 'antidelete',
+  label: 'Antidelete',
+  emoji: '🗑️',
+});
+
+toggleCommand({
+  name: 'antiedit',
+  settingKey: 'antiedit',
+  label: 'Antiedit',
+  emoji: '✏️',
+});
+
+toggleCommand({
+  name: 'antisticker',
+  settingKey: 'antisticker',
+  label: 'Antisticker',
+  emoji: '🎴',
+});
+
+toggleCommand({
+  name: 'antigroupmention',
+  aliases: ['antitag'],
+  settingKey: 'antigroupmention',
+  label: 'Antigroupmention',
+  emoji: '🚫',
+});
+
+toggleCommand({
+  name: 'autoreact',
+  settingKey: 'autoreact',
+  label: 'Auto-react',
+  emoji: '😄',
+});
+
+register({
+  name: 'anticall',
+  category: 'GROUP-SECURITY',
+  description: 'Auto-reject incoming calls to this bot (owner only) — on/off',
+  async execute({ sock, from, args, msg }) {
+    if (!msg.key.fromMe) {
+      await sock.sendMessage(from, { text: '❌ Owner only — link the account and send this command from it.' });
+      return;
+    }
+    const arg = (args[0] || '').toLowerCase();
+    if (!arg || !['on', 'off'].includes(arg)) {
+      await sock.sendMessage(from, {
+        text: `📵 *Anticall* is currently *${getGlobalSetting('anticall') ? 'ON' : 'OFF'}*.\nUse: ${PREFIX}anticall on | ${PREFIX}anticall off`,
+      });
+      return;
+    }
+    setGlobalSetting('anticall', arg === 'on');
+    await sock.sendMessage(from, { text: `📵 *Anticall* turned *${arg === 'on' ? 'ON ✅' : 'OFF ❌'}*.` });
+  },
+});
+
+register({
+  name: 'security',
+  aliases: ['groupsettings'],
+  category: 'GROUP-SECURITY',
+  description: 'View all group-security toggles at a glance',
+  async execute({ sock, from, isGroup }) {
+    if (!isGroup) {
+      await sock.sendMessage(from, { text: '⚠️ This only applies inside groups.' });
+      return;
+    }
+    const s = getGroupSettings(from);
+    const flag = (v) => (v ? '✅ ON' : '❌ OFF');
+    const text =
+      `🛡️ *Group Security Status*\n\n` +
+      `🗑️ Antidelete        : ${flag(s.antidelete)}\n` +
+      `✏️ Antiedit          : ${flag(s.antiedit)}\n` +
+      `🎴 Antisticker       : ${flag(s.antisticker)}\n` +
+      `🚫 Antigroupmention  : ${flag(s.antigroupmention)}\n` +
+      `😄 Auto-react        : ${flag(s.autoreact)}\n` +
+      `📵 Anticall (global) : ${flag(getGlobalSetting('anticall'))}\n\n` +
+      `_Toggle any of these with ${PREFIX}<name> on/off_`;
+    await sock.sendMessage(from, { text });
   },
 });
 
