@@ -126,10 +126,35 @@ async function startSession(phoneRaw) {
   });
 }
 
+/**
+ * Called once on process boot. Scans the sessions directory for accounts that
+ * were already linked before this restart (e.g. from a redeploy) and reconnects
+ * them automatically — no pairing code is requested since useMultiFileAuthState
+ * finds valid saved creds and marks the socket as already registered.
+ */
+async function resumeAllSessions() {
+  if (!fs.existsSync(SESSIONS_DIR)) return;
+
+  const entries = fs.readdirSync(SESSIONS_DIR, { withFileTypes: true });
+  const folders = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+
+  if (folders.length === 0) return;
+  console.log(`Resuming ${folders.length} previously linked session(s)…`);
+
+  for (const sessionId of folders) {
+    try {
+      await startSession(sessionId);
+      console.log(`[session:${sessionId}] resumed ✅`);
+    } catch (err) {
+      console.log(`[session:${sessionId}] resume failed: ${err.message}`);
+    }
+  }
+}
+
 function getStatus(sessionId) {
   const s = sessions.get(sessionId);
   if (!s) return { status: 'none' };
   return { status: s.status, phone: s.phone };
 }
 
-module.exports = { startSession, getSession, getStatus, listSessions, sanitizeId };
+module.exports = { startSession, getSession, getStatus, listSessions, sanitizeId, resumeAllSessions };

@@ -15,22 +15,31 @@ function extractText(message) {
 async function handleMessage(sock, m, sessionId) {
   try {
     const msg = m.messages?.[0];
-    if (!msg || !msg.message || msg.key.fromMe) return;
+    if (!msg || !msg.message) return;
 
     const from = msg.key.remoteJid;
-    const sender = msg.key.participant || msg.key.remoteJid;
+    const sender = msg.key.fromMe
+      ? sock.user?.id || from
+      : msg.key.participant || from;
     const isGroup = from.endsWith('@g.us');
 
     const text = extractText(msg.message).trim();
     if (!text.startsWith(PREFIX)) return;
+
+    // We only reach here if the text starts with the command prefix — the bot's own
+    // replies never do, so allowing fromMe through can't create a self-reply loop.
+    // This is what makes ".ping" etc. work from "Message yourself".
 
     const [rawCmd, ...args] = text.slice(PREFIX.length).trim().split(/\s+/);
     const cmdName = rawCmd.toLowerCase();
     const command = commands.get(cmdName);
     if (!command) return;
 
-    const allowed = await checkForceJoin(sock, from, sender);
-    if (!allowed) return;
+    // The linked account itself (you) is always treated as the owner — never gated.
+    if (!msg.key.fromMe) {
+      const allowed = await checkForceJoin(sock, from, sender);
+      if (!allowed) return;
+    }
 
     const quotedCtx = msg.message.extendedTextMessage?.contextInfo;
     const quoted = quotedCtx?.quotedMessage
