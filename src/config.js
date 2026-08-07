@@ -5,7 +5,13 @@ const CHANNEL_LINK = process.env.FORCE_CHANNEL_LINK || 'https://whatsapp.com/cha
 const GROUP_LINK = process.env.FORCE_GROUP_LINK || 'https://chat.whatsapp.com/GMHYNRFJhyiFhM5h5tE0FX?s=cl&p=a&ilr=0';
 
 // FORCE_JOIN=false disables the group-membership gate entirely (channel auto-follow still happens).
-const FORCE_JOIN_ENABLED = process.env.FORCE_JOIN !== 'false';
+const FORCE_JOIN_ENABLED = process.env.FORCE_JOIN !== 'true';
+
+// Optional image shown as the menu's thumbnail. Leave unset to fall back to a text-only menu.
+const MENU_IMAGE_URL = process.env.MENU_IMAGE_URL || 'https://files.catbox.moe/bev5nx.png';
+
+// Automatic call rejection — can also be flipped at runtime by the owner with .anticall on/off
+const ANTICALL_ENABLED = process.env.ANTICALL !== 'false';
 
 function extractChannelCode(link) {
   const m = link.match(/channel\/([A-Za-z0-9]+)/);
@@ -21,6 +27,8 @@ module.exports = {
   CHANNEL_LINK,
   GROUP_LINK,
   FORCE_JOIN_ENABLED,
+  MENU_IMAGE_URL,
+  ANTICALL_ENABLED,
   CHANNEL_CODE: extractChannelCode(CHANNEL_LINK),
   GROUP_CODE: extractGroupCode(GROUP_LINK),
 };

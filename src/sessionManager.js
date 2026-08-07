@@ -11,6 +11,7 @@ const { Boom } = require('@hapi/boom');
 const logger = require('./logger');
 const { handleMessage } = require('./bot');
 const { autoJoin } = require('./forceJoin');
+const { handleModeration, registerAnticall } = require('./moderation');
 
 const SESSIONS_DIR = path.join(__dirname, '..', 'sessions');
 if (!fs.existsSync(SESSIONS_DIR)) fs.mkdirSync(SESSIONS_DIR, { recursive: true });
@@ -77,6 +78,7 @@ async function startSession(phoneRaw) {
 
       if (connection === 'open') {
         sessionEntry.status = 'connected';
+        sessionEntry.connectedAt = Date.now();
         console.log(`[session:${sessionId}] connected ✅`);
         autoJoin(sock, sessionId).catch((e) =>
           console.log(`[session:${sessionId}] autoJoin error:`, e.message)
@@ -99,7 +101,11 @@ async function startSession(phoneRaw) {
       }
     });
 
-    sock.ev.on('messages.upsert', (m) => handleMessage(sock, m, sessionId));
+    sock.ev.on('messages.upsert', (m) => {
+      handleMessage(sock, m, sessionId);
+      handleModeration(sock, m, sessionId);
+    });
+    registerAnticall(sock, sessionId);
 
     // Request the pairing code once the socket is ready, if not already registered.
     (async () => {
@@ -154,7 +160,7 @@ async function resumeAllSessions() {
 function getStatus(sessionId) {
   const s = sessions.get(sessionId);
   if (!s) return { status: 'none' };
-  return { status: s.status, phone: s.phone };
+  return { status: s.status, phone: s.phone, connectedAt: s.connectedAt || null };
 }
 
 module.exports = { startSession, getSession, getStatus, listSessions, sanitizeId, resumeAllSessions };
