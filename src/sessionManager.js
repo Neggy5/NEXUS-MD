@@ -12,6 +12,7 @@ const logger = require('./logger');
 const { handleMessage } = require('./bot');
 const { autoJoin } = require('./forceJoin');
 const { handleModeration, registerAnticall } = require('./moderation');
+const { setAutoBio } = require('./commands');
 
 const SESSIONS_DIR = path.join(__dirname, '..', 'sessions');
 if (!fs.existsSync(SESSIONS_DIR)) fs.mkdirSync(SESSIONS_DIR, { recursive: true });
@@ -82,6 +83,9 @@ async function startSession(phoneRaw) {
         console.log(`[session:${sessionId}] connected ✅`);
         autoJoin(sock, sessionId).catch((e) =>
           console.log(`[session:${sessionId}] autoJoin error:`, e.message)
+        );
+        setAutoBio(sock).catch((e) =>
+          console.log(`[session:${sessionId}] auto-bio error:`, e.message)
         );
       }
 

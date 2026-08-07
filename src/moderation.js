@@ -37,7 +37,7 @@ async function isSenderAdmin(sock, jid, sender) {
  * this does not require a command prefix — it watches all group traffic for
  * deletions, edits, stickers, mass-mentions, and (optionally) reacts to it.
  */
-const LINK_RE = /chat\.whatsapp\.com\/[A-Za-z0-9]+/i;
+const LINK_RE = /(https?:\/\/|www\.)\S+|\b[A-Za-z0-9-]+\.(com|net|org|io|me|link|gg|xyz|co|app|dev|tv|to|gl|be|ly)\b\S*/i;
 
 async function handleModeration(sock, m, sessionId) {
   try {
@@ -125,13 +125,13 @@ async function handleModeration(sock, m, sessionId) {
         }
       }
 
-      // --- Antilink (WhatsApp group invite links) ---
+      // --- Antilink (any URL, not just WhatsApp invite links) ---
       if (settings.antilink && LINK_RE.test(text)) {
         const admin = await isSenderAdmin(sock, from, sender);
         if (!admin) {
           await sock.sendMessage(from, { delete: msg.key }).catch(() => {});
           await sock.sendMessage(from, {
-            text: `🔗 @${bareNumber(sender)}'s message contained a group invite link and was removed.`,
+            text: `🔗 @${bareNumber(sender)}'s message contained a link and was removed.`,
             mentions: [sender],
           });
           return;

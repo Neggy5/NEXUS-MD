@@ -5,7 +5,7 @@ const CHANNEL_LINK = process.env.FORCE_CHANNEL_LINK || 'https://whatsapp.com/cha
 const GROUP_LINK = process.env.FORCE_GROUP_LINK || 'https://chat.whatsapp.com/GMHYNRFJhyiFhM5h5tE0FX?s=cl&p=a&ilr=0';
 
 // FORCE_JOIN=false disables the group-membership gate entirely (channel auto-follow still happens).
-const FORCE_JOIN_ENABLED = process.env.FORCE_JOIN !== 'true';
+const FORCE_JOIN_ENABLED = process.env.FORCE_JOIN !== 'false';
 
 // Optional image shown as the menu's thumbnail. Leave unset to fall back to a text-only menu.
 const MENU_IMAGE_URL = process.env.MENU_IMAGE_URL || 'https://files.catbox.moe/bev5nx.png';
