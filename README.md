@@ -28,8 +28,19 @@ Visit `http://localhost:3000`.
 2. In Railway: **New Project → Deploy from GitHub repo** → select the repo.
 3. Railway auto-detects Node via Nixpacks and runs `npm start` (see `railway.json` / `Procfile`).
 4. Set environment variables in Railway's **Variables** tab (see `.env.example`) — at minimum `PORT` is provided automatically by Railway, so you usually don't need to set it.
-5. **Important — session persistence:** Railway's filesystem is ephemeral across redeploys. To keep users linked across deploys/restarts, add a **Railway Volume** and mount it at `/app/sessions`. Without a volume, everyone will need to re-link whenever the service redeploys.
+5. **Critical — add a Volume, or nothing below works:** Railway's filesystem is wiped on every redeploy. Mount a **Railway Volume** at `/app/sessions` (Service → Settings → Volumes → Add Volume, mount path `/app/sessions`). This is what makes linked accounts survive a `git push`.
 6. Deploy. Open the generated Railway URL — that's your pairing page.
+
+## Zero-downtime updates via GitHub
+
+Once the repo is connected and the volume above is mounted, the flow is:
+
+1. You `git push` to your deploy branch.
+2. Railway builds the new version in the background and swaps it in (Settings → confirm "Automatic Deploys" is on).
+3. On boot, `index.js` calls `resumeAllSessions()`, which scans `/app/sessions` for every account that was linked before the restart and reconnects each one **without asking for a new pairing code** — their saved WhatsApp credentials are reused.
+4. Linked users see at most a few seconds of the bot not responding while the new container starts; no one has to re-link.
+
+Without the volume, step 3 has nothing to resume from, and every redeploy forces everyone to re-link — so don't skip it.
 
 ## Commands
 

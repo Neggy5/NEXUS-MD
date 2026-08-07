@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const { startSession, getStatus, listSessions, sanitizeId, resumeAllSessions } = require('./src/sessionManager');
+const { CHANNEL_LINK, GROUP_LINK } = require('./src/config');
 
 const app = express();
 app.use(express.json());
@@ -25,6 +26,11 @@ app.post('/api/pair', async (req, res) => {
     console.error('pair error:', err);
     res.status(500).json({ error: 'Could not generate a pairing code. Try again in a moment.' });
   }
+});
+
+// Community links shown on the frontend (also used for the force-join gate).
+app.get('/api/links', (_req, res) => {
+  res.json({ channel: CHANNEL_LINK, group: GROUP_LINK });
 });
 
 // Poll connection status for a session
