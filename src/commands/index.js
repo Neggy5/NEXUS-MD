@@ -493,22 +493,24 @@ register({
     }
 
     const input = args.join(" ");
-    // Regular expression to detect if the input is an XNXX link
     const isUrl = input.match(/https?:\/\/(www\.)?xnxx\.(com|health|net)\/[^\s]+/gi);
 
     try {
       if (isUrl) {
-        // --- DOWNLOAD MODE (using davidcyril.name.ng/download/xnxx) ---
+        // --- DOWNLOAD MODE ---
         await sock.sendMessage(from, { text: '📥 *Downloading video...* Please wait.' });
         
-        const dlApi = `https://apis.davidcyril.name.ng/download/xnxx?url=${encodeURIComponent(isUrl[0])}`;
+        // Using Vreden API for better stability
+        const dlApi = `https://api.vreden.my.id/api/xnxxdl?url=${encodeURIComponent(isUrl[0])}`;
         const res = await fetch(dlApi);
         const data = await res.json();
 
-        // David Cyril API usually returns link in result.dl or result.video_url
-        const video = data.result?.dl || data.result?.video_url || data.result?.url;
+        // Check various possible locations for the video URL
+        const video = data.result?.url || data.result?.files?.high || data.result?.files?.low || data.url;
 
-        if (!video) throw new Error("Could not find download link. The video might be too large or private.");
+        if (!video) {
+          return await sock.sendMessage(from, { text: "❌ API Error: Could not extract download link. The video might be too large or the link is invalid." });
+        }
 
         await sock.sendMessage(from, {
           video: { url: video },
@@ -517,32 +519,37 @@ register({
         });
 
       } else {
-        // --- SEARCH MODE (using davidcyril.name.ng/xxx/xnxx) ---
+        // --- SEARCH MODE ---
         await sock.sendMessage(from, { text: `🔍 Searching for: *${input}*...` });
         
-        const searchApi = `https://apis.davidcyril.name.ng/xxx/xnxx?query=${encodeURIComponent(input)}`;
+        const searchApi = `https://api.vreden.my.id/api/xnxxsearch?query=${encodeURIComponent(input)}`;
         const res = await fetch(searchApi);
         const data = await res.json();
         
-        // Find the array in the response (result or results)
+        // Extract results array
         const results = data.result || data.results || (Array.isArray(data) ? data : []);
 
-        if (!results.length) return await sock.sendMessage(from, { text: "❌ No results found for your query." });
+        if (!results || results.length === 0) {
+          return await sock.sendMessage(from, { text: "❌ No results found. Try different keywords." });
+        }
 
         let msg = `🔞 *XNXX SEARCH RESULTS*\n\n`;
+        
+        // Take top 10 results
         results.slice(0, 10).forEach((v, i) => {
           const title = v.title || "No Title";
           const link = v.link || v.url;
-          msg += `*${i + 1}.* ${title}\n🔗 ${link}\n\n`;
+          const info = v.info || v.duration || "";
+          msg += `*${i + 1}.* ${title} ${info ? `(${info})` : ''}\n🔗 ${link}\n\n`;
         });
         
-        msg += `💡 *Tip:* Copy one of the links above and send \`${prefix}${command} <link>\` to download the video file.`;
+        msg += `💡 *Tip:* Copy one of the links above and send \`${prefix}${command} <link>\` to download the video.`;
         
         await sock.sendMessage(from, { text: msg });
       }
     } catch (e) {
-      console.error("XNXX Error:", e);
-      await sock.sendMessage(from, { text: "⚠️ API Error: " + (e.message || "Request failed") });
+      console.error("XNXX Command Error:", e);
+      await sock.sendMessage(from, { text: "⚠️ System Error: The API is currently unresponsive. Please try again in a few minutes." });
     }
   }
 });
