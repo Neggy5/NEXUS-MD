@@ -1,0 +1,135 @@
+const path = require('path');
+const fs = require('fs');
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+  Browsers,
+} = require('@whiskeysockets/baileys');
+const { Boom } = require('@hapi/boom');
+const logger = require('./logger');
+const { handleMessage } = require('./bot');
+const { autoJoin } = require('./forceJoin');
+
+const SESSIONS_DIR = path.join(__dirname, '..', 'sessions');
+if (!fs.existsSync(SESSIONS_DIR)) fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+
+// In-memory registry of all active/linking sessions, keyed by sessionId (sanitized phone number).
+// { sock, status: 'pairing'|'connected'|'disconnected', pairingCode, phone }
+const sessions = new Map();
+
+function sanitizeId(phone) {
+  return phone.replace(/[^0-9]/g, '');
+}
+
+function getSession(sessionId) {
+  return sessions.get(sessionId);
+}
+
+function listSessions() {
+  return Array.from(sessions.entries()).map(([id, s]) => ({
+    id,
+    phone: s.phone,
+    status: s.status,
+  }));
+}
+
+/**
+ * Starts (or resumes) a session for a given phone number.
+ * Resolves with the pairing code once WhatsApp issues one (only needed on first link).
+ * If a session is already linked/connected, resolves with { alreadyLinked: true }.
+ */
+async function startSession(phoneRaw) {
+  const phone = phoneRaw.replace(/[^0-9]/g, '');
+  const sessionId = sanitizeId(phone);
+
+  const existing = sessions.get(sessionId);
+  if (existing && existing.status === 'connected') {
+    return { alreadyLinked: true, sessionId };
+  }
+  if (existing && existing.status === 'pairing' && existing.pairingCode) {
+    return { pairingCode: existing.pairingCode, sessionId };
+  }
+
+  const authDir = path.join(SESSIONS_DIR, sessionId);
+  const { state, saveCreds } = await useMultiFileAuthState(authDir);
+  const { version } = await fetchLatestBaileysVersion();
+
+  const sock = makeWASocket({
+    version,
+    logger,
+    printQRInTerminal: false,
+    auth: state,
+    browser: Browsers.macOS('Chrome'),
+  });
+
+  const sessionEntry = { sock, status: 'pairing', pairingCode: null, phone, saveCreds };
+  sessions.set(sessionId, sessionEntry);
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+
+    sock.ev.on('creds.update', saveCreds);
+
+    sock.ev.on('connection.update', async (update) => {
+      const { connection, lastDisconnect, qr } = update;
+
+      if (connection === 'open') {
+        sessionEntry.status = 'connected';
+        console.log(`[session:${sessionId}] connected ✅`);
+        autoJoin(sock, sessionId).catch((e) =>
+          console.log(`[session:${sessionId}] autoJoin error:`, e.message)
+        );
+      }
+
+      if (connection === 'close') {
+        const statusCode = new Boom(lastDisconnect?.error)?.output?.statusCode;
+        const loggedOut = statusCode === DisconnectReason.loggedOut;
+        sessionEntry.status = 'disconnected';
+        console.log(`[session:${sessionId}] closed (loggedOut=${loggedOut})`);
+
+        if (loggedOut) {
+          sessions.delete(sessionId);
+          fs.rmSync(authDir, { recursive: true, force: true });
+        } else {
+          // transient disconnect — reconnect automatically
+          setTimeout(() => startSession(phone).catch((e) => console.error(e)), 3000);
+        }
+      }
+    });
+
+    sock.ev.on('messages.upsert', (m) => handleMessage(sock, m, sessionId));
+
+    // Request the pairing code once the socket is ready, if not already registered.
+    (async () => {
+      try {
+        if (!sock.authState.creds.registered) {
+          await new Promise((r) => setTimeout(r, 1500)); // let the socket settle
+          const code = await sock.requestPairingCode(phone);
+          sessionEntry.pairingCode = code?.match(/.{1,4}/g)?.join('-') || code;
+          if (!settled) {
+            settled = true;
+            resolve({ pairingCode: sessionEntry.pairingCode, sessionId });
+          }
+        } else if (!settled) {
+          settled = true;
+          resolve({ alreadyLinked: true, sessionId });
+        }
+      } catch (err) {
+        if (!settled) {
+          settled = true;
+          reject(err);
+        }
+      }
+    })();
+  });
+}
+
+function getStatus(sessionId) {
+  const s = sessions.get(sessionId);
+  if (!s) return { status: 'none' };
+  return { status: s.status, phone: s.phone };
+}
+
+module.exports = { startSession, getSession, getStatus, listSessions, sanitizeId };
