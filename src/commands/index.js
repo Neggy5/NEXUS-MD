@@ -439,13 +439,45 @@ register({
 });
 register({
   name: 'ping',
+  aliases: ['p'],
   category: 'MAIN',
-  description: 'Check bot responsiveness',
+  description: 'Check bot speed and system status',
   async execute({ sock, from }) {
+    const os = require('os');
     const start = Date.now();
-    const sent = await sock.sendMessage(from, { text: '🏓 Pinging...' });
-    const ms = Date.now() - start;
-    await sock.sendMessage(from, { text: `🏓 Pong! *${ms}ms*` }, { quoted: sent });
+    
+    // Initial message to calculate round-trip time
+    const sent = await sock.sendMessage(from, { text: '⚡ *NEXUS-MD: MEASURING...*' });
+    
+    const end = Date.now();
+    const latency = end - start;
+
+    // Calculate RAM usage
+    const totalRam = (os.totalmem() / 1024 / 1024 / 1024).toFixed(2);
+    const freeRam = (os.freemem() / 1024 / 1024 / 1024).toFixed(2);
+    const usedRam = (totalRam - freeRam).toFixed(2);
+
+    // Determine speed grade
+    let grade = 'Excellent 🟢';
+    if (latency > 300) grade = 'Good 🟡';
+    if (latency > 700) grade = 'Poor 🔴';
+
+    const uptime = formatUptime(Date.now() - START_TIME);
+
+    let status = `⚡ *NEXUS-MD STATUS*\n\n`;
+    status += `🛰️ *Latency:* \`${latency}ms\`\n`;
+    status += `📊 *Grade:* ${grade}\n`;
+    status += `⏱️ *Uptime:* \`${uptime}\`\n`;
+    status += `📟 *RAM:* \`${usedRam}GB\` / \`${totalRam}GB\`\n`;
+    status += `🚀 *Host:* \`Railway.app\`\n`;
+    status += `📡 *Platform:* \`${os.platform()}\`\n\n`;
+    status += `_System is running at optimal capacity._`;
+
+    // Send the detailed status as an edit or a new message quoting the first one
+    await sock.sendMessage(from, { 
+      text: status, 
+      edit: sent.key 
+    });
   },
 });
 
