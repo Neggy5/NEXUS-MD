@@ -297,43 +297,34 @@ register({
         return await sock.sendMessage(from, { text: `❌ Failed to download sticker.` });
       }
 
-      const sharp = require('sharp');
-      let imageBuffer;
-      let imageExt = 'jpg';
+      // Converts via ffmpeg-static (already a dependency, ships a prebuilt binary —
+      // no native compile step like `sharp` needs, which is what was breaking this
+      // command: sharp was never installed as a dependency).
+      const ffmpeg = require('ffmpeg-static');
+      const { exec } = require('child_process');
+      const fs = require('fs');
+      const path = require('path');
 
+      const tmpDir = path.join(process.cwd(), 'tmp');
+      if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+
+      const inputPath = path.join(tmpDir, `sticker_${Date.now()}.webp`);
+      const outputPath = path.join(tmpDir, `image_${Date.now()}.jpg`);
+
+      fs.writeFileSync(inputPath, mediaBuffer);
+
+      let imageBuffer;
       try {
-        imageBuffer = await sharp(mediaBuffer).jpeg({ quality: 90 }).toBuffer();
-        imageExt = 'jpg';
-      } catch (sharpErr) {
-        try {
-          imageBuffer = await sharp(mediaBuffer).png({ quality: 90 }).toBuffer();
-          imageExt = 'png';
-        } catch (pngErr) {
-          const ffmpeg = require('ffmpeg-static');
-          const { exec } = require('child_process');
-          const fs = require('fs');
-          const path = require('path');
-          
-          const tmpDir = path.join(process.cwd(), 'tmp');
-          if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-          
-          const inputPath = path.join(tmpDir, `sticker_${Date.now()}.webp`);
-          const outputPath = path.join(tmpDir, `image_${Date.now()}.jpg`);
-          
-          fs.writeFileSync(inputPath, mediaBuffer);
-          
-          await new Promise((resolve, reject) => {
-            exec(`"${ffmpeg}" -i "${inputPath}" "${outputPath}"`, (error) => {
-              if (error) reject(error);
-              else resolve();
-            });
+        await new Promise((resolve, reject) => {
+          exec(`"${ffmpeg}" -i "${inputPath}" "${outputPath}"`, (error) => {
+            if (error) reject(error);
+            else resolve();
           });
-          
-          imageBuffer = fs.readFileSync(outputPath);
-          try { fs.unlinkSync(inputPath); } catch {}
-          try { fs.unlinkSync(outputPath); } catch {}
-          imageExt = 'jpg';
-        }
+        });
+        imageBuffer = fs.readFileSync(outputPath);
+      } finally {
+        try { fs.unlinkSync(inputPath); } catch {}
+        try { fs.unlinkSync(outputPath); } catch {}
       }
 
       if (!imageBuffer || imageBuffer.length < 100) {
@@ -502,8 +493,6 @@ register({
       });
     }
 
-    await sock.sendMessage(from, { text: `⏳ Processing view-once media...` });
-
     try {
       let mediaMessage = target.message;
       
@@ -580,8 +569,10 @@ register({
         });
       }
 
-      await sock.sendMessage(from, { 
-        text: `✅ View-once media saved and sent to owner's chat.\n📤 *Sent to:* ${ownerJid.split('@')[0]}` 
+      // No visible confirmation text in the chat — just react ✅ on the command
+      // message so it's silent to anyone else watching that chat.
+      await sock.sendMessage(from, {
+        react: { text: '✅', key: msg.key }
       });
 
     } catch (error) {
