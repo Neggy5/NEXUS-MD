@@ -1,6 +1,6 @@
 const express = require('express');
 const path = require('path');
-const { startSession, getStatus, listSessions, sanitizeId, resumeAllSessions } = require('./src/sessionManager');
+const { startSession, getStatus, getStats, listSessions, sanitizeId, resumeAllSessions } = require('./src/sessionManager');
 const { CHANNEL_LINK, GROUP_LINK } = require('./src/config');
 
 const app = express();
@@ -36,6 +36,12 @@ app.get('/api/links', (_req, res) => {
 // Poll connection status for a session
 app.get('/api/status/:sessionId', (req, res) => {
   res.json(getStatus(req.params.sessionId));
+});
+
+// Public: total paired / currently-active counts shown on the landing page.
+// Deliberately excludes phone numbers and session ids — see /api/sessions for that (admin-only).
+app.get('/api/stats', (_req, res) => {
+  res.json(getStats());
 });
 
 // Admin: list all active sessions
