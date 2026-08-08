@@ -11,7 +11,7 @@ const { Boom } = require('@hapi/boom');
 const logger = require('./logger');
 const { handleMessage } = require('./bot');
 const { autoJoin } = require('./forceJoin');
-const { handleModeration, registerAnticall } = require('./moderation');
+const { handleModeration, registerAnticall, handleGroupParticipantsUpdate } = require('./moderation');
 const { setAutoBio } = require('./commands');
 
 const SESSIONS_DIR = path.join(__dirname, '..', 'sessions');
@@ -109,6 +109,9 @@ async function startSession(phoneRaw) {
       handleMessage(sock, m, sessionId);
       handleModeration(sock, m, sessionId);
     });
+    sock.ev.on('group-participants.update', (update) => {
+      handleGroupParticipantsUpdate(sock, update, sessionId);
+    });
     registerAnticall(sock, sessionId);
 
     // Request the pairing code once the socket is ready, if not already registered.
@@ -167,4 +170,14 @@ function getStatus(sessionId) {
   return { status: s.status, phone: s.phone, connectedAt: s.connectedAt || null };
 }
 
-module.exports = { startSession, getSession, getStatus, listSessions, sanitizeId, resumeAllSessions };
+// Aggregate counts only — no phone numbers or session ids, so this is safe to
+// expose on the public pairing page.
+function getStats() {
+  const all = Array.from(sessions.values());
+  return {
+    total: all.length,
+    active: all.filter((s) => s.status === 'connected').length,
+  };
+}
+
+module.exports = { startSession, getSession, getStatus, getStats, listSessions, sanitizeId, resumeAllSessions };

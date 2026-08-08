@@ -169,4 +169,43 @@ function registerAnticall(sock, sessionId) {
   });
 }
 
-module.exports = { handleModeration, registerAnticall, isSenderAdmin };
+/**
+ * Fires on every join/leave/promote/demote in every group the linked account
+ * is in. Sends the group's configured welcome/goodbye message (if that toggle
+ * is on) for each member who joined or left. Supports @user and @group
+ * placeholders in the custom message set via .setwelcome / .setgoodbye.
+ */
+async function handleGroupParticipantsUpdate(sock, update, sessionId) {
+  try {
+    const { id: groupJid, participants, action } = update;
+    if (action !== 'add' && action !== 'remove') return; // ignore promote/demote here
+
+    const settings = getGroupSettings(groupJid);
+    const enabled = action === 'add' ? settings.welcome : settings.goodbye;
+    if (!enabled) return;
+
+    let groupName = 'the group';
+    try {
+      const meta = await sock.groupMetadata(groupJid);
+      groupName = meta.subject || groupName;
+    } catch {
+      // fall back to the generic name above if metadata can't be fetched
+    }
+
+    const customTemplate = action === 'add' ? settings.welcomeMessage : settings.goodbyeMessage;
+    const defaultTemplate =
+      action === 'add' ? '👋 Welcome @user to @group! Glad to have you here.' : '👋 @user has left @group. Goodbye!';
+    const template = customTemplate || defaultTemplate;
+
+    for (const participant of participants) {
+      const text = template
+        .replace(/@group/gi, groupName)
+        .replace(/@user/gi, `@${bareNumber(participant)}`);
+      await sock.sendMessage(groupJid, { text, mentions: [participant] }).catch(() => {});
+    }
+  } catch (err) {
+    console.error(`[moderation:${sessionId}] group-participants error:`, err.message);
+  }
+}
+
+module.exports = { handleModeration, registerAnticall, handleGroupParticipantsUpdate, isSenderAdmin };

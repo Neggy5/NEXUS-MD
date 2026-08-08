@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { ANTICALL_ENABLED } = require('./config');
+const { ANTICALL_ENABLED, DEFAULT_PREFIX, DEFAULT_MENU_STYLE } = require('./config');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -70,6 +70,8 @@ const ACCOUNT_DEFAULTS = {
   mode: 'public',
   anticall: ANTICALL_ENABLED,
   autoreact: false,
+  prefix: DEFAULT_PREFIX,
+  menuStyle: DEFAULT_MENU_STYLE,
 };
 
 function getAccountSettings(sessionId) {
