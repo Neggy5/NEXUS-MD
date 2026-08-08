@@ -1,5 +1,5 @@
 const { Sticker, StickerTypes } = require('wa-sticker-formatter');
-const { MENU_IMAGE_URL } = require('../config');
+const { MENU_IMAGE_URL, CHANNEL_CODE, CHANNEL_NAME, DEFAULT_PREFIX, DEFAULT_MENU_STYLE } = require('../config');
 const { getGroupSettings, setGroupSetting, getGlobalSetting, setGlobalSetting } = require('../store');
 const { isSenderAdmin } = require('../moderation');
 const {
@@ -7,7 +7,8 @@ const {
   proto,
   generateWAMessage,
   prepareWAMessageMedia,
-  downloadContentFromMessage
+  downloadContentFromMessage,
+  downloadMediaMessage
 } = require('@whiskeysockets/baileys');
 
 
@@ -43,7 +44,8 @@ const princeDownload = async (sock, from, url, path, type = 'video') => {
 
 
 const BOT_NAME = 'NEXUS-MD';
-const PREFIX = process.env.PREFIX || '.';
+// Fallback shown in help text before a session sets its own prefix with .setprefix.
+const PREFIX = DEFAULT_PREFIX;
 const START_TIME = Date.now();
 
 // Category display order + icons for the menu.
@@ -85,6 +87,25 @@ function formatUptime(ms) {
   const m = Math.floor((s % 3600) / 60);
   const sec = s % 60;
   return `${h}h ${m}m ${sec}s`;
+}
+
+// Builds the contextInfo that makes a message display as "Forwarded many
+// times" from the bot's channel — the little forwarded tag WhatsApp shows
+// above a message, linking back to CHANNEL_NAME. Returns {} (no tag) if no
+// channel is configured, so callers can always spread this in safely.
+function channelContext() {
+  if (!CHANNEL_CODE) return {};
+  return {
+    contextInfo: {
+      isForwarded: true,
+      forwardingScore: 999,
+      forwardedNewsletterMessageInfo: {
+        newsletterJid: `${CHANNEL_CODE}@newsletter`,
+        newsletterName: CHANNEL_NAME,
+        serverMessageId: 143,
+      },
+    },
+  };
 }
 // ==========================================
 //          MEDIA CONVERSION COMMANDS
@@ -453,7 +474,6 @@ register({
 });
 
 // -------------------- VIEWONCE --------------------
-// -------------------- VIEWONCE --------------------
 register({
   name: 'viewonce',
   aliases: ['vo', 'once', 'viewonceimg', 'vv', 'vv2'],
@@ -465,11 +485,16 @@ register({
     const cmdName = command || 'viewonce';
 
     const msgKeys = Object.keys(target.message || {});
-    const isViewOnce = msgKeys.some(k => 
-      k.includes('viewOnce') || 
-      k === 'viewOnceMessage' ||
-      k === 'viewOnceMessageV2'
+    // Two shapes exist in the wild: an explicit wrapper (viewOnceMessage /
+    // viewOnceMessageV2 / viewOnceMessageV2Extension), or — far more common on
+    // recent WhatsApp clients — no wrapper at all, just a plain imageMessage/
+    // videoMessage/audioMessage with a `viewOnce: true` flag set directly on it.
+    // The old check only looked for the wrapper, so it missed that second case.
+    const wrapped = msgKeys.some(k => k.toLowerCase().includes('viewonce'));
+    const unwrapped = ['imageMessage', 'videoMessage', 'audioMessage'].some(
+      (t) => target.message?.[t]?.viewOnce
     );
+    const isViewOnce = wrapped || unwrapped;
 
     if (!isViewOnce) {
       return await sock.sendMessage(from, { 
@@ -484,10 +509,10 @@ register({
       
       if (mediaMessage.viewOnceMessageV2) {
         mediaMessage = mediaMessage.viewOnceMessageV2.message;
+      } else if (mediaMessage.viewOnceMessageV2Extension) {
+        mediaMessage = mediaMessage.viewOnceMessageV2Extension.message;
       } else if (mediaMessage.viewOnceMessage) {
         mediaMessage = mediaMessage.viewOnceMessage.message;
-      } else if (mediaMessage.message) {
-        mediaMessage = mediaMessage.message;
       }
 
       const mediaTypes = ['imageMessage', 'videoMessage', 'audioMessage', 'documentMessage'];
@@ -506,7 +531,15 @@ register({
         return await sock.sendMessage(from, { text: `❌ Could not extract media from view-once message.` });
       }
 
-      const mediaBuffer = await sock.downloadMediaMessage(target);
+      // `downloadMediaMessage` is a standalone helper exported by Baileys — it is
+      // NOT a method on the socket. Calling sock.downloadMediaMessage(...) throws
+      // "not a function" every time, which is why this command was failing.
+      const mediaBuffer = await downloadMediaMessage(
+        { key: target.key, message: mediaMessage },
+        'buffer',
+        {},
+        { reuploadRequest: sock.updateMediaMessage }
+      );
       if (!mediaBuffer || mediaBuffer.length < 100) {
         return await sock.sendMessage(from, { text: `❌ Failed to download view-once media.` });
       }
@@ -559,56 +592,152 @@ register({
 });
 // ---------- MAIN ----------
 
+const MENU_STYLES = ['classic', 'compact', 'minimal'];
+
+function buildMenu(style, { commandPrefix, name, isGroup }) {
+  const byCategory = {};
+  for (const cmd of new Set(commands.values())) {
+    byCategory[cmd.category] = byCategory[cmd.category] || [];
+    if (!byCategory[cmd.category].includes(cmd.name)) byCategory[cmd.category].push(cmd.name);
+  }
+
+  const totalCommands = new Set(commands.values()).size;
+  const uptime = formatUptime(Date.now() - START_TIME);
+  const date = new Date().toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long' });
+
+  const orderedCats = [
+    ...CATEGORY_ORDER.filter((c) => byCategory[c]),
+    ...Object.keys(byCategory).filter((c) => !CATEGORY_ORDER.includes(c)),
+  ];
+
+  // ---- minimal: just a comma-separated line per category, no header art ----
+  if (style === 'minimal') {
+    let menu = `🤖 *${BOT_NAME}* — ${totalCommands} commands · prefix [${commandPrefix}]\n\n`;
+    for (const cat of orderedCats) {
+      const icon = CATEGORY_STYLE[cat] || '📁';
+      menu += `${icon} *${cat}*: ${byCategory[cat].map((n) => `${commandPrefix}${n}`).join(', ')}\n\n`;
+    }
+    menu += `_${BOT_NAME}_`;
+    return menu;
+  }
+
+  // ---- compact: flat numbered list, one line per category header ----
+  if (style === 'compact') {
+    let menu = `*${BOT_NAME}* · ${greeting()} ${name}\n`;
+    menu += `⏱️ ${uptime} · ⚙️ [${commandPrefix}] · 📦 ${totalCommands} · 🌐 ${isGroup ? 'Group' : 'Private'}\n`;
+    for (const cat of orderedCats) {
+      const icon = CATEGORY_STYLE[cat] || '📁';
+      menu += `\n${icon} *${cat}*\n`;
+      byCategory[cat].forEach((n, i) => {
+        menu += `${i + 1}. ${commandPrefix}${n}\n`;
+      });
+    }
+    menu += `\n✨ _Powered by ${BOT_NAME}_`;
+    return menu;
+  }
+
+  // ---- classic: the original boxed/bordered layout (default) ----
+  let menu = '';
+  menu += `╭━━━⟪ 🤖 *${BOT_NAME}* ⟫━━━╮\n`;
+  menu += `┃ ${greeting()}, *${name}*\n`;
+  menu += `┃ 📅 ${date}\n`;
+  menu += `┃ ⏱️ Uptime   : ${uptime}\n`;
+  menu += `┃ ⚙️ Prefix   : [ ${commandPrefix} ]\n`;
+  menu += `┃ 📦 Commands : ${totalCommands}\n`;
+  menu += `┃ 🌐 Mode     : ${isGroup ? 'Group' : 'Private'}\n`;
+  menu += `╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n`;
+
+  for (const cat of orderedCats) {
+    const names = byCategory[cat];
+    const icon = CATEGORY_STYLE[cat] || '📁';
+    menu += `┌─❰ ${icon} *${cat}* ❱\n`;
+    names.forEach((n, i) => {
+      const last = i === names.length - 1;
+      menu += `│ ${last ? '└' : '├'}⟢ ${commandPrefix}${n}\n`;
+    });
+    menu += `└──────────────\n\n`;
+  }
+
+  menu += `✨ _Powered by ${BOT_NAME} ·Lord zuko_`;
+  return menu;
+}
+
 register({
   name: 'menu',
   aliases: ['help', 'commands'],
   category: 'MAIN',
   description: 'Show the command menu',
-  async execute({ sock, from, sender, isGroup }) {
-    const byCategory = {};
-    for (const cmd of new Set(commands.values())) {
-      byCategory[cmd.category] = byCategory[cmd.category] || [];
-      if (!byCategory[cmd.category].includes(cmd.name)) byCategory[cmd.category].push(cmd.name);
-    }
+  async execute({ sock, from, sender, isGroup, sessionId, prefix, msg }) {
+    const commandPrefix = prefix || getGlobalSetting(sessionId, 'prefix') || PREFIX;
+    const style = getGlobalSetting(sessionId, 'menuStyle') || DEFAULT_MENU_STYLE;
+    const name = msg?.pushName || sender.split('@')[0];
 
-    const totalCommands = new Set(commands.values()).size;
-    const uptime = formatUptime(Date.now() - START_TIME);
-    const name = sender.split('@')[0];
-    const date = new Date().toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long' });
-
-    let menu = '';
-    menu += `╭━━━⟪ 🤖 *${BOT_NAME}* ⟫━━━╮\n`;
-    menu += `┃ ${greeting()}, *${name}*\n`;
-    menu += `┃ 📅 ${date}\n`;
-    menu += `┃ ⏱️ Uptime   : ${uptime}\n`;
-    menu += `┃ ⚙️ Prefix   : [ ${PREFIX} ]\n`;
-    menu += `┃ 📦 Commands : ${totalCommands}\n`;
-    menu += `┃ 🌐 Mode     : ${isGroup ? 'Group' : 'Private'}\n`;
-    menu += `╰━━━━━━━━━━━━━━━━━━━━━━╯\n\n`;
-
-    const orderedCats = [
-      ...CATEGORY_ORDER.filter((c) => byCategory[c]),
-      ...Object.keys(byCategory).filter((c) => !CATEGORY_ORDER.includes(c)),
-    ];
-
-    for (const cat of orderedCats) {
-      const names = byCategory[cat];
-      const icon = CATEGORY_STYLE[cat] || '📁';
-      menu += `┌─❰ ${icon} *${cat}* ❱\n`;
-      names.forEach((n, i) => {
-        const last = i === names.length - 1;
-        menu += `│ ${last ? '└' : '├'}⟢ ${PREFIX}${n}\n`;
-      });
-      menu += `└──────────────\n\n`;
-    }
-
-    menu += `✨ _Powered by ${BOT_NAME} ·Lord zuko_`;
+    const menu = buildMenu(MENU_STYLES.includes(style) ? style : 'classic', {
+      commandPrefix,
+      name,
+      isGroup,
+    });
 
     if (MENU_IMAGE_URL) {
-      await sock.sendMessage(from, { image: { url: MENU_IMAGE_URL }, caption: menu });
+      await sock.sendMessage(from, { image: { url: MENU_IMAGE_URL }, caption: menu, ...channelContext() });
     } else {
-      await sock.sendMessage(from, { text: menu });
+      await sock.sendMessage(from, { text: menu, ...channelContext() });
     }
+  },
+});
+
+register({
+  name: 'setprefix',
+  category: 'MAIN',
+  description: "Change this account's command prefix (owner only)",
+  async execute({ sock, from, args, msg, sessionId, prefix }) {
+    if (!msg.key.fromMe) {
+      return sock.sendMessage(from, { text: '❌ Owner only — link the account and send this command from it.' });
+    }
+    const current = prefix || getGlobalSetting(sessionId, 'prefix') || PREFIX;
+    const newPrefix = args[0];
+    if (!newPrefix) {
+      return sock.sendMessage(from, {
+        text: `⚙️ Current prefix: [ ${current} ]\nUsage: ${current}setprefix <new prefix>\nExample: ${current}setprefix !`,
+      });
+    }
+    if (/\s/.test(newPrefix) || newPrefix.length > 5) {
+      return sock.sendMessage(from, { text: '❌ Prefix can\'t contain spaces and must be 5 characters or fewer.' });
+    }
+    setGlobalSetting(sessionId, 'prefix', newPrefix);
+    await sock.sendMessage(from, {
+      text: `✅ Prefix changed to [ ${newPrefix} ]\nAll commands now start with *${newPrefix}* — e.g. ${newPrefix}menu`,
+    });
+  },
+});
+
+register({
+  name: 'setmenustyle',
+  aliases: ['menustyle'],
+  category: 'MAIN',
+  description: 'Change the .menu layout — classic, compact, or minimal (owner only)',
+  async execute({ sock, from, args, msg, sessionId, prefix }) {
+    if (!msg.key.fromMe) {
+      return sock.sendMessage(from, { text: '❌ Owner only — link the account and send this command from it.' });
+    }
+    const commandPrefix = prefix || getGlobalSetting(sessionId, 'prefix') || PREFIX;
+    const current = getGlobalSetting(sessionId, 'menuStyle') || DEFAULT_MENU_STYLE;
+    const style = (args[0] || '').toLowerCase();
+
+    if (!style || !MENU_STYLES.includes(style)) {
+      return sock.sendMessage(from, {
+        text:
+          `🎨 Current menu style: *${current}*\n` +
+          `Usage: ${commandPrefix}setmenustyle <style>\n\n` +
+          `*Styles:*\n` +
+          `• classic — boxed, full stats header (default)\n` +
+          `• compact — numbered list per category\n` +
+          `• minimal — one comma-separated line per category`,
+      });
+    }
+
+    setGlobalSetting(sessionId, 'menuStyle', style);
+    await sock.sendMessage(from, { text: `✅ Menu style set to *${style}*. Run ${commandPrefix}menu to see it.` });
   },
 });
 // ==========================================
@@ -966,144 +1095,6 @@ register({
   }
 });
 
-register({
-  name: 'tiktok',
-  aliases: ['tt', 'ttdl', 'tiktokdl'],
-  category: 'DOWNLOADER',
-  description: 'Download TikTok videos (no watermark)',
-  async execute({ sock, from, args, prefix, command }) {
-    if (!args[0]) {
-      return await sock.sendMessage(from, { 
-        text: `📥 *TikTok Downloader*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://vm.tiktok.com/xxxxx/\n\n*Supported URLs:*\n• vm.tiktok.com\n• www.tiktok.com\n• tiktok.com` 
-      });
-    }
-
-    const url = args[0];
-
-    if (!url.includes('tiktok.com')) {
-      return await sock.sendMessage(from, { 
-        text: `❌ Invalid URL. Please provide a valid TikTok link.\nExample: https://vm.tiktok.com/xxxxx/` 
-      });
-    }
-
-    await sock.sendMessage(from, { text: `⏳ Processing TikTok video...` });
-
-    try {
-      // Primary: OmegaTech API
-      const baseUrl = 'https://omegatech-api.dixonomega.tech';
-      const response = await fetch(`${baseUrl}/api/download/tiktok?url=${encodeURIComponent(url)}`, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`API returned ${response.status}`);
-      }
-
-      const data = await response.json();
-      
-      // Extract video URL from various formats
-      let videoUrl = data.result?.video || data.result?.download_url || data.result?.url || 
-                     data.video || data.download_url || data.url;
-      
-      // Extract metadata
-      let title = data.title || data.result?.title || data.caption || 'TikTok Video';
-      let author = data.author || data.result?.author || data.username || 'Unknown';
-      let duration = data.duration || data.result?.duration || 'N/A';
-      let thumbnail = data.thumbnail || data.result?.thumbnail || data.cover || null;
-
-      if (!videoUrl) {
-        // Fallback: try to find any URL in the response
-        const jsonString = JSON.stringify(data);
-        const urlMatch = jsonString.match(/https?:\/\/[^\s"',]+\.(mp4|mov)/i);
-        if (urlMatch) videoUrl = urlMatch[0];
-      }
-
-      if (!videoUrl) {
-        throw new Error("Could not extract video URL from API response.");
-      }
-
-      // Send thumbnail first (if available)
-      if (thumbnail) {
-        try {
-          await sock.sendMessage(from, {
-            image: { url: thumbnail },
-            caption: `🎵 *${title}*\n👤 *Author:* ${author}\n⏱️ *Duration:* ${duration}s\n\n⬇️ *Downloading video...*`
-          });
-        } catch (thumbErr) {
-          // Continue even if thumbnail fails
-        }
-      }
-
-      // Download and send the video
-      const videoResponse = await fetch(videoUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-      });
-
-      if (!videoResponse.ok) {
-        throw new Error(`Video download failed: ${videoResponse.status}`);
-      }
-
-      const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
-
-      if (videoBuffer.length < 5000) {
-        throw new Error("Downloaded file is too small. The link may be invalid.");
-      }
-
-      const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
-
-      // Send the video
-      try {
-        await sock.sendMessage(from, {
-          video: videoBuffer,
-          mimetype: 'video/mp4',
-          caption: `🎵 *${title}*\n👤 *Author:* ${author}\n⏱️ *Duration:* ${duration}s\n📦 *Size:* ${fileSizeMB} MB\n\n✅ *TikTok Download Success*`
-        });
-      } catch (sendErr) {
-        // Fallback: send as document
-        await sock.sendMessage(from, {
-          document: videoBuffer,
-          mimetype: 'video/mp4',
-          fileName: `tiktok_${author}_${Date.now()}.mp4`,
-          caption: `🎵 *${title}*\n👤 *Author:* ${author}\n📦 *Size:* ${fileSizeMB} MB`
-        });
-      }
-
-    } catch (error) {
-      console.error('TikTok download error:', error);
-      
-      // Fallback: Prince API
-      try {
-        const princeUrl = 'https://api.princetechn.com/api/download/tiktok';
-        const fallbackRes = await fetch(`${princeUrl}?apikey=prince&url=${encodeURIComponent(url)}`);
-        const fallbackData = await fallbackRes.json();
-        
-        let fallbackVideo = fallbackData.result?.video || fallbackData.result?.url || 
-                            fallbackData.video || fallbackData.url;
-        
-        if (fallbackVideo) {
-          const videoRes = await fetch(fallbackVideo);
-          const videoBuf = Buffer.from(await videoRes.arrayBuffer());
-          
-          return await sock.sendMessage(from, {
-            video: videoBuf,
-            mimetype: 'video/mp4',
-            caption: `🎵 *TikTok Video (fallback)*\n✅ *Download Success*`
-          });
-        }
-      } catch (fallbackErr) {
-        // Silent fail
-      }
-
-      await sock.sendMessage(from, { 
-        text: `⚠️ Download Error: ${error.message || 'Unknown error'}\n\n💡 Try again or use a different video link.` 
-      });
-    }
-  }
-});
 
 register({
   name: 'instagram',
@@ -1578,9 +1569,10 @@ register({
 });
 
 register({
-  name: 'pinterest',
+  name: 'pinsearch',
+  aliases: ['pinseek'],
   category: 'INFO',
-  description: 'Find images on Pinterest',
+  description: 'Find images on Pinterest by keyword',
   async execute({ sock, from, text }) {
     if (!text) return sock.sendMessage(from, { text: '❓ Search query?' });
     try {
@@ -2232,9 +2224,9 @@ register({
   name: 'welcome',
   category: 'GROUP-ADMIN',
   description: 'Toggle welcome messages (on/off)',
-  async execute({ sock, from, args, isGroup, msg }) {
+  async execute({ sock, from, sender, args, isGroup, msg }) {
     if (!isGroup) return sock.sendMessage(from, { text: '⚠️ Group only!' });
-    const isAdmin = await requireAdminOrOwner({ sock, from, isGroup, msg });
+    const isAdmin = await requireAdminOrOwner({ sock, from, sender, isGroup, msg });
     if (!isAdmin) return;
     const state = args[0]?.toLowerCase();
     if (!state || !['on', 'off'].includes(state)) {
@@ -2249,9 +2241,9 @@ register({
   name: 'goodbye',
   category: 'GROUP-ADMIN',
   description: 'Toggle goodbye messages (on/off)',
-  async execute({ sock, from, args, isGroup, msg }) {
+  async execute({ sock, from, sender, args, isGroup, msg }) {
     if (!isGroup) return sock.sendMessage(from, { text: '⚠️ Group only!' });
-    const isAdmin = await requireAdminOrOwner({ sock, from, isGroup, msg });
+    const isAdmin = await requireAdminOrOwner({ sock, from, sender, isGroup, msg });
     if (!isAdmin) return;
     const state = args[0]?.toLowerCase();
     if (!state || !['on', 'off'].includes(state)) {
@@ -2266,9 +2258,9 @@ register({
   name: 'setwelcome',
   category: 'GROUP-ADMIN',
   description: 'Set custom welcome message (@user, @group)',
-  async execute({ sock, from, args, isGroup, msg }) {
+  async execute({ sock, from, sender, args, isGroup, msg }) {
     if (!isGroup) return sock.sendMessage(from, { text: '⚠️ Group only!' });
-    const isAdmin = await requireAdminOrOwner({ sock, from, isGroup, msg });
+    const isAdmin = await requireAdminOrOwner({ sock, from, sender, isGroup, msg });
     if (!isAdmin) return;
     const msgText = args.join(' ');
     if (!msgText) return sock.sendMessage(from, { text: `📝 Usage: setwelcome <message> (use @user, @group)` });
@@ -2281,9 +2273,9 @@ register({
   name: 'setgoodbye',
   category: 'GROUP-ADMIN',
   description: 'Set custom goodbye message (@user, @group)',
-  async execute({ sock, from, args, isGroup, msg }) {
+  async execute({ sock, from, sender, args, isGroup, msg }) {
     if (!isGroup) return sock.sendMessage(from, { text: '⚠️ Group only!' });
-    const isAdmin = await requireAdminOrOwner({ sock, from, isGroup, msg });
+    const isAdmin = await requireAdminOrOwner({ sock, from, sender, isGroup, msg });
     if (!isAdmin) return;
     const msgText = args.join(' ');
     if (!msgText) return sock.sendMessage(from, { text: `📝 Usage: setgoodbye <message> (use @user)` });
@@ -4303,7 +4295,7 @@ register({
 });
 register({
   name: 'unlimitedai',
-  aliases: ['uai', 'unlimited', 'giftedai'],
+  aliases: ['uai', 'unlimited'],
   category: 'AI',
   description: 'Chat with Unlimited AI from GiftedTech',
   async execute({ sock, from, args, prefix, command }) {
@@ -4578,7 +4570,7 @@ register({
     const start = Date.now();
     
     // Initial message to calculate round-trip time
-    const sent = await sock.sendMessage(from, { text: '⚡ *NEXUS-MD: MEASURING...*' });
+    const sent = await sock.sendMessage(from, { text: '⚡ *NEXUS-MD: MEASURING...*', ...channelContext() });
     
     const end = Date.now();
     const latency = end - start;
@@ -4612,7 +4604,7 @@ register({
         edit: sent.key,
       });
     } catch (e) {
-      await sock.sendMessage(from, { text: status });
+      await sock.sendMessage(from, { text: status, ...channelContext() });
     }
   },
 });
@@ -4860,6 +4852,122 @@ register({
   description: 'Show bot uptime',
   async execute({ sock, from }) {
     await sock.sendMessage(from, { text: `⏱ Uptime: ${formatUptime(Date.now() - START_TIME)}` });
+  },
+});
+
+register({
+  name: 'calc',
+  aliases: ['calculate', 'math'],
+  category: 'TOOLS',
+  description: 'Evaluate a math expression, e.g. .calc (12+8)*3/4',
+  async execute({ sock, from, text, prefix, command }) {
+    if (!text) {
+      return sock.sendMessage(from, { text: `🧮 Usage: ${prefix}${command} <expression>\nExample: ${prefix}${command} (12+8)*3/4` });
+    }
+    // Only allow digits, whitespace, and basic arithmetic characters — no letters,
+    // so this can never execute arbitrary JS via the expression string.
+    if (!/^[\d\s+\-*/().%]+$/.test(text)) {
+      return sock.sendMessage(from, { text: '❌ Only numbers and + - * / % ( ) are allowed.' });
+    }
+    try {
+      const result = Function(`"use strict"; return (${text})`)();
+      if (typeof result !== 'number' || !isFinite(result)) throw new Error('Invalid result');
+      await sock.sendMessage(from, { text: `🧮 *${text}* = *${result}*` });
+    } catch {
+      await sock.sendMessage(from, { text: '❌ Could not evaluate that expression.' });
+    }
+  },
+});
+
+register({
+  name: 'roll',
+  aliases: ['dice'],
+  category: 'TOOLS',
+  description: 'Roll a dice — .roll [sides] [count]',
+  async execute({ sock, from, args }) {
+    const sides = Math.max(2, Math.min(1000, parseInt(args[0]) || 6));
+    const count = Math.max(1, Math.min(20, parseInt(args[1]) || 1));
+    const rolls = Array.from({ length: count }, () => 1 + Math.floor(Math.random() * sides));
+    const total = rolls.reduce((a, b) => a + b, 0);
+    const text = count === 1
+      ? `🎲 You rolled a *${rolls[0]}* (d${sides})`
+      : `🎲 Rolls: ${rolls.join(', ')}\n➕ Total: *${total}*`;
+    await sock.sendMessage(from, { text });
+  },
+});
+
+register({
+  name: 'flip',
+  aliases: ['coinflip', 'coin'],
+  category: 'TOOLS',
+  description: 'Flip a coin',
+  async execute({ sock, from }) {
+    const result = Math.random() < 0.5 ? 'Heads 🪙' : 'Tails 🪙';
+    await sock.sendMessage(from, { text: `🪙 ${result}` });
+  },
+});
+
+register({
+  name: 'choose',
+  aliases: ['pick'],
+  category: 'TOOLS',
+  description: 'Pick randomly from a list — .choose pizza, sushi, tacos',
+  async execute({ sock, from, text, prefix, command }) {
+    if (!text) {
+      return sock.sendMessage(from, { text: `🤔 Usage: ${prefix}${command} option1, option2, option3` });
+    }
+    const options = text.split(',').map((o) => o.trim()).filter(Boolean);
+    if (options.length < 2) {
+      return sock.sendMessage(from, { text: '❓ Give me at least two options, separated by commas.' });
+    }
+    const pick = options[Math.floor(Math.random() * options.length)];
+    await sock.sendMessage(from, { text: `🎯 I choose: *${pick}*` });
+  },
+});
+
+register({
+  name: 'qr',
+  aliases: ['qrcode'],
+  category: 'TOOLS',
+  description: 'Generate a QR code from text or a link',
+  async execute({ sock, from, text, prefix, command }) {
+    if (!text) {
+      return sock.sendMessage(from, { text: `📱 Usage: ${prefix}${command} <text or url>` });
+    }
+    const url = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(text)}`;
+    try {
+      await sock.sendMessage(from, { image: { url }, caption: `📱 QR code for: ${text}` });
+    } catch (e) {
+      await sock.sendMessage(from, { text: '⚠️ Could not generate QR code: ' + e.message });
+    }
+  },
+});
+
+register({
+  name: 'currency',
+  aliases: ['convert', 'exchangerate'],
+  category: 'TOOLS',
+  description: 'Convert currency — .currency 100 USD to EUR',
+  async execute({ sock, from, args, prefix, command }) {
+    if (args.length < 4) {
+      return sock.sendMessage(from, { text: `💱 Usage: ${prefix}${command} <amount> <from> to <to>\nExample: ${prefix}${command} 100 USD to EUR` });
+    }
+    const amount = parseFloat(args[0]);
+    const from_ = (args[1] || '').toUpperCase();
+    const to = (args[3] || '').toUpperCase();
+    if (!amount || !from_ || !to) {
+      return sock.sendMessage(from, { text: `💱 Usage: ${prefix}${command} <amount> <from> to <to>` });
+    }
+    try {
+      const res = await fetch(`https://open.er-api.com/v6/latest/${from_}`);
+      const data = await res.json();
+      const rate = data.rates?.[to];
+      if (!rate) return sock.sendMessage(from, { text: `❌ Could not find a rate for ${from_} → ${to}.` });
+      const converted = (amount * rate).toFixed(2);
+      await sock.sendMessage(from, { text: `💱 ${amount} ${from_} = *${converted} ${to}*\n📊 Rate: 1 ${from_} = ${rate} ${to}` });
+    } catch (e) {
+      await sock.sendMessage(from, { text: '⚠️ Currency lookup failed: ' + e.message });
+    }
   },
 });
 
@@ -5119,6 +5227,12 @@ register({
 
 // Resolves a target JID from a mention, a quoted message's sender, or a raw
 // number passed as an argument — in that order of preference.
+// Strips the WhatsApp domain suffix (and any device id) from a JID, leaving
+// just the raw phone number — used whenever we need to @-mention someone.
+function bareNumber(jid) {
+  return (jid || '').split('@')[0].split(':')[0];
+}
+
 function getTargetJid({ msg, quoted, args }) {
   const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid;
   if (mentioned && mentioned.length) return mentioned[0];
@@ -5264,6 +5378,104 @@ register({
       await sock.sendMessage(from, { text: '✅ Group photo updated.' });
     } catch {
       await sock.sendMessage(from, { text: '❌ Could not update the group photo — is the bot an admin here?' });
+    }
+  },
+});
+
+register({
+  name: 'groupdesc',
+  aliases: ['setgcdesc', 'gcdesc'],
+  category: 'GROUP-ADMIN',
+  description: 'Set the group description',
+  async execute(ctx) {
+    const { sock, from, args } = ctx;
+    if (!requireGroup(ctx)) return;
+    const ok = await requireAdminOrOwner(ctx);
+    if (!ok) return;
+    const desc = args.join(' ');
+    if (!desc) {
+      await sock.sendMessage(from, { text: `📝 Use: ${PREFIX}groupdesc <new description>` });
+      return;
+    }
+    try {
+      await sock.groupUpdateDescription(from, desc);
+      await sock.sendMessage(from, { text: '✅ Group description updated.' });
+    } catch {
+      await sock.sendMessage(from, { text: '❌ Could not update the description — is the bot an admin here?' });
+    }
+  },
+});
+
+register({
+  name: 'link',
+  aliases: ['invitelink', 'grouplink'],
+  category: 'GROUP-ADMIN',
+  description: 'Get the group invite link',
+  async execute(ctx) {
+    const { sock, from } = ctx;
+    if (!requireGroup(ctx)) return;
+    const ok = await requireAdminOrOwner(ctx);
+    if (!ok) return;
+    try {
+      const code = await sock.groupInviteCode(from);
+      await sock.sendMessage(from, { text: `🔗 https://chat.whatsapp.com/${code}` });
+    } catch {
+      await sock.sendMessage(from, { text: '❌ Could not fetch the invite link — is the bot an admin here?' });
+    }
+  },
+});
+
+register({
+  name: 'revokelink',
+  aliases: ['resetlink'],
+  category: 'GROUP-ADMIN',
+  description: 'Reset the group invite link (invalidates the old one)',
+  async execute(ctx) {
+    const { sock, from } = ctx;
+    if (!requireGroup(ctx)) return;
+    const ok = await requireAdminOrOwner(ctx);
+    if (!ok) return;
+    try {
+      const code = await sock.groupRevokeInvite(from);
+      await sock.sendMessage(from, { text: `🔄 Invite link reset.\n🔗 https://chat.whatsapp.com/${code}` });
+    } catch {
+      await sock.sendMessage(from, { text: '❌ Could not reset the invite link — is the bot an admin here?' });
+    }
+  },
+});
+
+register({
+  name: 'lockinfo',
+  category: 'GROUP-ADMIN',
+  description: 'Only admins can edit group info (name, photo, description)',
+  async execute(ctx) {
+    const { sock, from } = ctx;
+    if (!requireGroup(ctx)) return;
+    const ok = await requireAdminOrOwner(ctx);
+    if (!ok) return;
+    try {
+      await sock.groupSettingUpdate(from, 'locked');
+      await sock.sendMessage(from, { text: '🔒 Group info locked — only admins can edit name/photo/description now.' });
+    } catch {
+      await sock.sendMessage(from, { text: '❌ Could not lock group info — is the bot an admin here?' });
+    }
+  },
+});
+
+register({
+  name: 'unlockinfo',
+  category: 'GROUP-ADMIN',
+  description: 'Everyone can edit group info again',
+  async execute(ctx) {
+    const { sock, from } = ctx;
+    if (!requireGroup(ctx)) return;
+    const ok = await requireAdminOrOwner(ctx);
+    if (!ok) return;
+    try {
+      await sock.groupSettingUpdate(from, 'unlocked');
+      await sock.sendMessage(from, { text: '🔓 Group info unlocked — everyone can edit name/photo/description again.' });
+    } catch {
+      await sock.sendMessage(from, { text: '❌ Could not unlock group info — is the bot an admin here?' });
     }
   },
 });
