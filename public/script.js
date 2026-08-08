@@ -10,6 +10,7 @@ const statusText = document.getElementById('statusText');
 const connectedForEl = document.getElementById('connectedFor');
 const channelLink = document.getElementById('channelLink');
 const groupLink = document.getElementById('groupLink');
+const statsText = document.getElementById('statsText');
 
 let pollTimer = null;
 let uptimeTimer = null;
@@ -31,6 +32,17 @@ async function loadCommunityLinks() {
   } catch (err) {
     // Non-critical — just leave the buttons pointing nowhere if this fails.
     console.warn('Could not load community links:', err.message);
+  }
+}
+
+// ---- Paired / active account count ----
+async function loadStats() {
+  try {
+    const res = await fetch('/api/stats');
+    const data = await res.json();
+    statsText.textContent = `${data.active} active · ${data.total} paired`;
+  } catch (err) {
+    statsText.textContent = 'Stats unavailable';
   }
 }
 
@@ -151,4 +163,6 @@ document.getElementById('resetBtn').addEventListener('click', reset);
 document.getElementById('resetBtn2').addEventListener('click', reset);
 
 loadCommunityLinks();
+loadStats();
+setInterval(loadStats, 15000);
 spawnParticles();
