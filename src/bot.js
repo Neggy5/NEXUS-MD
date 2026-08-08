@@ -15,8 +15,15 @@ function extractText(message) {
 }
 
 async function handleMessage(sock, m, sessionId) {
+  // messages.upsert can carry more than one message in a single event
+  // (e.g. catching up after a reconnect) — handle every one, not just the first.
+  for (const msg of m.messages || []) {
+    await handleSingleMessage(sock, msg, sessionId);
+  }
+}
+
+async function handleSingleMessage(sock, msg, sessionId) {
   try {
-    const msg = m.messages?.[0];
     if (!msg || !msg.message) return;
 
     const from = msg.key.remoteJid;

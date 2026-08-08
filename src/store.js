@@ -25,7 +25,7 @@ function persist() {
 }
 
 const GROUP_DEFAULTS = {
-  antidelete: true,
+  antidelete: false,
   antiedit: true,
   antisticker: false,
   antigroupmention: false,
@@ -69,7 +69,7 @@ function persistAccount() {
 const ACCOUNT_DEFAULTS = {
   mode: 'public',
   anticall: ANTICALL_ENABLED,
-  autoreact: false,
+  autoreact: true,
   prefix: DEFAULT_PREFIX,
   menuStyle: DEFAULT_MENU_STYLE,
 };
