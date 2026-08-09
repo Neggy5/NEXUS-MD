@@ -292,11 +292,21 @@ register({
   description: 'Convert sticker/video to GIF and send',
   async execute({ sock, from, msg, args, prefix, command }) {
     // ─── FIX: Get quoted message properly ───
-    const quoted = msg?.quoted || msg;
+    let quoted = msg?.quoted || msg;
     
-    if (!quoted) {
+    // If msg has message but no quoted, try to get from contextInfo
+    if (!quoted || !quoted.message) {
+      if (msg?.message?.extendedTextMessage?.contextInfo?.quotedMessage) {
+        quoted = {
+          message: msg.message.extendedTextMessage.contextInfo.quotedMessage,
+          key: msg.message.extendedTextMessage.contextInfo
+        };
+      }
+    }
+
+    if (!quoted || !quoted.message) {
       return await sock.sendMessage(from, { 
-        text: `🎬 Reply to a video or sticker with: ${prefix || '.'}togif` 
+        text: `🎬 Reply to a video or sticker with: ${prefix || '.'}togif\n\nNo quoted message found.` 
       });
     }
 
@@ -305,6 +315,7 @@ register({
     let isSticker = false;
     let mime = '';
 
+    // Check all possible locations
     if (quoted.message?.videoMessage) {
       isVideo = true;
       mime = quoted.message.videoMessage.mimetype || 'video/mp4';
@@ -318,6 +329,10 @@ register({
       mime = quoted.mimetype;
       if (mime.includes('video') || mime.includes('gif')) isVideo = true;
       if (mime.includes('webp')) isSticker = true;
+    } else if (quoted.key?.message?.videoMessage) {
+      isVideo = true;
+    } else if (quoted.key?.message?.stickerMessage) {
+      isSticker = true;
     }
 
     if (!isVideo && !isSticker) {
@@ -341,7 +356,16 @@ register({
           { reuploadRequest: sock.updateMediaMessage }
         );
       } catch (dlErr) {
-        mediaBuffer = await sock.downloadMediaMessage(quoted);
+        try {
+          mediaBuffer = await downloadMediaMessage(
+            { key: quoted.key, message: quoted.message },
+            'buffer',
+            {},
+            { reuploadRequest: sock.updateMediaMessage }
+          );
+        } catch (dlErr2) {
+          mediaBuffer = await sock.downloadMediaMessage(quoted);
+        }
       }
 
       if (!mediaBuffer || mediaBuffer.length < 100) {
@@ -6067,21 +6091,34 @@ register({
     }
   }
 });
-// ==========================================
-//          TO IMAGE - Convert Sticker to Image
-// ==========================================
 register({
   name: 'toimage',
   aliases: ['img', 'toimg', 'convertimg'],
   category: 'TOOLS',
   description: 'Convert sticker to image and send',
   async execute({ sock, from, msg, args, prefix, command }) {
-    // ─── FIX: Get quoted message properly ───
-    const quoted = msg?.quoted || msg;
+    // ─── DEBUG: Log what we received ───
+    console.log('Message keys:', Object.keys(msg || {}));
+    console.log('Has quoted:', !!msg?.quoted);
+    console.log('Has message:', !!msg?.message);
     
-    if (!quoted) {
+    // ─── FIX: Get quoted message properly ───
+    let quoted = msg?.quoted || msg;
+    
+    // If msg has message but no quoted, try to get from contextInfo
+    if (!quoted || !quoted.message) {
+      // Try to get from contextInfo
+      if (msg?.message?.extendedTextMessage?.contextInfo?.quotedMessage) {
+        quoted = {
+          message: msg.message.extendedTextMessage.contextInfo.quotedMessage,
+          key: msg.message.extendedTextMessage.contextInfo
+        };
+      }
+    }
+
+    if (!quoted || !quoted.message) {
       return await sock.sendMessage(from, { 
-        text: `🖼️ Reply to a sticker with: ${prefix || '.'}toimage` 
+        text: `🖼️ Reply to a sticker with: ${prefix || '.'}toimage\n\nNo quoted message found.` 
       });
     }
 
@@ -6089,22 +6126,33 @@ register({
     let isSticker = false;
     let mediaBuffer = null;
 
-    // Check if message has stickerMessage
+    // Check all possible sticker locations
     if (quoted.message?.stickerMessage) {
       isSticker = true;
-    }
-    // Check if it's an image with webp mimetype
-    else if (quoted.message?.imageMessage?.mimetype?.includes('webp')) {
+    } else if (quoted.message?.imageMessage?.mimetype?.includes('webp')) {
+      isSticker = true;
+    } else if (quoted.mimetype && quoted.mimetype.includes('webp')) {
       isSticker = true;
     }
-    // Check mimetype directly
-    else if (quoted.mimetype && quoted.mimetype.includes('webp')) {
+    // Check if it's in the contextInfo
+    else if (quoted.key?.message?.stickerMessage) {
+      isSticker = true;
+    } else if (quoted.key?.message?.imageMessage?.mimetype?.includes('webp')) {
       isSticker = true;
     }
 
     if (!isSticker) {
+      // ─── DEBUG: Show what we detected ───
+      let debugInfo = 'Detected message types:\n';
+      if (quoted.message) {
+        debugInfo += Object.keys(quoted.message).join(', ');
+      } else if (quoted.key) {
+        debugInfo += 'Has key object';
+      } else {
+        debugInfo += 'No message found';
+      }
       return await sock.sendMessage(from, { 
-        text: `🖼️ Reply to a *sticker* with: ${prefix || '.'}toimage` 
+        text: `🖼️ Reply to a *sticker* with: ${prefix || '.'}toimage\n\nDebug: ${debugInfo}` 
       });
     }
 
@@ -6113,8 +6161,9 @@ register({
     try {
       const { downloadMediaMessage } = require('@whiskeysockets/baileys');
       
-      // ─── FIX: Download properly ───
+      // ─── FIX: Download from the correct message source ───
       try {
+        // Try with the full message
         mediaBuffer = await downloadMediaMessage(
           quoted.message || quoted,
           'buffer',
@@ -6122,8 +6171,20 @@ register({
           { reuploadRequest: sock.updateMediaMessage }
         );
       } catch (dlErr) {
-        // Fallback: try using sock.downloadMediaMessage
-        mediaBuffer = await sock.downloadMediaMessage(quoted);
+        console.log('First download failed:', dlErr.message);
+        // Try with just the key
+        try {
+          mediaBuffer = await downloadMediaMessage(
+            { key: quoted.key, message: quoted.message },
+            'buffer',
+            {},
+            { reuploadRequest: sock.updateMediaMessage }
+          );
+        } catch (dlErr2) {
+          console.log('Second download failed:', dlErr2.message);
+          // Fallback: use sock.downloadMediaMessage
+          mediaBuffer = await sock.downloadMediaMessage(quoted);
+        }
       }
 
       if (!mediaBuffer || mediaBuffer.length < 100) {
@@ -8176,341 +8237,147 @@ register({
   name: 'playvideo',
   aliases: ['playv', 'ytmp4', 'ytvideo', 'watch', 'vplay'],
   category: 'DOWNLOADER',
-  description: 'Search and download YouTube videos (MP4)',
-  async execute({ sock, from, args, prefix, command }) {
-    if (!args[0]) {
+  description: 'Search and download YouTube videos as MP4',
+  async execute({ sock, from, msg, args, prefix, command }) {
+    // ─── BUILD TEXT FROM ARGS ───
+    const text = args.join(' ');
+    
+    if (!text) {
       return await sock.sendMessage(from, { 
-        text: `🎬 *Video Player*\n\nUsage: ${prefix}${command} <song name or URL>\nExample: ${prefix}${command} Music Video\n\n*Examples:*\n${prefix}${command} Shape of You\n${prefix}${command} https://youtu.be/60ItHLz5WEA\n\n*Quality:* Best available (up to 1080p)\n*Note:* Videos over 16MB sent as documents.` 
+        text: `🎬 Usage: ${prefix || '.'}playvideo <song name or URL>\nExample: ${prefix || '.'}playvideo Music Video` 
       });
     }
 
-    const query = args.join(" ");
-    const isUrl = query.includes('youtube.com') || query.includes('youtu.be');
+    await sock.sendMessage(from, { text: `🔍 Searching for: ${text}` });
 
-    await sock.sendMessage(from, { text: `⏳ Searching for "${query}"...` });
+    try {
+      // ─── GET VIDEO INFO ───
+      let videoUrl = text;
+      let videoTitle = 'YouTube Video';
+      let thumbnail = '';
+      let duration = '';
+      let artist = '';
 
-    let videoUrl = query;
-    let title = 'YouTube Video';
-    let thumbnail = '';
-    let duration = '';
-    let artist = '';
-
-    // ==========================================================
-    // STEP 1: If not a URL, search via yt-search
-    // ==========================================================
-    if (!isUrl) {
-      try {
+      if (text.includes('youtube.com') || text.includes('youtu.be')) {
+        const videoId = text.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/)?.[1];
+        if (videoId) {
+          try {
+            const yts = require('yt-search');
+            const search = await yts({ videoId });
+            if (search) {
+              videoTitle = search.title || 'YouTube Video';
+              thumbnail = search.thumbnail || '';
+              duration = search.timestamp || search.duration || '';
+              artist = search.author?.name || search.author || '';
+            }
+          } catch (e) {}
+        }
+        videoUrl = text;
+      } else {
         const yts = require('yt-search');
-        const searchResults = await yts(query);
-        
-        if (!searchResults || !searchResults.videos || searchResults.videos.length === 0) {
-          return await sock.sendMessage(from, { 
-            text: `❌ No results found for "${query}".\n\n💡 Try a different search term.` 
-          });
+        const search = await yts(text);
+        if (!search?.videos?.length) {
+          return await sock.sendMessage(from, { text: '❌ No results found.' });
         }
-
-        const target = searchResults.videos[0];
-        videoUrl = target.url;
-        title = target.title || 'YouTube Video';
-        thumbnail = target.thumbnail || target.image || '';
-        duration = target.timestamp || target.duration || '';
-        artist = target.author?.name || target.author || '';
-
-      } catch (ytErr) {
-        console.warn('yt-search failed:', ytErr.message);
+        const video = search.videos[0];
+        videoUrl = video.url;
+        videoTitle = video.title || 'YouTube Video';
+        thumbnail = video.thumbnail || '';
+        duration = video.timestamp || video.duration || '';
+        artist = video.author?.name || video.author || '';
       }
-    }
 
-    // Send thumbnail if available
-    if (thumbnail) {
-      try {
+      // ─── SEND THUMBNAIL ───
+      if (thumbnail) {
+        try {
+          await sock.sendMessage(from, {
+            image: { url: thumbnail },
+            caption: `🎬 *${videoTitle}*\n${artist ? `👤 ${artist}\n` : ''}${duration ? `⏱️ ${duration}\n` : ''}\n⏳ Downloading video...`
+          });
+        } catch (e) {}
+      }
+
+      // ─── DOWNLOAD VIDEO ───
+      let videoData = null;
+      const apis = [
+        { name: 'EliteProTech', url: `https://eliteprotech-apis.zone.id/ytmp4?url=${encodeURIComponent(videoUrl)}` },
+        { name: 'David Cyril', url: `https://apis.davidcyril.name.ng/play?url=${encodeURIComponent(videoUrl)}&format=mp4` },
+        { name: 'Prince', url: `https://api.princetechn.com/api/download/ytmp4?apikey=prince&url=${encodeURIComponent(videoUrl)}` },
+        { name: 'OmegaTech', url: `https://api.omegatech.app/api/download/play?search=${encodeURIComponent(videoUrl)}` }
+      ];
+
+      for (const api of apis) {
+        try {
+          const res = await fetch(api.url, { 
+            method: 'GET',
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+          });
+          if (!res.ok) continue;
+          const data = await res.json();
+          const download = data?.result?.url || data?.result?.download_url || data?.download_url || data?.url || data?.video || data?.download;
+          if (download) {
+            videoData = { download, title: data?.result?.title || data?.title || videoTitle };
+            break;
+          }
+        } catch (e) {
+          console.log(`❌ ${api.name} failed:`, e.message);
+        }
+      }
+
+      if (!videoData) {
+        return await sock.sendMessage(from, { text: '❌ All download sources failed. Try again.' });
+      }
+
+      // ─── FETCH VIDEO BUFFER ───
+      const videoRes = await fetch(videoData.download, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
+
+      if (!videoRes.ok) {
+        return await sock.sendMessage(from, { text: '❌ Failed to download video file.' });
+      }
+
+      let videoBuffer = Buffer.from(await videoRes.arrayBuffer());
+
+      if (videoBuffer.length < 5000) {
+        return await sock.sendMessage(from, { text: '❌ Downloaded file is too small.' });
+      }
+
+      const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
+
+      // ─── SEND VIDEO ───
+      const safeTitle = (videoData.title || 'video').replace(/[^\w\s-]/g, '').trim();
+      const caption = `🎬 *${videoData.title || videoTitle}*\n📦 Size: ${fileSizeMB} MB`;
+
+      // If video > 16MB, send as document
+      if (videoBuffer.length > 16 * 1024 * 1024) {
         await sock.sendMessage(from, {
-          image: { url: thumbnail },
-          caption: `🎬 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}${duration ? `⏱️ *Duration:* ${duration}\n` : ''}\n\n⬇️ *Downloading video...*`
+          document: videoBuffer,
+          mimetype: 'video/mp4',
+          fileName: `${safeTitle}.mp4`,
+          caption: `${caption}\n⚠️ Sent as document (16MB limit)`
         });
-      } catch (thumbErr) {
-        await sock.sendMessage(from, { 
-          text: `🎬 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}${duration ? `⏱️ *Duration:* ${duration}\n` : ''}\n\n⬇️ *Downloading video...*` 
-        });
-      }
-    }
-
-    // ==========================================================
-    // STEP 2: Try PRIMARY API - EliteProTech (MP4)
-    // ==========================================================
-    try {
-      const eliteUrl = `https://eliteprotech-apis.zone.id/ytmp4?url=${encodeURIComponent(videoUrl)}`;
-      const eliteRes = await fetch(eliteUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-      });
-
-      if (eliteRes.ok) {
-        const eliteData = await eliteRes.json();
-        
-        let videoDownloadUrl = eliteData.result?.url || eliteData.result?.download_url || 
-                               eliteData.url || eliteData.download_url || eliteData.result;
-
-        if (!videoDownloadUrl) {
-          const jsonString = JSON.stringify(eliteData);
-          const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp4|mkv|webm|avi)/i);
-          if (urlMatch) videoDownloadUrl = urlMatch[0];
-        }
-
-        if (videoDownloadUrl && videoDownloadUrl.startsWith('http')) {
-          const videoResponse = await fetch(videoDownloadUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      } else {
+        try {
+          await sock.sendMessage(from, {
+            video: videoBuffer,
+            mimetype: 'video/mp4',
+            caption: caption
           });
-
-          if (videoResponse.ok) {
-            const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
-            if (videoBuffer.length > 5000) {
-              const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
-              const safeTitle = title.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'video';
-              const fileName = `${safeTitle}.mp4`;
-
-              // Check if video is too large for WhatsApp (16MB limit)
-              if (videoBuffer.length > 16 * 1024 * 1024) {
-                await sock.sendMessage(from, {
-                  document: videoBuffer,
-                  mimetype: 'video/mp4',
-                  fileName: fileName,
-                  caption: `🎬 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}📦 *Size:* ${fileSizeMB} MB\n\n⚠️ *Sent as document due to WhatsApp 16MB limit.*`
-                });
-                return;
-              }
-
-              try {
-                await sock.sendMessage(from, {
-                  video: videoBuffer,
-                  mimetype: 'video/mp4',
-                  caption: `🎬 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success (EliteProTech)*`
-                });
-                return;
-              } catch (sendErr) {
-                // Fallback: send as document
-                await sock.sendMessage(from, {
-                  document: videoBuffer,
-                  mimetype: 'video/mp4',
-                  fileName: fileName,
-                  caption: `🎬 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
-                });
-                return;
-              }
-            }
-          }
-        }
-      }
-    } catch (eliteErr) {
-      console.warn('EliteProTech MP4 failed:', eliteErr.message);
-    }
-
-    // ==========================================================
-    // STEP 3: Fallback API - David Cyril (MP4)
-    // ==========================================================
-    try {
-      const davidUrl = `https://apis.davidcyril.name.ng/play?url=${encodeURIComponent(videoUrl)}&format=mp4`;
-      const davidRes = await fetch(davidUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-      });
-
-      if (davidRes.ok) {
-        const davidData = await davidRes.json();
-        
-        let videoDownloadUrl = davidData.result?.url || davidData.result?.download_url || 
-                               davidData.url || davidData.download_url || davidData.result;
-
-        if (!videoDownloadUrl) {
-          const jsonString = JSON.stringify(davidData);
-          const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp4|mkv|webm|avi)/i);
-          if (urlMatch) videoDownloadUrl = urlMatch[0];
-        }
-
-        if (videoDownloadUrl && videoDownloadUrl.startsWith('http')) {
-          const videoResponse = await fetch(videoDownloadUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+        } catch (sendErr) {
+          await sock.sendMessage(from, {
+            document: videoBuffer,
+            mimetype: 'video/mp4',
+            fileName: `${safeTitle}.mp4`,
+            caption: caption
           });
-
-          if (videoResponse.ok) {
-            const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
-            if (videoBuffer.length > 5000) {
-              const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
-              const safeTitle = title.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'video';
-              const fileName = `${safeTitle}.mp4`;
-
-              if (videoBuffer.length > 16 * 1024 * 1024) {
-                await sock.sendMessage(from, {
-                  document: videoBuffer,
-                  mimetype: 'video/mp4',
-                  fileName: fileName,
-                  caption: `🎬 *${title}*\n📦 *Size:* ${fileSizeMB} MB\n\n⚠️ *Sent as document due to size limit.*`
-                });
-                return;
-              }
-
-              try {
-                await sock.sendMessage(from, {
-                  video: videoBuffer,
-                  mimetype: 'video/mp4',
-                  caption: `🎬 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success (David Cyril)*`
-                });
-                return;
-              } catch (sendErr) {
-                await sock.sendMessage(from, {
-                  document: videoBuffer,
-                  mimetype: 'video/mp4',
-                  fileName: fileName,
-                  caption: `🎬 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
-                });
-                return;
-              }
-            }
-          }
         }
       }
-    } catch (davidErr) {
-      console.warn('David Cyril MP4 failed:', davidErr.message);
+
+    } catch (err) {
+      console.error('Playvideo error:', err);
+      await sock.sendMessage(from, { text: `❌ Error: ${err.message || 'Unknown error'}` });
     }
-
-    // ==========================================================
-    // STEP 4: Third Fallback - Prince API (MP4)
-    // ==========================================================
-    try {
-      const princeUrl = `https://api.princetechn.com/api/download/ytmp4?apikey=prince&url=${encodeURIComponent(videoUrl)}`;
-      const princeRes = await fetch(princeUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-      });
-
-      if (princeRes.ok) {
-        const princeData = await princeRes.json();
-        
-        let videoDownloadUrl = princeData.result?.download_url || princeData.result?.url || 
-                               princeData.download_url || princeData.url || princeData.result;
-
-        if (!videoDownloadUrl) {
-          const jsonString = JSON.stringify(princeData);
-          const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp4|mkv|webm|avi)/i);
-          if (urlMatch) videoDownloadUrl = urlMatch[0];
-        }
-
-        if (videoDownloadUrl && videoDownloadUrl.startsWith('http')) {
-          const videoResponse = await fetch(videoDownloadUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-          });
-
-          if (videoResponse.ok) {
-            const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
-            if (videoBuffer.length > 5000) {
-              const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
-              const safeTitle = title.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'video';
-              const fileName = `${safeTitle}.mp4`;
-
-              if (videoBuffer.length > 16 * 1024 * 1024) {
-                await sock.sendMessage(from, {
-                  document: videoBuffer,
-                  mimetype: 'video/mp4',
-                  fileName: fileName,
-                  caption: `🎬 *${title}*\n📦 *Size:* ${fileSizeMB} MB\n\n⚠️ *Sent as document due to size limit.*`
-                });
-                return;
-              }
-
-              try {
-                await sock.sendMessage(from, {
-                  video: videoBuffer,
-                  mimetype: 'video/mp4',
-                  caption: `🎬 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success (Prince)*`
-                });
-                return;
-              } catch (sendErr) {
-                await sock.sendMessage(from, {
-                  document: videoBuffer,
-                  mimetype: 'video/mp4',
-                  fileName: fileName,
-                  caption: `🎬 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
-                });
-                return;
-              }
-            }
-          }
-        }
-      }
-    } catch (princeErr) {
-      console.warn('Prince MP4 failed:', princeErr.message);
-    }
-
-    // ==========================================================
-    // STEP 5: Final Fallback - GiftedTech API
-    // ==========================================================
-    try {
-      const giftedUrl = `https://api.giftedtech.co.ke/api/download/ytmp4?apikey=gifted&url=${encodeURIComponent(videoUrl)}&quality=720p`;
-      const giftedRes = await fetch(giftedUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-      });
-
-      if (giftedRes.ok) {
-        const giftedData = await giftedRes.json();
-        
-        let videoDownloadUrl = giftedData.result?.download_url || giftedData.result?.url || 
-                               giftedData.download_url || giftedData.url || giftedData.result;
-
-        if (!videoDownloadUrl) {
-          const jsonString = JSON.stringify(giftedData);
-          const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp4|mkv|webm|avi)/i);
-          if (urlMatch) videoDownloadUrl = urlMatch[0];
-        }
-
-        if (videoDownloadUrl && videoDownloadUrl.startsWith('http')) {
-          const videoResponse = await fetch(videoDownloadUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-          });
-
-          if (videoResponse.ok) {
-            const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
-            if (videoBuffer.length > 5000) {
-              const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
-              const safeTitle = title.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'video';
-              const fileName = `${safeTitle}.mp4`;
-
-              if (videoBuffer.length > 16 * 1024 * 1024) {
-                await sock.sendMessage(from, {
-                  document: videoBuffer,
-                  mimetype: 'video/mp4',
-                  fileName: fileName,
-                  caption: `🎬 *${title}*\n📦 *Size:* ${fileSizeMB} MB\n\n⚠️ *Sent as document due to size limit.*`
-                });
-                return;
-              }
-
-              try {
-                await sock.sendMessage(from, {
-                  video: videoBuffer,
-                  mimetype: 'video/mp4',
-                  caption: `🎬 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success (GiftedTech)*`
-                });
-                return;
-              } catch (sendErr) {
-                await sock.sendMessage(from, {
-                  document: videoBuffer,
-                  mimetype: 'video/mp4',
-                  fileName: fileName,
-                  caption: `🎬 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
-                });
-                return;
-              }
-            }
-          }
-        }
-      }
-    } catch (giftedErr) {
-      console.warn('GiftedTech MP4 failed:', giftedErr.message);
-    }
-
-    // ==========================================================
-    // STEP 6: All APIs failed
-    // ==========================================================
-    await sock.sendMessage(from, { 
-      text: `⚠️ All download methods failed for "${query}".\n\n💡 Try:\n• A different video name\n• A direct YouTube URL\n• Using ${prefix}ytmp4 or ${prefix}ytv (fallback commands)\n• Wait a few minutes and retry\n\n${isUrl ? 'The video might be age-restricted or private.' : ''}` 
-    });
   }
 });
 
