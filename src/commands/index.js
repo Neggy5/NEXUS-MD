@@ -282,186 +282,93 @@ register({
 
 
 // -------------------- TO IMAGE --------------------
+// ==========================================
+//          TO GIF - Convert Sticker/Video to GIF
+// ==========================================
 register({
   name: 'togif',
   aliases: ['gif', 'togifconvert', 'makegif'],
   category: 'TOOLS',
-  description: 'Convert sticker/video to GIF and send to owner',
+  description: 'Convert sticker/video to GIF and send',
   async execute({ sock, from, msg, quoted, prefix, command }) {
     const target = quoted || msg;
-    
-    // ==========================================================
-    // FIX: Better mime detection - check multiple locations
-    // ==========================================================
-    let mime = '';
-    let isSticker = false;
+    const mime = target.mimetype || '';
+
+    // Check if it's a video or sticker
     let isVideo = false;
-    let isGif = false;
+    let isSticker = false;
 
-    // Check sticker message
-    if (target.message?.stickerMessage) {
-      mime = target.message.stickerMessage.mimetype || 'image/webp';
-      isSticker = true;
-    }
-    // Check video message
-    else if (target.message?.videoMessage) {
-      mime = target.message.videoMessage.mimetype || 'video/mp4';
+    if (target.message?.videoMessage) {
       isVideo = true;
-      // Check if it's a GIF
-      if (target.message.videoMessage.gifPlayback || mime.includes('gif')) {
-        isGif = true;
-      }
-    }
-    // Check image message (could be a webp sticker)
-    else if (target.message?.imageMessage) {
-      mime = target.message.imageMessage.mimetype || '';
-      if (mime.includes('webp')) isSticker = true;
-    }
-    // Check document message
-    else if (target.message?.documentMessage) {
-      mime = target.message.documentMessage.mimetype || '';
-      if (mime.includes('webp')) isSticker = true;
-    }
-    // Check quoted message
-    else if (quoted?.message?.stickerMessage) {
-      mime = quoted.message.stickerMessage.mimetype || 'image/webp';
+    } else if (target.message?.stickerMessage) {
       isSticker = true;
-    }
-    else if (quoted?.message?.videoMessage) {
-      mime = quoted.message.videoMessage.mimetype || 'video/mp4';
-      isVideo = true;
-    }
-    // Fallback: check target.mimetype
-    else if (target.mimetype) {
-      mime = target.mimetype;
-      if (mime.includes('webp')) isSticker = true;
-      if (mime.includes('video')) isVideo = true;
-      if (mime.includes('gif')) isGif = true;
+    } else if (mime.includes('video') || mime.includes('webp') || mime.includes('gif')) {
+      isVideo = mime.includes('video') || mime.includes('gif');
+      isSticker = mime.includes('webp');
     }
 
-    const cmdPrefix = prefix || PREFIX;
-    const cmdName = command || 'togif';
-
-    // Check if any valid media type was detected
-    if (!isSticker && !isVideo && !isGif && !mime.includes('webp') && !mime.includes('video')) {
-      await sock.sendMessage(from, { 
-        text: `❌ Reply to a *sticker* or *video* with: ${cmdPrefix}${cmdName}\n\nDetected: ${mime || 'unknown'}` 
+    if (!isVideo && !isSticker) {
+      return await sock.sendMessage(from, {
+        text: `🎬 Reply to a video or sticker with: ${prefix || '.'}togif`
       });
-      return;
     }
 
-    await sock.sendMessage(from, { text: `⏳ Converting to GIF...` });
+    await sock.sendMessage(from, { text: '⏳ Converting to GIF...' });
 
     try {
-      // ==========================================================
-      // FIX: Better download method
-      // ==========================================================
       const { downloadMediaMessage } = require('@whiskeysockets/baileys');
       
-      let mediaBuffer = null;
-      
-      try {
-        mediaBuffer = await downloadMediaMessage(
-          target.message || target,
-          'buffer',
-          {},
-          { reuploadRequest: sock.updateMediaMessage }
-        );
-      } catch (dlErr) {
-        // Fallback: try the old method
-        mediaBuffer = await sock.downloadMediaMessage(target);
-      }
+      let mediaBuffer = await downloadMediaMessage(
+        target.message || target,
+        'buffer',
+        {},
+        { reuploadRequest: sock.updateMediaMessage }
+      );
 
       if (!mediaBuffer || mediaBuffer.length < 100) {
-        return await sock.sendMessage(from, { text: `❌ Failed to download media.` });
+        return await sock.sendMessage(from, { text: '❌ Failed to download media.' });
       }
 
-      let gifBuffer = mediaBuffer;
-      let isConverted = false;
+      let finalBuffer = mediaBuffer;
 
-      // ==========================================================
-      // Convert sticker/webp to GIF
-      // ==========================================================
+      // If it's a sticker (webp), convert to video first
       if (isSticker || mime.includes('webp')) {
         try {
           const ffmpeg = require('ffmpeg-static');
           const { exec } = require('child_process');
           const fs = require('fs');
           const path = require('path');
-          
+
           const tmpDir = path.join(process.cwd(), 'tmp');
           if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-          
+
           const inputPath = path.join(tmpDir, `sticker_${Date.now()}.webp`);
-          const outputPath = path.join(tmpDir, `gif_${Date.now()}.gif`);
-          
+          const outputPath = path.join(tmpDir, `gif_${Date.now()}.mp4`);
+
           fs.writeFileSync(inputPath, mediaBuffer);
-          
           await new Promise((resolve, reject) => {
-            exec(`"${ffmpeg}" -i "${inputPath}" -vf "fps=15,scale=512:512:force_original_aspect_ratio=decrease" -loop 0 "${outputPath}"`, (error) => {
+            exec(`"${ffmpeg}" -i "${inputPath}" -vf "fps=15,scale=512:512:force_original_aspect_ratio=decrease" -c:v libx264 -pix_fmt yuv420p "${outputPath}"`, (error) => {
               if (error) reject(error);
               else resolve();
             });
           });
-          
-          gifBuffer = fs.readFileSync(outputPath);
+
+          finalBuffer = fs.readFileSync(outputPath);
           try { fs.unlinkSync(inputPath); } catch {}
           try { fs.unlinkSync(outputPath); } catch {}
-          isConverted = true;
         } catch (convErr) {
-          console.warn('Sticker to GIF conversion failed:', convErr.message);
+          return await sock.sendMessage(from, { text: '❌ Failed to convert sticker.' });
         }
       }
 
-      // ==========================================================
-      // Convert video to GIF
-      // ==========================================================
-      if ((isVideo || mime.includes('video')) && !isConverted) {
-        try {
-          const ffmpeg = require('ffmpeg-static');
-          const { exec } = require('child_process');
-          const fs = require('fs');
-          const path = require('path');
-          
-          const tmpDir = path.join(process.cwd(), 'tmp');
-          if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-          
-          const inputPath = path.join(tmpDir, `video_${Date.now()}.mp4`);
-          const outputPath = path.join(tmpDir, `gif_${Date.now()}.gif`);
-          
-          fs.writeFileSync(inputPath, mediaBuffer);
-          
-          await new Promise((resolve, reject) => {
-            exec(`"${ffmpeg}" -i "${inputPath}" -vf "fps=15,scale=512:512:force_original_aspect_ratio=decrease" -loop 0 "${outputPath}"`, (error) => {
-              if (error) reject(error);
-              else resolve();
-            });
-          });
-          
-          gifBuffer = fs.readFileSync(outputPath);
-          try { fs.unlinkSync(inputPath); } catch {}
-          try { fs.unlinkSync(outputPath); } catch {}
-          isConverted = true;
-        } catch (convErr) {
-          console.warn('Video to GIF conversion failed:', convErr.message);
-        }
+      if (!finalBuffer || finalBuffer.length < 100) {
+        return await sock.sendMessage(from, { text: '❌ Failed to convert to GIF.' });
       }
 
-      if (!gifBuffer || gifBuffer.length < 100) {
-        return await sock.sendMessage(from, { text: `❌ Failed to convert to GIF.` });
-      }
-
-      const ownerJid = getOwnerJid(sock);
-
-      await sock.sendMessage(ownerJid, {
-        video: gifBuffer,
-        mimetype: 'video/mp4',
+      await sock.sendMessage(from, {
+        video: finalBuffer,
         gifPlayback: true,
-        caption: `🎬 *Converted to GIF*\n📦 *Size:* ${(gifBuffer.length / 1024).toFixed(1)} KB`
-      });
-
-      await sock.sendMessage(from, { 
-        text: `✅ Converted to GIF and sent to owner's chat.\n📤 *Sent to:* ${ownerJid.split('@')[0]}` 
+        caption: `🎬 *GIF Created*\n📦 Size: ${(finalBuffer.length / 1024).toFixed(1)} KB`
       });
 
     } catch (error) {
@@ -470,7 +377,6 @@ register({
     }
   }
 });
-
 // -------------------- VIEWONCE --------------------
 register({
   name: 'viewonce',
@@ -6142,6 +6048,99 @@ register({
     }
   }
 });
+// ==========================================
+//          TO IMAGE - Convert Sticker to Image
+// ==========================================
+register({
+  name: 'toimage',
+  aliases: ['img', 'toimg', 'convertimg'],
+  category: 'TOOLS',
+  description: 'Convert sticker to image and send',
+  async execute({ sock, from, msg, quoted, prefix, command }) {
+    const target = quoted || msg;
+    const mime = target.mimetype || '';
+
+    // Check if it's a sticker
+    let isSticker = false;
+    if (target.message?.stickerMessage) {
+      isSticker = true;
+    } else if (target.message?.imageMessage?.mimetype?.includes('webp')) {
+      isSticker = true;
+    } else if (mime.includes('webp')) {
+      isSticker = true;
+    }
+
+    if (!isSticker) {
+      return await sock.sendMessage(from, {
+        text: `🖼️ Reply to a sticker with: ${prefix || '.'}toimage`
+      });
+    }
+
+    await sock.sendMessage(from, { text: '⏳ Converting sticker to image...' });
+
+    try {
+      const { downloadMediaMessage } = require('@whiskeysockets/baileys');
+      
+      let mediaBuffer = await downloadMediaMessage(
+        target.message || target,
+        'buffer',
+        {},
+        { reuploadRequest: sock.updateMediaMessage }
+      );
+
+      if (!mediaBuffer || mediaBuffer.length < 100) {
+        return await sock.sendMessage(from, { text: '❌ Failed to download sticker.' });
+      }
+
+      // Convert webp to jpg using sharp
+      let imageBuffer = null;
+      try {
+        const sharp = require('sharp');
+        imageBuffer = await sharp(mediaBuffer).toFormat('jpeg').toBuffer();
+      } catch (sharpErr) {
+        // Fallback: ffmpeg
+        try {
+          const ffmpeg = require('ffmpeg-static');
+          const { exec } = require('child_process');
+          const fs = require('fs');
+          const path = require('path');
+
+          const tmpDir = path.join(process.cwd(), 'tmp');
+          if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+
+          const inputPath = path.join(tmpDir, `sticker_${Date.now()}.webp`);
+          const outputPath = path.join(tmpDir, `image_${Date.now()}.jpg`);
+
+          fs.writeFileSync(inputPath, mediaBuffer);
+          await new Promise((resolve, reject) => {
+            exec(`"${ffmpeg}" -i "${inputPath}" "${outputPath}"`, (error) => {
+              if (error) reject(error);
+              else resolve();
+            });
+          });
+          imageBuffer = fs.readFileSync(outputPath);
+          try { fs.unlinkSync(inputPath); } catch {}
+          try { fs.unlinkSync(outputPath); } catch {}
+        } catch (ffmpegErr) {
+          return await sock.sendMessage(from, { text: '❌ Failed to convert sticker.' });
+        }
+      }
+
+      if (!imageBuffer || imageBuffer.length < 100) {
+        return await sock.sendMessage(from, { text: '❌ Failed to convert sticker.' });
+      }
+
+      await sock.sendMessage(from, {
+        image: imageBuffer,
+        caption: `🖼️ *Sticker to Image*\n📦 Size: ${(imageBuffer.length / 1024).toFixed(1)} KB`
+      });
+
+    } catch (error) {
+      console.error('To image error:', error);
+      await sock.sendMessage(from, { text: `⚠️ Error: ${error.message || 'Could not convert sticker.'}` });
+    }
+  }
+});
 register({
   name: 'alightgen',
   aliases: ['alight', 'amprem', 'alightprem', 'amgen'],
@@ -7999,145 +7998,105 @@ register({
 });
 register({
   name: 'play',
-  aliases: ['song', 'music', 'ytplay', 'ytaudio', 'playv2'],
+  aliases: ['song', 'music', 'ytplay', 'ytaudio'],
   category: 'DOWNLOADER',
-  description: 'Search and download YouTube audio as MP3 (David Cyril API)',
+  description: 'Search and download YouTube audio as MP3',
   async execute({ sock, from, args, prefix, command }) {
-    // ==========================================================
-    // Check if user provided a query or URL
-    // ==========================================================
     if (!args[0]) {
       return await sock.sendMessage(from, { 
-        text: `🎵 *YouTube Music Player (v2)*\n\nUsage: ${prefix}${command} <song name or URL>\nExample: ${prefix}${command} Alone\n\n*Examples:*\n${prefix}${command} Shape of You\n${prefix}${command} https://www.youtube.com/watch?v=xxxxxxxxxxx\n\n*Note:* Searches YouTube and returns the top result as MP3 audio.` 
+        text: `🎵 Usage: ${prefix}${command} <song name or URL>\nExample: ${prefix}${command} Alone` 
       });
     }
 
-    const query = args.join(" ");
-    const isUrl = query.includes('youtube.com') || query.includes('youtu.be');
-
-    await sock.sendMessage(from, { 
-      text: `🎵 *Searching for:* ${query}` 
-    });
+    const text = args.join(' ');
+    await sock.sendMessage(from, { text: `🔍 Searching...` });
 
     try {
-      // ==========================================================
-      // Build API URL
-      // ==========================================================
-      const apiUrl = new URL('https://apis.davidcyril.name.ng/download/ytmp3v2');
-      
-      if (isUrl) {
-        apiUrl.searchParams.append('url', query);
-      } else {
-        apiUrl.searchParams.append('search', query);
-      }
+      // ─── GET VIDEO INFO ───
+      let videoUrl = text;
+      let videoTitle = 'YouTube Audio';
+      let thumbnail = '';
 
-      const response = await fetch(apiUrl.toString(), {
-        method: 'GET',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'application/json'
+      if (text.includes('youtube.com') || text.includes('youtu.be')) {
+        const videoId = text.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/)?.[1];
+        if (videoId) {
+          try {
+            const yts = require('yt-search');
+            const search = await yts({ videoId });
+            if (search) {
+              videoTitle = search.title || 'YouTube Audio';
+              thumbnail = search.thumbnail || '';
+            }
+          } catch (e) {}
         }
-      });
-
-      if (!response.ok) {
-        throw new Error(`API returned ${response.status}`);
+        videoUrl = text;
+      } else {
+        const yts = require('yt-search');
+        const search = await yts(text);
+        if (!search?.videos?.length) {
+          return await sock.sendMessage(from, { text: '❌ No results found.' });
+        }
+        const video = search.videos[0];
+        videoUrl = video.url;
+        videoTitle = video.title || 'YouTube Audio';
+        thumbnail = video.thumbnail || '';
       }
 
-      const data = await response.json();
+      // ─── DOWNLOAD AUDIO ───
+      let audioData = null;
+      const apis = [
+        { name: 'David Cyril', url: `https://apis.davidcyril.name.ng/download/ytmp3v2?url=${encodeURIComponent(videoUrl)}` },
+        { name: 'OmegaTech', url: `https://api.omegatech.app/api/download/play?search=${encodeURIComponent(videoUrl)}` },
+        { name: 'Prince', url: `https://api.princetechn.com/api/download/ytmp3?apikey=prince&url=${encodeURIComponent(videoUrl)}` },
+        { name: 'EliteProTech', url: `https://eliteprotech-apis.zone.id/ytmp3?url=${encodeURIComponent(videoUrl)}` }
+      ];
 
-      // ==========================================================
-      // Extract data from response
-      // ==========================================================
-      let title = data.result?.title || data.title || data.videoTitle || 'YouTube Audio';
-      let artist = data.result?.artist || data.artist || data.channel || 'Unknown';
-      let duration = data.result?.duration || data.duration || 'N/A';
-      let thumbnail = data.result?.thumbnail || data.thumbnail || data.thumb || '';
-      let audioUrl = data.result?.url || data.result?.download_url || data.url || data.download_url;
-
-      // Fallback: try to find any URL in the response
-      if (!audioUrl) {
-        const jsonString = JSON.stringify(data);
-        const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp3|m4a|ogg|wav)/i);
-        if (urlMatch) audioUrl = urlMatch[0];
-      }
-
-      if (!audioUrl) {
-        return await sock.sendMessage(from, { 
-          text: `❌ No audio download URL found for "${query}".\n\n💡 Try a different search term or direct URL.` 
-        });
-      }
-
-      // ==========================================================
-      // Send video info with thumbnail
-      // ==========================================================
-      let infoMsg = `🎵 *${title}*\n`;
-      infoMsg += `👤 *Artist:* ${artist}\n`;
-      infoMsg += `⏱️ *Duration:* ${duration}\n\n`;
-      infoMsg += `⬇️ *Downloading audio...*`;
-
-      if (thumbnail) {
+      for (const api of apis) {
         try {
-          await sock.sendMessage(from, {
-            image: { url: thumbnail },
-            caption: infoMsg
-          });
-        } catch (thumbErr) {
-          await sock.sendMessage(from, { text: infoMsg });
-        }
-      } else {
-        await sock.sendMessage(from, { text: infoMsg });
+          const res = await fetch(api.url, { timeout: 30000 });
+          const data = await res.json();
+          const download = data?.result?.url || data?.result?.download_url || data?.download_url || data?.url || data?.download;
+          if (download) {
+            audioData = { download, title: data?.result?.title || data?.title || videoTitle };
+            break;
+          }
+        } catch (e) {}
       }
 
-      // ==========================================================
-      // Download the audio
-      // ==========================================================
-      const audioResponse = await fetch(audioUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-      });
-
-      if (!audioResponse.ok) {
-        throw new Error(`Failed to download audio: ${audioResponse.status}`);
+      if (!audioData) {
+        return await sock.sendMessage(from, { text: '❌ Failed to get audio. Try again.' });
       }
 
-      const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+      // ─── FETCH AUDIO BUFFER ───
+      const audioRes = await fetch(audioData.download);
+      let audioBuffer = Buffer.from(await audioRes.arrayBuffer());
 
-      if (audioBuffer.length < 5000) {
-        return await sock.sendMessage(from, { 
-          text: `❌ Downloaded file is too small. Please try again.` 
-        });
+      if (audioBuffer.length < 1000) {
+        return await sock.sendMessage(from, { text: '❌ File too small.' });
       }
 
-      const fileSizeMB = (audioBuffer.length / 1024 / 1024).toFixed(1);
-
-      // ==========================================================
-      // Send the audio
-      // ==========================================================
-      const safeTitle = title.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'audio';
+      // ─── SEND AUDIO ───
+      const safeTitle = (audioData.title || 'audio').replace(/[^\w\s-]/g, '').trim();
 
       try {
         await sock.sendMessage(from, {
           audio: audioBuffer,
           mimetype: 'audio/mpeg',
           fileName: `${safeTitle}.mp3`,
-          caption: `🎵 *${title}*\n👤 ${artist}\n📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success*`
+          ptt: false
         });
-      } catch (sendErr) {
-        // Fallback: send as document
+      } catch (e) {
         await sock.sendMessage(from, {
           document: audioBuffer,
           mimetype: 'audio/mpeg',
           fileName: `${safeTitle}.mp3`,
-          caption: `🎵 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
+          caption: `🎵 ${safeTitle}`
         });
       }
 
-    } catch (error) {
-      console.error('Play error:', error);
-      await sock.sendMessage(from, { 
-        text: `⚠️ Error: ${error.message || 'Could not search or download.'}\n\n💡 Try:\n• ${prefix}${command} Alone\n• ${prefix}${command} Shape of You\n• ${prefix}${command} https://youtube.com/watch?v=xxxxx\n\n💡 Or try again later.` 
-      });
+    } catch (err) {
+      console.error('Play error:', err);
+      await sock.sendMessage(from, { text: `❌ Error: ${err.message}` });
     }
   }
 });
