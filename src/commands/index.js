@@ -3158,37 +3158,41 @@ register({
 });
 register({
   name: 'pinterest',
-  aliases: ['pin', 'pins', 'pinterestdl'],
+  aliases: ['pin', 'pins', 'pinvideo', 'pinterestdl'],
   category: 'DOWNLOADER',
-  description: 'Download Pinterest videos and images',
+  description: 'Search and download Pinterest videos',
   async execute({ sock, from, args, prefix, command }) {
+    // ==========================================================
+    // Check if user provided a search query
+    // ==========================================================
     if (!args[0]) {
       return await sock.sendMessage(from, { 
-        text: `📌 *Pinterest Downloader*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://pin.it/1cR6JJNpv\n\n*Supports:*\n• Pinterest video pins\n• Pinterest image pins\n\n*Note:* For image pins, use the image URL directly.` 
+        text: `📌 *Pinterest Video Search & Download*\n\nUsage: ${prefix}${command} <query>\nExample: ${prefix}${command} Naruto\n\n*Examples:*\n${prefix}${command} Anime\n${prefix}${command} Nature wallpaper\n${prefix}${command} Aesthetic\n${prefix}${command} Funny cats\n\n*Note:* Returns up to 10 video results with download links.` 
       });
     }
 
-    const url = args[0];
+    const query = args.join(" ");
 
-    // Check if it's a Pinterest URL
-    if (!url.includes('pin.it') && !url.includes('pinterest.com')) {
-      return await sock.sendMessage(from, { 
-        text: `❌ Invalid URL. Please provide a valid Pinterest link.\nExample: https://pin.it/1cR6JJNpv` 
-      });
-    }
-
-    await sock.sendMessage(from, { text: `⏳ Processing Pinterest media...` });
+    await sock.sendMessage(from, { 
+      text: `📌 *Searching Pinterest for:* ${query}` 
+    });
 
     try {
-      // Primary: GiftedTech API
-      const response = await fetch(
-        `https://api.giftedtech.co.ke/api/download/pinterestv2?apikey=gifted&url=${encodeURIComponent(url)}`,
-        {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-          }
+      // ==========================================================
+      // Call Pinterest Search API
+      // ==========================================================
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const apiUrl = new URL(`${baseUrl}/api/download/Pinterest`);
+      apiUrl.searchParams.append('action', 'search');
+      apiUrl.searchParams.append('query', query);
+
+      const response = await fetch(apiUrl.toString(), {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
         }
-      );
+      });
 
       if (!response.ok) {
         throw new Error(`API returned ${response.status}`);
@@ -3196,108 +3200,225 @@ register({
 
       const data = await response.json();
 
-      // Extract video and audio URLs
-      let videoUrl = data.result?.videoUrl || null;
-      let audioUrl = data.result?.audioUrl || null;
-
-      if (!videoUrl && !audioUrl) {
-        // Try to find any URL in the response
-        const jsonString = JSON.stringify(data);
-        const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp4|mov|jpg|jpeg|png|gif)/i);
-        if (urlMatch) {
-          videoUrl = urlMatch[0];
-        }
-      }
-
-      if (!videoUrl && !audioUrl) {
-        throw new Error("Could not extract media from Pinterest link.");
-      }
-
-      // Use video URL as primary, fallback to audio URL
-      const mediaUrl = videoUrl || audioUrl;
-
-      // Download the media
-      const mediaResponse = await fetch(mediaUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-      });
-
-      if (!mediaResponse.ok) {
-        throw new Error(`Media download failed: ${mediaResponse.status}`);
-      }
-
-      const mediaBuffer = Buffer.from(await mediaResponse.arrayBuffer());
-
-      if (mediaBuffer.length < 5000) {
-        throw new Error("Downloaded file is too small. The link may be invalid.");
-      }
-
-      const fileSizeMB = (mediaBuffer.length / 1024 / 1024).toFixed(1);
-
-      // Detect if it's video or image
-      const isVideo = mediaUrl.includes('.mp4') || mediaUrl.includes('.mov') || mediaUrl.includes('.webm');
-      const isAudio = mediaUrl.includes('.mp3') || mediaUrl.includes('.m4a') || mediaUrl.includes('.ogg');
-
-      const caption = `📌 *Pinterest Media*\n📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success*`;
-
-      // Send based on media type
-      try {
-        if (isVideo) {
-          await sock.sendMessage(from, {
-            video: mediaBuffer,
-            mimetype: 'video/mp4',
-            caption: caption
-          });
-        } else if (isAudio) {
-          await sock.sendMessage(from, {
-            audio: mediaBuffer,
-            mimetype: 'audio/mpeg',
-            fileName: `pinterest_audio_${Date.now()}.mp3`,
-            caption: caption
-          });
-        } else {
-          // Try to send as image
-          await sock.sendMessage(from, {
-            image: mediaBuffer,
-            caption: caption
-          });
-        }
-      } catch (sendErr) {
-        // Fallback: send as document
-        const ext = mediaUrl.split('.').pop().split('?')[0] || 'mp4';
-        await sock.sendMessage(from, {
-          document: mediaBuffer,
-          fileName: `pinterest_${Date.now()}.${ext}`,
-          caption: `📌 *Pinterest Media*\n📦 *Size:* ${fileSizeMB} MB`
+      // ==========================================================
+      // Check if search was successful
+      // ==========================================================
+      if (!data.success) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Search failed: ${data.message || 'Unknown error'}` 
         });
       }
 
-    } catch (error) {
-      console.error('Pinterest download error:', error);
+      const videos = data.data?.videos || [];
+      
+      if (!videos.length) {
+        return await sock.sendMessage(from, { 
+          text: `❌ No videos found for "${query}".` 
+        });
+      }
 
-      // Fallback: Prince API
-      try {
-        const princeUrl = 'https://api.princetechn.com/api/search/pinterest';
-        const fallbackRes = await fetch(`${princeUrl}?apikey=prince&query=${encodeURIComponent(url)}`);
-        const fallbackData = await fallbackRes.json();
+      // ==========================================================
+      // Send results (max 10)
+      // ==========================================================
+      const maxResults = Math.min(videos.length, 10);
+      
+      await sock.sendMessage(from, { 
+        text: `📌 *Found ${videos.length} videos for "${query}"*\n📤 *Sending ${maxResults} results...*` 
+      });
 
-        let fallbackImage = fallbackData.result?.[0] || fallbackData.url || fallbackData.image;
+      for (let i = 0; i < maxResults; i++) {
+        const video = videos[i];
+        
+        const title = video.title || 'Untitled';
+        const description = video.description || 'No description';
+        const videoUrl = video.video || '';
+        const thumbnail = video.thumbnail || '';
+        const link = video.link || '';
+        const pinner = video.pinner || 'Unknown';
+        const username = video.username || '';
+        const likes = video.likes || 0;
 
-        if (fallbackImage) {
-          const imgRes = await fetch(fallbackImage);
-          const imgBuf = Buffer.from(await imgRes.arrayBuffer());
-          if (imgBuf.length > 5000) {
-            return await sock.sendMessage(from, {
-              image: imgBuf,
-              caption: '📌 *Pinterest Image (fallback)*\n✅ *Download Success*'
+        if (!videoUrl) continue;
+
+        let msg = `📌 *${title}*\n`;
+        msg += `👤 *Pinner:* ${pinner}${username ? ` (@${username})` : ''}\n`;
+        msg += `❤️ *Likes:* ${likes.toLocaleString()}\n`;
+        msg += `📝 *Description:* ${description.slice(0, 100)}${description.length > 100 ? '...' : ''}\n`;
+        msg += `🔗 *Link:* ${link}\n\n`;
+        msg += `⬇️ *Downloading video...*`;
+
+        // Send thumbnail with info
+        if (thumbnail) {
+          try {
+            await sock.sendMessage(from, {
+              image: { url: thumbnail },
+              caption: msg
             });
+          } catch (thumbErr) {
+            await sock.sendMessage(from, { text: msg });
           }
+        } else {
+          await sock.sendMessage(from, { text: msg });
         }
-      } catch (fallbackErr) {}
+
+        // ==========================================================
+        // Download and send the video
+        // ==========================================================
+        try {
+          const videoResponse = await fetch(videoUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              'Referer': 'https://www.pinterest.com/'
+            }
+          });
+
+          if (videoResponse.ok) {
+            const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+            
+            if (videoBuffer.length > 5000) {
+              const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
+              
+              // If video is too large, send as document
+              if (videoBuffer.length > 16 * 1024 * 1024) {
+                await sock.sendMessage(from, {
+                  document: videoBuffer,
+                  mimetype: 'video/mp4',
+                  fileName: `pinterest_${Date.now()}.mp4`,
+                  caption: `📌 *${title}*\n📦 *Size:* ${fileSizeMB} MB\n\n⚠️ *Sent as document due to 16MB limit.*`
+                });
+              } else {
+                try {
+                  await sock.sendMessage(from, {
+                    video: videoBuffer,
+                    mimetype: 'video/mp4',
+                    caption: `📌 *${title}*\n❤️ ${likes} likes\n📦 *Size:* ${fileSizeMB} MB\n\n✅ *Pinterest Download Success*`
+                  });
+                } catch (sendErr) {
+                  // Fallback: send as document
+                  await sock.sendMessage(from, {
+                    document: videoBuffer,
+                    mimetype: 'video/mp4',
+                    fileName: `pinterest_${Date.now()}.mp4`,
+                    caption: `📌 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
+                  });
+                }
+              }
+            }
+          }
+        } catch (dlErr) {
+          console.warn(`Failed to download video ${i+1}:`, dlErr.message);
+          await sock.sendMessage(from, { 
+            text: `⚠️ Failed to download video ${i+1}. Skipping...` 
+          });
+        }
+
+        // Small delay between videos
+        await new Promise(r => setTimeout(r, 1000));
+      }
 
       await sock.sendMessage(from, { 
-        text: `⚠️ Download Error: ${error.message || 'Could not download media.'}\n\n💡 Make sure the URL is valid and try again.` 
+        text: `✅ *Sent ${maxResults} videos from Pinterest.*\n💡 Use ${prefix}${command} <query> to search more.` 
+      });
+
+    } catch (error) {
+      console.error('Pinterest error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not search Pinterest.'}\n\n💡 Try:\n• ${prefix}${command} Naruto\n• ${prefix}${command} Anime\n• ${prefix}${command} Nature\n\n💡 Or try again later.` 
+      });
+    }
+  }
+});
+register({
+  name: 'couplepp',
+  aliases: ['couple', 'couplepfp', 'lovepp', 'matchingpp'],
+  category: 'GAMES',
+  description: 'Get random matching couple profile pictures',
+  async execute({ sock, from, args, prefix, command }) {
+    await sock.sendMessage(from, { 
+      text: `💑 *Generating random couple profile pictures...*` 
+    });
+
+    try {
+      // ==========================================================
+      // Call OmegaTech Couple PP API
+      // ==========================================================
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const response = await fetch(`${baseUrl}/api/random/couple-pp`, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ==========================================================
+      // Check if request was successful
+      // ==========================================================
+      if (!data.success) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Failed to fetch couple images: ${data.message || 'Unknown error'}` 
+        });
+      }
+
+      const maleUrl = data.result?.male || null;
+      const femaleUrl = data.result?.female || null;
+
+      if (!maleUrl || !femaleUrl) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Could not retrieve both images. Please try again.` 
+        });
+      }
+
+      // ==========================================================
+      // Download both images
+      // ==========================================================
+      const [maleBuffer, femaleBuffer] = await Promise.all([
+        fetch(maleUrl).then(res => res.ok ? Buffer.from(await res.arrayBuffer()) : null),
+        fetch(femaleUrl).then(res => res.ok ? Buffer.from(await res.arrayBuffer()) : null)
+      ]);
+
+      if (!maleBuffer || !femaleBuffer) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Failed to download one or both images. Please try again.` 
+        });
+      }
+
+      // ==========================================================
+      // Send both images
+      // ==========================================================
+      const timestamp = data.timestamp ? new Date(data.timestamp).toLocaleString() : 'Just now';
+      const caption = `💑 *Couple Profile Pictures*\n\n👤 *Male version:*\n👩 *Female version:*\n\n✨ _Powered by OmegaTech_\n🕐 ${timestamp}`;
+
+      // Send male image
+      await sock.sendMessage(from, {
+        image: maleBuffer,
+        caption: `👤 *Male PP*\n\n💑 *Matching couple set*`
+      });
+
+      // Small delay between images
+      await new Promise(r => setTimeout(r, 500));
+
+      // Send female image
+      await sock.sendMessage(from, {
+        image: femaleBuffer,
+        caption: `👩 *Female PP*\n\n💑 *Matching couple set*`
+      });
+
+      // Send combined info
+      await sock.sendMessage(from, { 
+        text: `✅ *Couple profile pictures sent successfully!*\n\n💡 Use ${prefix}${command} to get another set.` 
+      });
+
+    } catch (error) {
+      console.error('Couple PP error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not fetch couple images.'}\n\n💡 Try again later.` 
       });
     }
   }
@@ -3958,16 +4079,121 @@ register({
 });
 register({
   name: 'nanobanana',
-  aliases: ['bananaai', 'editimage', 'imgtransform', 'nanobanana2', 'aiedit'],
+  aliases: ['nano', 'bananaimg', 'nanobanana2', 'nbanana', 'txt2img'],
   category: 'AI',
-  description: 'Transform an image using AI Banana (nano-banana-2) with a prompt',
+  description: 'Generate AI images from text prompts using NanoBanana 2',
+  async execute({ sock, from, args, prefix, command }) {
+    // ==========================================================
+    // Check if user provided a prompt
+    // ==========================================================
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🍌 *NanoBanana 2 - AI Image Generator*\n\nUsage: ${prefix}${command} <prompt>\nExample: ${prefix}${command} A cow in city\n\n*Examples:*\n${prefix}${command} A beautiful sunset over mountains\n${prefix}${command} A cyberpunk city at night\n${prefix}${command} A cat wearing a wizard hat\n${prefix}${command} A floating island in space\n\n*Note:* Generates high-quality images using NanoBanana Pro.` 
+      });
+    }
+
+    const prompt = args.join(" ");
+
+    await sock.sendMessage(from, { 
+      text: `🍌 *Generating image...*\n📝 *Prompt:* ${prompt}\n⏳ This may take 10-20 seconds...` 
+    });
+
+    try {
+      // ==========================================================
+      // Call NanoBanana Pro API
+      // ==========================================================
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const apiUrl = new URL(`${baseUrl}/api/ai/nano-banana-pro`);
+      apiUrl.searchParams.append('prompt', prompt);
+
+      const response = await fetch(apiUrl.toString(), {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ==========================================================
+      // Check if generation was successful
+      // ==========================================================
+      if (!data.success) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Image generation failed: ${data.message || 'Unknown error'}` 
+        });
+      }
+
+      // ==========================================================
+      // Extract image URL
+      // ==========================================================
+      const imageUrl = data.image || data.result?.image || data.result?.url || data.url;
+
+      if (!imageUrl) {
+        return await sock.sendMessage(from, { 
+          text: `❌ No image URL returned from the API.` 
+        });
+      }
+
+      // ==========================================================
+      // Download the image
+      // ==========================================================
+      const imageResponse = await fetch(imageUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!imageResponse.ok) {
+        throw new Error(`Failed to download image: ${imageResponse.status}`);
+      }
+
+      const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+
+      if (imageBuffer.length < 1000) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Generated image is too small. Please try again.` 
+        });
+      }
+
+      const fileSize = (imageBuffer.length / 1024).toFixed(1);
+
+      // ==========================================================
+      // Send the image
+      // ==========================================================
+      const model = data.model || 'NanoBanana 2';
+      const timestamp = data.timestamp ? new Date(data.timestamp).toLocaleString() : 'Just now';
+
+      await sock.sendMessage(from, {
+        image: imageBuffer,
+        caption: `🍌 *${model}*\n\n📝 *Prompt:* ${prompt}\n📦 *Size:* ${fileSize} KB\n🕐 *Generated:* ${timestamp}\n\n✅ *Image Generated Successfully*\n\n✨ _Powered by OmegaTech_`
+      });
+
+    } catch (error) {
+      console.error('NanoBanana error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not generate image.'}\n\n💡 Try:\n• A different prompt\n• A shorter prompt\n• ${prefix}${command} a cat sitting on a chair\n• ${prefix}${command} beautiful landscape\n\n💡 Or try again later.` 
+      });
+    }
+  }
+});
+register({
+  name: 'nanoedit',
+  aliases: ['editimage', 'nanoe', 'imageedit', 'nanoeditor'],
+  category: 'AI',
+  description: 'Edit images using AI (NanoBanana 2) - reply to an image',
   async execute({ sock, from, msg, quoted, args, prefix, command }) {
     // ==========================================================
     // Check if user provided a prompt
     // ==========================================================
     if (!args[0]) {
       return await sock.sendMessage(from, { 
-        text: `🍌 *AI Banana Image Editor*\n\nUsage: ${prefix}${command} <prompt> (reply to an image)\nExample: ${prefix}${command} make it black and white\n\n*Examples:*\n${prefix}${command} turn this into a cartoon\n${prefix}${command} add a sunset background\n${prefix}${command} make this look like an oil painting\n${prefix}${command} remove the background\n\n*Note:* Reply to an image message with your prompt.` 
+        text: `🍌 *NanoBanana 2 - AI Image Editor*\n\nUsage: Reply to an image with: ${prefix}${command} <prompt>\n\n*Examples:*\n${prefix}${command} Edit this to nice picture and good theme\n${prefix}${command} Make this look like a painting\n${prefix}${command} Add a sunset background\n${prefix}${command} Turn this into anime style\n${prefix}${command} Remove the background\n\n*Note:* The AI will edit the replied image according to your prompt.` 
       });
     }
 
@@ -3978,41 +4204,43 @@ register({
     // Check if replying to an image
     // ==========================================================
     let imageUrl = null;
-    let imageBuffer = null;
 
     // Check for image in quoted message
-    if (quoted?.message?.imageMessage) {
-      imageUrl = quoted.message.imageMessage.url || quoted.message.imageMessage.caption;
-    } else if (msg?.message?.imageMessage) {
-      imageUrl = msg.message.imageMessage.url || msg.message.imageMessage.caption;
-    } else if (quoted?.message?.documentMessage?.mimetype?.includes('image')) {
-      imageUrl = quoted.message.documentMessage.url;
+    if (target.message?.imageMessage) {
+      imageUrl = target.message.imageMessage.url || target.message.imageMessage.caption;
+    } else if (target.message?.documentMessage?.mimetype?.includes('image')) {
+      imageUrl = target.message.documentMessage.url;
+    } else if (target.message?.stickerMessage) {
+      imageUrl = target.message.stickerMessage.url;
+    } else if (target.message?.videoMessage) {
+      imageUrl = target.message.videoMessage.url;
     }
 
     if (!imageUrl) {
       return await sock.sendMessage(from, { 
-        text: `❌ Reply to an *image* with: ${prefix}${command} <prompt>\n\nExample: Reply to a photo with:\n${prefix}${command} make it look like a painting` 
+        text: `❌ Reply to an *image* with: ${prefix}${command} <prompt>\n\nExample: Reply to a photo with:\n${prefix}${command} Edit this to nice picture and good theme` 
       });
     }
 
-    await sock.sendMessage(from, { text: `🍌 *AI Banana processing...*\n⏳ Editing image with prompt: *${prompt}*\n\nThis may take 10-20 seconds...` });
+    await sock.sendMessage(from, { 
+      text: `🍌 *Editing image...*\n📝 *Prompt:* ${prompt}\n⏳ This may take 10-30 seconds...` 
+    });
 
     try {
       // ==========================================================
-      // Call OmegaTech AI Banana API
+      // Call NanoBanana 2 Edit API
       // ==========================================================
       const baseUrl = 'https://omegatech-api.dixonomega.tech';
-      const response = await fetch(`${baseUrl}/api/ai/ai-nanobanana`, {
-        method: 'POST',
+      const apiUrl = new URL(`${baseUrl}/api/ai/nano-banana2`);
+      apiUrl.searchParams.append('image', imageUrl);
+      apiUrl.searchParams.append('prompt', prompt);
+
+      const response = await fetch(apiUrl.toString(), {
+        method: 'GET',
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          prompt: prompt,
-          image: imageUrl
-        })
+          'Accept': 'application/json'
+        }
       });
 
       if (!response.ok) {
@@ -4022,102 +4250,655 @@ register({
       const data = await response.json();
 
       // ==========================================================
-      // Extract generated image URL
+      // Check if editing was successful
       // ==========================================================
-      let resultImage = data.result?.url || data.result?.image || data.result?.generated || 
-                        data.url || data.image || data.generated || data.output;
-
-      if (!resultImage) {
-        // Try to find any URL in the response
-        const jsonString = JSON.stringify(data);
-        const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(png|jpg|jpeg|gif|webp)/i);
-        if (urlMatch) resultImage = urlMatch[0];
-      }
-
-      if (!resultImage) {
-        throw new Error("Could not extract generated image from API response.");
+      if (!data.success) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Image editing failed: ${data.message || 'Unknown error'}` 
+        });
       }
 
       // ==========================================================
-      // Download and send the result
+      // Extract task ID and wait for completion
       // ==========================================================
-      const imageResponse = await fetch(resultImage, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      const taskId = data.task_id || data.taskId || data.id;
+
+      if (!taskId) {
+        return await sock.sendMessage(from, { 
+          text: `❌ No task ID returned from the API.` 
+        });
+      }
+
+      // ==========================================================
+      // Check status with retry
+      // ==========================================================
+      await sock.sendMessage(from, { 
+        text: `⏳ *Processing...* (Task ID: ${taskId.slice(0, 8)})\nThis may take up to 60 seconds...` 
+      });
+
+      let editedImage = null;
+      let attempts = 0;
+      const maxAttempts = 12;
+
+      while (attempts < maxAttempts) {
+        attempts++;
+        await new Promise(r => setTimeout(r, 5000)); // Wait 5 seconds between checks
+
+        try {
+          const statusUrl = new URL(`${baseUrl}/api/ai/nano-banana2/status`);
+          statusUrl.searchParams.append('task_id', taskId);
+
+          const statusRes = await fetch(statusUrl.toString(), {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+          });
+
+          if (statusRes.ok) {
+            const statusData = await statusRes.json();
+            
+            if (statusData.status === 'completed' || statusData.success) {
+              editedImage = statusData.result?.image || statusData.result?.url || statusData.image || statusData.url;
+              break;
+            } else if (statusData.status === 'failed' || statusData.status === 'error') {
+              throw new Error(statusData.message || 'Editing failed');
+            }
+          }
+        } catch (e) {
+          // Continue retrying
+        }
+
+        if (attempts < maxAttempts) {
+          await sock.sendMessage(from, { 
+            text: `⏳ *Still processing...* (${attempts}/${maxAttempts})` 
+          });
+        }
+      }
+
+      // ==========================================================
+      // If we didn't get an image, try to get it from the initial response
+      // ==========================================================
+      if (!editedImage) {
+        // Some APIs return the image directly in the initial response
+        editedImage = data.result?.image || data.result?.url || data.image || data.url;
+      }
+
+      if (!editedImage) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Could not retrieve the edited image.\n\nTask ID: ${taskId}\n💡 Try again or check the status later.` 
+        });
+      }
+
+      // ==========================================================
+      // Download the edited image
+      // ==========================================================
+      const imageResponse = await fetch(editedImage, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
       });
 
       if (!imageResponse.ok) {
-        throw new Error(`Failed to download result: ${imageResponse.status}`);
+        throw new Error(`Failed to download edited image: ${imageResponse.status}`);
       }
 
       const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
 
       if (imageBuffer.length < 1000) {
-        throw new Error("Generated image is too small, possibly corrupted.");
+        return await sock.sendMessage(from, { 
+          text: `❌ Edited image is too small. Please try again.` 
+        });
       }
 
       const fileSize = (imageBuffer.length / 1024).toFixed(1);
 
       // ==========================================================
-      // Send the generated image
+      // Send the edited image
       // ==========================================================
+      const timestamp = data.timestamp ? new Date(data.timestamp).toLocaleString() : 'Just now';
+
       await sock.sendMessage(from, {
         image: imageBuffer,
-        caption: `🍌 *AI Banana Transform*\n\n📝 *Prompt:* ${prompt}\n📦 *Size:* ${fileSize} KB\n\n✅ *Image Generated Successfully*\n\n✨ _Powered by OmegaTech AI_`
+        caption: `🍌 *NanoBanana 2 - Image Edit*\n\n📝 *Prompt:* ${prompt}\n📦 *Size:* ${fileSize} KB\n🕐 *Generated:* ${timestamp}\n🆔 *Task ID:* ${taskId.slice(0, 12)}...\n\n✅ *Image Edited Successfully*\n\n✨ _Powered by OmegaTech_`
       });
 
     } catch (error) {
-      console.error('AI Banana error:', error);
+      console.error('NanoEdit error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not edit image.'}\n\n💡 Try:\n• A different prompt\n• A clearer image\n• ${prefix}${command} Make it look like a painting\n• ${prefix}${command} Add a sunset background\n\n💡 Or try again later.` 
+      });
+    }
+  }
+});
+register({
+  name: 'spotify',
+  aliases: ['sp', 'spsearch', 'spotifydl', 'spotifysearch'],
+  category: 'DOWNLOADER',
+  description: 'Search Spotify tracks and get preview audio',
+  async execute({ sock, from, args, prefix, command }) {
+    // ==========================================================
+    // Check if user provided a search query
+    // ==========================================================
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🎵 *Spotify Search & Preview*\n\nUsage: ${prefix}${command} <song/artist>\nExample: ${prefix}${command} Alone\n\n*Examples:*\n${prefix}${command} Shape of You\n${prefix}${command} Drake\n${prefix}${command} Bohemian Rhapsody\n${prefix}${command} Blinding Lights\n\n*Note:* Returns top 5 results with 30-second previews.` 
+      });
+    }
 
+    const query = args.join(" ");
+
+    await sock.sendMessage(from, { 
+      text: `🎵 *Searching Spotify for:* ${query}` 
+    });
+
+    try {
       // ==========================================================
-      // Fallback: Try alternative endpoints
+      // Call Spotify Search API
       // ==========================================================
-      const fallbacks = [
-        {
-          url: `https://api.princetechn.com/api/ai/imagegen?apikey=prince&prompt=${encodeURIComponent(prompt)}&image=${encodeURIComponent(imageUrl)}`,
-          name: 'Prince'
-        },
-        {
-          url: `https://apis.davidcyril.name.ng/imagegen/edit?prompt=${encodeURIComponent(prompt)}&image=${encodeURIComponent(imageUrl)}`,
-          name: 'David Cyril'
-        },
-        {
-          url: `https://api.giftedtech.co.ke/api/ai/img2img?apikey=gifted&prompt=${encodeURIComponent(prompt)}&image=${encodeURIComponent(imageUrl)}`,
-          name: 'GiftedTech'
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const apiUrl = new URL(`${baseUrl}/api/Search/Spotify`);
+      apiUrl.searchParams.append('query', query);
+      apiUrl.searchParams.append('type', 'tracks');
+      apiUrl.searchParams.append('preview', 'true');
+
+      const response = await fetch(apiUrl.toString(), {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
         }
-      ];
+      });
 
-      for (const fallback of fallbacks) {
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ==========================================================
+      // Check if search was successful
+      // ==========================================================
+      if (!data.success) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Search failed: ${data.message || 'Unknown error'}` 
+        });
+      }
+
+      const tracks = data.tracks || [];
+      
+      if (!tracks.length) {
+        return await sock.sendMessage(from, { 
+          text: `❌ No results found for "${query}".` 
+        });
+      }
+
+      // ==========================================================
+      // Build and send results
+      // ==========================================================
+      const maxResults = Math.min(tracks.length, 5);
+      
+      for (let i = 0; i < maxResults; i++) {
+        const track = tracks[i];
+        
+        const title = track.title || 'Unknown';
+        const artist = track.artist || 'Unknown';
+        const album = track.album || 'Unknown';
+        const duration = track.duration || '0:00';
+        const explicit = track.explicit ? '🔞' : '✅';
+        const thumb = track.thumb || '';
+        const url = track.url || '';
+        const previewUrl = track.previewUrl || '';
+
+        let msg = `🎵 *${title}*\n`;
+        msg += `👤 *Artist:* ${artist}\n`;
+        msg += `💿 *Album:* ${album}\n`;
+        msg += `⏱️ *Duration:* ${duration}\n`;
+        msg += `📌 *Explicit:* ${explicit}\n`;
+        msg += `🔗 *Spotify:* ${url}\n\n`;
+
+        if (previewUrl) {
+          msg += `🎧 *Preview:* ${previewUrl}`;
+        } else {
+          msg += `❌ *No preview available*`;
+        }
+
+        // Send with thumbnail if available
+        if (thumb) {
+          try {
+            await sock.sendMessage(from, {
+              image: { url: thumb },
+              caption: msg
+            });
+          } catch (thumbErr) {
+            await sock.sendMessage(from, { text: msg });
+          }
+        } else {
+          await sock.sendMessage(from, { text: msg });
+        }
+
+        // Small delay between results
+        await new Promise(r => setTimeout(r, 500));
+      }
+
+    } catch (error) {
+      console.error('Spotify error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not search Spotify.'}\n\n💡 Try:\n• ${prefix}${command} Alone\n• ${prefix}${command} Shape of You\n• ${prefix}${command} Drake\n\n💡 Or try again later.` 
+      });
+    }
+  }
+});
+
+register({
+  name: 'txt2video',
+  aliases: ['t2v', 'textvideo', 'aivideo', 'text2video'],
+  category: 'AI',
+  description: 'Generate AI videos from text prompts',
+  async execute({ sock, from, args, prefix, command }) {
+    // ==========================================================
+    // Check if user provided a prompt
+    // ==========================================================
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🎬 *Text to Video AI*\n\nUsage: ${prefix}${command} <prompt> [ratio] [sound]\n\n*Examples:*\n${prefix}${command} A cow in city\n${prefix}${command} A beautiful sunset over mountains 16:9\n${prefix}${command} A cyberpunk city at night 9:16\n${prefix}${command} A cat running through a field 1:1\n\n*Options:*\n• ratio: auto, 16:9, 9:16, 1:1, 4:3, 3:4 (default: auto)\n• sound: true, false (default: true)\n\n*Full example:*\n${prefix}${command} A cow in city 16:9 true` 
+      });
+    }
+
+    // ==========================================================
+    // Parse prompt, ratio, and sound
+    // ==========================================================
+    let prompt = args[0];
+    let ratio = 'auto';
+    let sound = true;
+
+    // Check if user provided ratio (second argument)
+    if (args[1]) {
+      const validRatios = ['auto', '16:9', '9:16', '1:1', '4:3', '3:4'];
+      if (validRatios.includes(args[1])) {
+        ratio = args[1];
+        // Check if user provided sound (third argument)
+        if (args[2]) {
+          sound = args[2].toLowerCase() === 'true';
+        }
+        prompt = args[0];
+      } else {
+        // If second arg is not a ratio, treat it as part of the prompt
+        prompt = args.join(" ");
+        ratio = 'auto';
+        sound = true;
+      }
+    }
+
+    await sock.sendMessage(from, { 
+      text: `🎬 *Generating video...*\n📝 *Prompt:* ${prompt}\n📐 *Ratio:* ${ratio}\n🔊 *Sound:* ${sound ? 'On' : 'Off'}\n⏳ This may take 30-60 seconds...` 
+    });
+
+    try {
+      // ==========================================================
+      // Call Txt2video API
+      // ==========================================================
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const apiUrl = new URL(`${baseUrl}/api/ai/Txt2video`);
+      apiUrl.searchParams.append('action', 'generate');
+      apiUrl.searchParams.append('prompt', prompt);
+      apiUrl.searchParams.append('ratio', ratio);
+      apiUrl.searchParams.append('sound', String(sound));
+
+      const response = await fetch(apiUrl.toString(), {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ==========================================================
+      // Check if generation was successful
+      // ==========================================================
+      if (!data.success) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Video generation failed: ${data.message || 'Unknown error'}` 
+        });
+      }
+
+      // ==========================================================
+      // Extract video URL
+      // ==========================================================
+      const videoUrl = data.data?.videoUrl || data.result?.videoUrl || data.videoUrl || data.url;
+
+      if (!videoUrl) {
+        return await sock.sendMessage(from, { 
+          text: `❌ No video URL returned from the API.` 
+        });
+      }
+
+      // ==========================================================
+      // Download the video
+      // ==========================================================
+      const videoResponse = await fetch(videoUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!videoResponse.ok) {
+        throw new Error(`Failed to download video: ${videoResponse.status}`);
+      }
+
+      const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+
+      if (videoBuffer.length < 5000) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Generated video is too small. Please try again.` 
+        });
+      }
+
+      const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(2);
+
+      // ==========================================================
+      // Send the video
+      // ==========================================================
+      const timestamp = data.timestamp ? new Date(data.timestamp).toLocaleString() : 'Just now';
+
+      const caption = `🎬 *AI Generated Video*\n\n📝 *Prompt:* ${prompt}\n📐 *Ratio:* ${ratio}\n🔊 *Sound:* ${sound ? 'On ✅' : 'Off ❌'}\n📦 *Size:* ${fileSizeMB} MB\n🕐 *Generated:* ${timestamp}\n\n✅ *Video Generated Successfully*\n\n✨ _Powered by OmegaTech_`;
+
+      // If video is too large (WhatsApp 16MB limit), send as document
+      if (videoBuffer.length > 16 * 1024 * 1024) {
+        await sock.sendMessage(from, {
+          document: videoBuffer,
+          mimetype: 'video/mp4',
+          fileName: `txt2video_${Date.now()}.mp4`,
+          caption: caption + '\n\n⚠️ *Sent as document due to 16MB limit.*'
+        });
+      } else {
         try {
-          const fallbackRes = await fetch(fallback.url, {
+          await sock.sendMessage(from, {
+            video: videoBuffer,
+            mimetype: 'video/mp4',
+            caption: caption,
+            gifPlayback: false
+          });
+        } catch (sendErr) {
+          // Fallback: send as document
+          await sock.sendMessage(from, {
+            document: videoBuffer,
+            mimetype: 'video/mp4',
+            fileName: `txt2video_${Date.now()}.mp4`,
+            caption: caption
+          });
+        }
+      }
+
+    } catch (error) {
+      console.error('Text-to-video error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not generate video.'}\n\n💡 Try:\n• A shorter prompt\n• A different ratio\n• ${prefix}${command} A cow in city 16:9\n• ${prefix}${command} A sunset over mountains\n\n💡 Or try again later.` 
+      });
+    }
+  }
+});
+register({
+  name: 'nanoblend',
+  aliases: ['blend', 'mergeimage', 'nano3', 'teamimage'],
+  category: 'AI',
+  description: 'Blend/merge up to 4 images into one using NanoBanana Pro V3',
+  async execute({ sock, from, msg, quoted, args, prefix, command }) {
+    // ==========================================================
+    // Check if user provided a prompt
+    // ==========================================================
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🍌 *NanoBanana Pro V3 - Image Blender*\n\nUsage: Reply to images with: ${prefix}${command} <prompt>\n\n*Reply to up to 4 images at once:*\n${prefix}${command} Blind and make a nice team image\n\n*Examples:*\n${prefix}${command} Merge these into one cool photo\n${prefix}${command} Combine and make a group picture\n${prefix}${command} Blend these into a team image\n\n*Note:* Reply to 2-4 images in one message. The AI will blend them according to your prompt.` 
+      });
+    }
+
+    const prompt = args.join(" ");
+    const target = quoted || msg;
+
+    // ==========================================================
+    // Check for multiple images in the quoted message
+    // ==========================================================
+    let imageUrls = [];
+    let imageIndex = 1;
+
+    // Check for single image
+    if (target.message?.imageMessage) {
+      const url = target.message.imageMessage.url || target.message.imageMessage.caption;
+      if (url) imageUrls.push(url);
+    }
+
+    // Check for multiple images in the quoted message (quoted message with multiple images)
+    // Note: WhatsApp doesn't support multiple images in a single quote,
+    // so users need to reply to a message that already has multiple images,
+    // or we collect them from the message context
+
+    // Alternative: Check if the message has multiple image messages in the protocol
+    // This handles the case where the user has forwarded a message with multiple images
+    if (target.message?.imageMessage && !imageUrls.length) {
+      // Try to get more images from the message context
+      const ctxInfo = target.message?.imageMessage?.contextInfo;
+      if (ctxInfo?.quotedMessage?.imageMessage) {
+        const url2 = ctxInfo.quotedMessage.imageMessage.url || ctxInfo.quotedMessage.imageMessage.caption;
+        if (url2) imageUrls.push(url2);
+      }
+    }
+
+    // Check for document messages that are images
+    if (target.message?.documentMessage?.mimetype?.includes('image')) {
+      const url = target.message.documentMessage.url;
+      if (url) imageUrls.push(url);
+    }
+
+    // Check for sticker
+    if (target.message?.stickerMessage) {
+      const url = target.message.stickerMessage.url;
+      if (url) imageUrls.push(url);
+    }
+
+    // ==========================================================
+    // If no images found, try to get from the message context
+    // ==========================================================
+    if (!imageUrls.length && target.message?.extendedTextMessage?.contextInfo) {
+      const ctx = target.message.extendedTextMessage.contextInfo;
+      // Check for quoted message images
+      if (ctx?.quotedMessage?.imageMessage) {
+        const url = ctx.quotedMessage.imageMessage.url || ctx.quotedMessage.imageMessage.caption;
+        if (url) imageUrls.push(url);
+      }
+      // Check for multiple quoted messages (not supported in WhatsApp)
+    }
+
+    // ==========================================================
+    // Manual check: try to get images from the message chain
+    // ==========================================================
+    // If the user replied to a message with images, we need to find them
+    // WhatsApp only allows quoting one message, so users need to send
+    // a message with multiple images (like a media message with multiple attachments)
+    // or we need to accept image URLs as arguments instead
+
+    // Alternative: Accept image URLs as arguments
+    // Check if any arguments are URLs
+    const urlArgs = args.filter(arg => arg.startsWith('http') && (arg.includes('.jpg') || arg.includes('.jpeg') || arg.includes('.png') || arg.includes('.gif') || arg.includes('.webp')));
+    if (urlArgs.length) {
+      imageUrls = urlArgs;
+      // Remove URLs from prompt
+      const cleanPrompt = args.filter(arg => !arg.startsWith('http')).join(' ');
+      if (cleanPrompt) {
+        // Use the cleaned prompt
+        // But we already have the prompt from args[0], so we need to rebuild it
+        const promptParts = args.filter(arg => !arg.startsWith('http'));
+        const newPrompt = promptParts.join(' ');
+        // We'll use the original prompt but note that URLs were provided
+      }
+    }
+
+    // ==========================================================
+    // If still no images, ask the user
+    // ==========================================================
+    if (!imageUrls.length) {
+      return await sock.sendMessage(from, { 
+        text: `❌ *No images found.*\n\nPlease reply to a message with images, or provide image URLs:\n\n*Usage (with URLs):*\n${prefix}${command} <prompt> <image_url1> <image_url2> ...\n\n*Example:*\n${prefix}${command} Make a team image https://example.com/img1.jpg https://example.com/img2.jpg\n\n*Or reply to:*\n• A message with 2-4 images\n• A single image message\n• A document image` 
+      });
+    }
+
+    // Limit to 4 images
+    if (imageUrls.length > 4) {
+      imageUrls = imageUrls.slice(0, 4);
+    }
+
+    if (imageUrls.length < 2) {
+      return await sock.sendMessage(from, { 
+        text: `❌ *Need at least 2 images.*\n\nFound only ${imageUrls.length} image(s).\n\nPlease provide 2-4 images to blend.\n\n${prefix}${command} <prompt> <url1> <url2>\nExample: ${prefix}${command} Make a team image https://example.com/1.jpg https://example.com/2.jpg` 
+      });
+    }
+
+    await sock.sendMessage(from, { 
+      text: `🍌 *Blending images...*\n📝 *Prompt:* ${prompt}\n📊 *Images:* ${imageUrls.length}\n⏳ This may take 20-40 seconds...` 
+    });
+
+    try {
+      // ==========================================================
+      // Call NanoBanana Pro V3 API
+      // ==========================================================
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const apiUrl = new URL(`${baseUrl}/api/ai/nanobana-pro-v3`);
+      
+      // Add images to the request
+      imageUrls.forEach((url, index) => {
+        apiUrl.searchParams.append(`image${index + 1}`, url);
+      });
+      
+      apiUrl.searchParams.append('prompt', prompt);
+
+      const response = await fetch(apiUrl.toString(), {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ==========================================================
+      // Check if blending was successful
+      // ==========================================================
+      if (!data.success) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Image blending failed: ${data.message || 'Unknown error'}` 
+        });
+      }
+
+      // ==========================================================
+      // Extract task ID and wait for completion
+      // ==========================================================
+      const taskId = data.task_id || data.taskId || data.id;
+
+      if (!taskId) {
+        return await sock.sendMessage(from, { 
+          text: `❌ No task ID returned from the API.` 
+        });
+      }
+
+      await sock.sendMessage(from, { 
+        text: `⏳ *Processing...* (Task ID: ${taskId.slice(0, 8)})\nThis may take up to 60 seconds...` 
+      });
+
+      let blendedImage = null;
+      let attempts = 0;
+      const maxAttempts = 12;
+
+      while (attempts < maxAttempts) {
+        attempts++;
+        await new Promise(r => setTimeout(r, 5000));
+
+        try {
+          const statusUrl = new URL(`${baseUrl}/api/ai/nanobana-pro-v3/status`);
+          statusUrl.searchParams.append('task_id', taskId);
+
+          const statusRes = await fetch(statusUrl.toString(), {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
           });
 
-          if (fallbackRes.ok) {
-            const fallbackData = await fallbackRes.json();
-            let fallbackImage = fallbackData.result?.url || fallbackData.url || fallbackData.image || fallbackData.result;
-
-            if (fallbackImage && fallbackImage.startsWith('http')) {
-              const imgRes = await fetch(fallbackImage);
-              const imgBuf = Buffer.from(await imgRes.arrayBuffer());
-              if (imgBuf.length > 1000) {
-                await sock.sendMessage(from, {
-                  image: imgBuf,
-                  caption: `🍌 *AI Banana Transform (${fallback.name} fallback)*\n\n📝 *Prompt:* ${prompt}\n\n✅ *Image Generated Successfully*`
-                });
-                return;
-              }
+          if (statusRes.ok) {
+            const statusData = await statusRes.json();
+            
+            if (statusData.status === 'completed' || statusData.success) {
+              blendedImage = statusData.result?.image || statusData.result?.url || statusData.image || statusData.url;
+              break;
+            } else if (statusData.status === 'failed' || statusData.status === 'error') {
+              throw new Error(statusData.message || 'Blending failed');
             }
           }
-        } catch (fallbackErr) {
-          console.warn(`${fallback.name} fallback failed:`, fallbackErr.message);
+        } catch (e) {
+          // Continue retrying
+        }
+
+        if (attempts < maxAttempts) {
+          await sock.sendMessage(from, { 
+            text: `⏳ *Still processing...* (${attempts}/${maxAttempts})` 
+          });
         }
       }
 
       // ==========================================================
-      // All fallbacks failed
+      // If we didn't get an image, try to get it from the initial response
       // ==========================================================
+      if (!blendedImage) {
+        blendedImage = data.result?.image || data.result?.url || data.image || data.url;
+      }
+
+      if (!blendedImage) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Could not retrieve the blended image.\n\nTask ID: ${taskId}\n💡 Try again or check the status later.` 
+        });
+      }
+
+      // ==========================================================
+      // Download the blended image
+      // ==========================================================
+      const imageResponse = await fetch(blendedImage, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!imageResponse.ok) {
+        throw new Error(`Failed to download blended image: ${imageResponse.status}`);
+      }
+
+      const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+
+      if (imageBuffer.length < 1000) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Blended image is too small. Please try again.` 
+        });
+      }
+
+      const fileSize = (imageBuffer.length / 1024).toFixed(1);
+
+      // ==========================================================
+      // Send the blended image
+      // ==========================================================
+      const timestamp = data.timestamp ? new Date(data.timestamp).toLocaleString() : 'Just now';
+
+      await sock.sendMessage(from, {
+        image: imageBuffer,
+        caption: `🍌 *NanoBanana Pro V3 - Image Blend*\n\n📝 *Prompt:* ${prompt}\n📊 *Images used:* ${data.images_used || imageUrls.length}\n📦 *Size:* ${fileSize} KB\n🕐 *Generated:* ${timestamp}\n🆔 *Task ID:* ${taskId.slice(0, 12)}...\n\n✅ *Images Blended Successfully*\n\n✨ _Powered by OmegaTech_`
+      });
+
+    } catch (error) {
+      console.error('NanoBlend error:', error);
       await sock.sendMessage(from, { 
-        text: `⚠️ AI Banana Error: ${error.message || 'Could not generate image.'}\n\n💡 Try:\n• A different prompt\n• A smaller/simpler image\n• ${prefix}${command} make it black and white\n• ${prefix}${command} add a cartoon effect\n\n💡 Or try again later.` 
+        text: `⚠️ Error: ${error.message || 'Could not blend images.'}\n\n💡 Try:\n• A different prompt\n• Different images\n• ${prefix}${command} Merge these into one cool photo <url1> <url2>\n• ${prefix}${command} Blend these into a team image <url1> <url2>\n\n💡 Or try again later.` 
       });
     }
   }
@@ -4971,184 +5752,7 @@ register({
     }
   }
 });
-register({
-  name: 'sinhalasub',
-  aliases: ['ss', 'sinhala', 'movies', 'sublk'],
-  category: 'DOWNLOADER',
-  description: 'Browse & download movies/TV from Sinhalasub (Sinhala subtitles)',
-  async execute({ sock, from, args, prefix, command }) {
-    // ==========================================================
-    // Check if user provided an action
-    // ==========================================================
-    if (!args[0]) {
-      return await sock.sendMessage(from, { 
-        text: `🎬 *Sinhalasub Movie/TV Downloader*\n\n*Actions:*\n• ${prefix}${command} home - Browse recent/popular\n• ${prefix}${command} search <query> - Search movies\n• ${prefix}${command} detail <url_or_id> - Get movie details & download links\n• ${prefix}${command} trending - Trending movies\n• ${prefix}${command} imdb - IMDB top movies\n• ${prefix}${command} genre <genre> - Browse by genre\n\n*Examples:*\n${prefix}${command} home\n${prefix}${command} search transformers\n${prefix}${command} detail https://sinhalasub.lk/movie/xxxxx\n${prefix}${command} trending\n${prefix}${command} genre action` 
-      });
-    }
 
-    const action = args[0].toLowerCase();
-    const query = args.slice(1).join(" ");
-
-    await sock.sendMessage(from, { text: `⏳ Fetching data...` });
-
-    try {
-      // ==========================================================
-      // Call Sinhalasub API
-      // ==========================================================
-      const baseUrl = 'https://omegatech-api.dixonomega.tech';
-      const apiUrl = new URL(`${baseUrl}/api/movie/sinhalasub`);
-      
-      apiUrl.searchParams.append('action', action);
-      
-      if (action === 'search' && query) {
-        apiUrl.searchParams.append('q', query);
-      } else if (action === 'detail' && query) {
-        // query can be URL or ID
-        apiUrl.searchParams.append('id', query);
-      } else if (action === 'listing' && query) {
-        apiUrl.searchParams.append('path', query);
-        if (args[2]) apiUrl.searchParams.append('page', args[2]);
-      } else if (action === 'genre' && query) {
-        apiUrl.searchParams.append('genre', query);
-        if (args[2]) apiUrl.searchParams.append('page', args[2]);
-      } else if (['home', 'trending', 'imdb'].includes(action)) {
-        // No additional params needed
-        if (args[1]) apiUrl.searchParams.append('page', args[1]);
-      } else {
-        return await sock.sendMessage(from, { 
-          text: `❌ Invalid action. Use: home, search, detail, trending, imdb, genre` 
-        });
-      }
-
-      const response = await fetch(apiUrl.toString(), {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'application/json'
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`API returned ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      // ==========================================================
-      // Handle different actions
-      // ==========================================================
-      
-      // --- HOME / TRENDING / IMDB / GENRE / SEARCH (list view) ---
-      if (['home', 'search', 'trending', 'imdb', 'genre', 'listing'].includes(action)) {
-        let movies = data.result || data.movies || data.data || data.results || [];
-        
-        if (!movies.length) {
-          return await sock.sendMessage(from, { 
-            text: `❌ No movies found for "${query || action}".` 
-          });
-        }
-
-        const maxDisplay = Math.min(movies.length, 15);
-        let msg = `🎬 *Sinhalasub${action === 'search' ? ` Search: ${query}` : ` - ${action.toUpperCase()}`}*\n`;
-        msg += `📊 Showing ${maxDisplay} of ${movies.length}\n\n`;
-
-        for (let i = 0; i < maxDisplay; i++) {
-          const m = movies[i];
-          const title = m.title || m.name || m.movie || 'Unknown';
-          const year = m.year || m.release || '';
-          const rating = m.rating || m.imdb || '';
-          const url = m.url || m.link || m.id || '';
-          
-          msg += `• *${title}*`;
-          if (year) msg += ` (${year})`;
-          if (rating) msg += ` ⭐${rating}`;
-          msg += `\n`;
-          if (url) msg += `  🔗 ${url}\n`;
-          msg += `\n`;
-        }
-
-        msg += `\n💡 Use: ${prefix}${command} detail <url> for download links`;
-        await sock.sendMessage(from, { text: msg });
-        return;
-      }
-
-      // --- DETAIL (single movie with download links) ---
-      if (action === 'detail') {
-        const detail = data.result || data.movie || data.data || data;
-        
-        if (!detail || !detail.title) {
-          return await sock.sendMessage(from, { 
-            text: `❌ Movie details not found. Check the URL/ID.` 
-          });
-        }
-
-        const title = detail.title || 'Unknown';
-        const year = detail.year || detail.release || '';
-        const rating = detail.rating || detail.imdb || '';
-        const genre = detail.genre || detail.genres || '';
-        const cast = detail.cast || detail.actors || '';
-        const plot = detail.plot || detail.description || detail.synopsis || '';
-        const poster = detail.poster || detail.image || detail.thumbnail || '';
-        const downloadLinks = detail.downloads || detail.links || detail.download || [];
-
-        let msg = `🎬 *${title}*`;
-        if (year) msg += ` (${year})`;
-        msg += `\n\n`;
-
-        if (rating) msg += `⭐ *Rating:* ${rating}\n`;
-        if (genre) msg += `📂 *Genre:* ${genre}\n`;
-        if (cast) msg += `🎭 *Cast:* ${cast}\n`;
-        if (plot) msg += `📝 *Plot:* ${plot.slice(0, 200)}${plot.length > 200 ? '...' : ''}\n\n`;
-
-        msg += `📥 *Download Links:*\n`;
-
-        if (downloadLinks && downloadLinks.length) {
-          const maxLinks = Math.min(downloadLinks.length, 8);
-          for (let i = 0; i < maxLinks; i++) {
-            const link = downloadLinks[i];
-            const label = link.label || link.quality || link.name || `Link ${i+1}`;
-            const url = link.url || link.link || link;
-            if (url) {
-              msg += `• *${label}*: ${url}\n`;
-            }
-          }
-          if (downloadLinks.length > 8) {
-            msg += `\n*...and ${downloadLinks.length - 8} more links.*`;
-          }
-        } else {
-          msg += `• No download links available\n`;
-        }
-
-        // Send poster if available
-        if (poster) {
-          try {
-            await sock.sendMessage(from, {
-              image: { url: poster },
-              caption: msg
-            });
-          } catch (imgErr) {
-            await sock.sendMessage(from, { text: msg });
-          }
-        } else {
-          await sock.sendMessage(from, { text: msg });
-        }
-        return;
-      }
-
-      // ==========================================================
-      // If we get here, something went wrong
-      // ==========================================================
-      await sock.sendMessage(from, { 
-        text: `❌ No results found. Check your query or try again.` 
-      });
-
-    } catch (error) {
-      console.error('Sinhalasub error:', error);
-      await sock.sendMessage(from, { 
-        text: `⚠️ Error: ${error.message || 'Could not fetch data.'}\n\n💡 Try:\n• ${prefix}${command} home\n• ${prefix}${command} search avengers\n• ${prefix}${command} detail <url>\n• ${prefix}${command} trending` 
-      });
-    }
-  }
-});
 register({
   name: 'upload',
   aliases: ['kappa', 'uploadfile', 'filehost'],
@@ -7489,326 +8093,145 @@ register({
 });
 register({
   name: 'play',
-  aliases: ['song', 'music', 'audio', 'ytmp3'],
+  aliases: ['song', 'music', 'ytplay', 'ytaudio'],
   category: 'DOWNLOADER',
-  description: 'Search and download music from YouTube (MP3)',
+  description: 'Search YouTube and download as MP3 audio',
   async execute({ sock, from, args, prefix, command }) {
+    // ==========================================================
+    // Check if user provided a search query
+    // ==========================================================
     if (!args[0]) {
       return await sock.sendMessage(from, { 
-        text: `🎵 *Music Player*\n\nUsage: ${prefix}${command} <song name or URL>\nExample: ${prefix}${command} Faded\n\n*Examples:*\n${prefix}${command} Shape of You\n${prefix}${command} https://youtu.be/60ItHLz5WEA\n\n*Note:* Downloads best available quality MP3.` 
+        text: `🎵 *YouTube Music Player*\n\nUsage: ${prefix}${command} <song name>\nExample: ${prefix}${command} Alone\n\n*Examples:*\n${prefix}${command} Shape of You\n${prefix}${command} Blinding Lights\n${prefix}${command} Bohemian Rhapsody\n\n*Note:* Searches YouTube and returns the top result as MP3 audio.` 
       });
     }
 
     const query = args.join(" ");
-    const isUrl = query.includes('youtube.com') || query.includes('youtu.be');
 
-    await sock.sendMessage(from, { text: `⏳ Searching for "${query}"...` });
+    await sock.sendMessage(from, { 
+      text: `🎵 *Searching YouTube for:* ${query}` 
+    });
 
-    let videoUrl = query;
-    let title = 'YouTube Audio';
-    let thumbnail = '';
-    let duration = '';
-    let artist = '';
+    try {
+      // ==========================================================
+      // Call YouTube Play API
+      // ==========================================================
+      const baseUrl = 'https://api.omegatech.app';
+      const apiUrl = new URL(`${baseUrl}/api/download/play`);
+      apiUrl.searchParams.append('search', query);
 
-    // ==========================================================
-    // STEP 1: If not a URL, search via yt-search
-    // ==========================================================
-    if (!isUrl) {
-      try {
-        const yts = require('yt-search');
-        const searchResults = await yts(query);
-        
-        if (!searchResults || !searchResults.videos || searchResults.videos.length === 0) {
-          return await sock.sendMessage(from, { 
-            text: `❌ No results found for "${query}".\n\n💡 Try a different search term.` 
-          });
+      const response = await fetch(apiUrl.toString(), {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
         }
+      });
 
-        const target = searchResults.videos[0];
-        videoUrl = target.url;
-        title = target.title || 'YouTube Audio';
-        thumbnail = target.thumbnail || target.image || '';
-        duration = target.timestamp || target.duration || '';
-        artist = target.author?.name || target.author || '';
-
-      } catch (ytErr) {
-        console.warn('yt-search failed:', ytErr.message);
-        // Continue with raw query as URL
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
       }
-    }
 
-    // ==========================================================
-    // STEP 2: Try to fetch metadata if still missing
-    // ==========================================================
-    if (!isUrl && (!title || title === 'YouTube Audio')) {
-      try {
-        const yts = require('yt-search');
-        const searchResults = await yts(videoUrl);
-        if (searchResults && searchResults.videos && searchResults.videos.length > 0) {
-          const target = searchResults.videos[0];
-          title = target.title || 'YouTube Audio';
-          thumbnail = target.thumbnail || target.image || '';
-          duration = target.timestamp || target.duration || '';
-          artist = target.author?.name || target.author || '';
+      const data = await response.json();
+
+      // ==========================================================
+      // Check if search was successful
+      // ==========================================================
+      if (!data.success) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Search failed: ${data.message || 'Unknown error'}` 
+        });
+      }
+
+      // ==========================================================
+      // Extract video data
+      // ==========================================================
+      const title = data.title || data.result?.title || 'Unknown';
+      const artist = data.artist || data.result?.artist || data.channel || 'Unknown';
+      const duration = data.duration || data.result?.duration || 'N/A';
+      const thumbnail = data.thumbnail || data.result?.thumbnail || data.result?.thumb || '';
+      const audioUrl = data.download_url || data.result?.download_url || data.url || data.result?.url;
+      const videoUrl = data.video_url || data.result?.video_url || data.result?.url;
+
+      if (!audioUrl) {
+        return await sock.sendMessage(from, { 
+          text: `❌ No audio download URL found for "${query}".` 
+        });
+      }
+
+      // ==========================================================
+      // Send video info with thumbnail
+      // ==========================================================
+      let infoMsg = `🎵 *${title}*\n`;
+      infoMsg += `👤 *Artist:* ${artist}\n`;
+      infoMsg += `⏱️ *Duration:* ${duration}\n`;
+      if (videoUrl) infoMsg += `🔗 *Watch:* ${videoUrl}\n\n`;
+      infoMsg += `⬇️ *Downloading audio...*`;
+
+      if (thumbnail) {
+        try {
+          await sock.sendMessage(from, {
+            image: { url: thumbnail },
+            caption: infoMsg
+          });
+        } catch (thumbErr) {
+          await sock.sendMessage(from, { text: infoMsg });
         }
-      } catch (e) {}
-    }
+      } else {
+        await sock.sendMessage(from, { text: infoMsg });
+      }
 
-    // Send thumbnail if available
-    if (thumbnail) {
+      // ==========================================================
+      // Download and send the audio
+      // ==========================================================
+      const audioResponse = await fetch(audioUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!audioResponse.ok) {
+        throw new Error(`Failed to download audio: ${audioResponse.status}`);
+      }
+
+      const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+
+      if (audioBuffer.length < 5000) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Downloaded file is too small. Please try again.` 
+        });
+      }
+
+      const fileSizeMB = (audioBuffer.length / 1024 / 1024).toFixed(1);
+
+      // ==========================================================
+      // Send the audio
+      // ==========================================================
+      const safeTitle = title.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'audio';
+
       try {
         await sock.sendMessage(from, {
-          image: { url: thumbnail },
-          caption: `🎵 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}${duration ? `⏱️ *Duration:* ${duration}\n` : ''}\n\n⬇️ *Downloading audio...*`
+          audio: audioBuffer,
+          mimetype: 'audio/mpeg',
+          fileName: `${safeTitle}.mp3`,
+          caption: `🎵 *${title}*\n👤 ${artist}\n📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success*`
         });
-      } catch (thumbErr) {
-        await sock.sendMessage(from, { 
-          text: `🎵 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}${duration ? `⏱️ *Duration:* ${duration}\n` : ''}\n\n⬇️ *Downloading audio...*` 
+      } catch (sendErr) {
+        // Fallback: send as document
+        await sock.sendMessage(from, {
+          document: audioBuffer,
+          mimetype: 'audio/mpeg',
+          fileName: `${safeTitle}.mp3`,
+          caption: `🎵 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
         });
       }
-    }
 
-    // ==========================================================
-    // STEP 3: Try PRIMARY API - David Cyril
-    // ==========================================================
-    try {
-      const davidUrl = `https://apis.davidcyril.name.ng/play?url=${encodeURIComponent(videoUrl)}`;
-      const davidRes = await fetch(davidUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+    } catch (error) {
+      console.error('Play error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not search or download.'}\n\n💡 Try:\n• ${prefix}${command} Alone\n• ${prefix}${command} Shape of You\n• ${prefix}${command} Blinding Lights\n\n💡 Or try again later.` 
       });
-
-      if (davidRes.ok) {
-        const davidData = await davidRes.json();
-        
-        // Extract audio URL - David Cyril returns: { result: { url: "..." } }
-        let audioUrl = davidData.result?.url || davidData.result?.download_url || 
-                       davidData.url || davidData.download_url || davidData.result;
-
-        if (!audioUrl) {
-          // Try to find any URL in the response
-          const jsonString = JSON.stringify(davidData);
-          const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp3|m4a|ogg|wav)/i);
-          if (urlMatch) audioUrl = urlMatch[0];
-        }
-
-        if (audioUrl && audioUrl.startsWith('http')) {
-          // Download and send
-          const audioResponse = await fetch(audioUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-          });
-
-          if (audioResponse.ok) {
-            const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
-            if (audioBuffer.length > 5000) {
-              const fileSizeMB = (audioBuffer.length / 1024 / 1024).toFixed(1);
-              const safeTitle = title.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'audio';
-              const fileName = `${safeTitle}.mp3`;
-
-              try {
-                await sock.sendMessage(from, {
-                  audio: audioBuffer,
-                  mimetype: 'audio/mpeg',
-                  fileName: fileName,
-                  caption: `🎵 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success (David Cyril)*`
-                });
-                return; // Success, exit
-              } catch (sendErr) {
-                // Fallback: send as document
-                await sock.sendMessage(from, {
-                  document: audioBuffer,
-                  mimetype: 'audio/mpeg',
-                  fileName: fileName,
-                  caption: `🎵 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
-                });
-                return;
-              }
-            }
-          }
-        }
-      }
-    } catch (davidErr) {
-      console.warn('David Cyril API failed:', davidErr.message);
     }
-
-    // ==========================================================
-    // STEP 4: Fallback API - EliteProTech
-    // ==========================================================
-    try {
-      const eliteUrl = `https://eliteprotech-apis.zone.id/ytmp3?url=${encodeURIComponent(videoUrl)}`;
-      const eliteRes = await fetch(eliteUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-      });
-
-      if (eliteRes.ok) {
-        const eliteData = await eliteRes.json();
-        
-        let audioUrl = eliteData.result?.url || eliteData.result?.download_url || 
-                       eliteData.url || eliteData.download_url || eliteData.result;
-
-        if (!audioUrl) {
-          const jsonString = JSON.stringify(eliteData);
-          const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp3|m4a|ogg|wav)/i);
-          if (urlMatch) audioUrl = urlMatch[0];
-        }
-
-        if (audioUrl && audioUrl.startsWith('http')) {
-          const audioResponse = await fetch(audioUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-          });
-
-          if (audioResponse.ok) {
-            const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
-            if (audioBuffer.length > 5000) {
-              const fileSizeMB = (audioBuffer.length / 1024 / 1024).toFixed(1);
-              const safeTitle = title.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'audio';
-              const fileName = `${safeTitle}.mp3`;
-
-              try {
-                await sock.sendMessage(from, {
-                  audio: audioBuffer,
-                  mimetype: 'audio/mpeg',
-                  fileName: fileName,
-                  caption: `🎵 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success (EliteProTech)*`
-                });
-                return;
-              } catch (sendErr) {
-                await sock.sendMessage(from, {
-                  document: audioBuffer,
-                  mimetype: 'audio/mpeg',
-                  fileName: fileName,
-                  caption: `🎵 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
-                });
-                return;
-              }
-            }
-          }
-        }
-      }
-    } catch (eliteErr) {
-      console.warn('EliteProTech API failed:', eliteErr.message);
-    }
-
-    // ==========================================================
-    // STEP 5: Third Fallback - Prince API
-    // ==========================================================
-    try {
-      const princeUrl = `https://api.princetechn.com/api/download/ytmp3?apikey=prince&url=${encodeURIComponent(videoUrl)}`;
-      const princeRes = await fetch(princeUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-      });
-
-      if (princeRes.ok) {
-        const princeData = await princeRes.json();
-        
-        let audioUrl = princeData.result?.download_url || princeData.result?.url || 
-                       princeData.download_url || princeData.url || princeData.result;
-
-        if (!audioUrl) {
-          const jsonString = JSON.stringify(princeData);
-          const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp3|m4a|ogg|wav)/i);
-          if (urlMatch) audioUrl = urlMatch[0];
-        }
-
-        if (audioUrl && audioUrl.startsWith('http')) {
-          const audioResponse = await fetch(audioUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-          });
-
-          if (audioResponse.ok) {
-            const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
-            if (audioBuffer.length > 5000) {
-              const fileSizeMB = (audioBuffer.length / 1024 / 1024).toFixed(1);
-              const safeTitle = title.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'audio';
-              const fileName = `${safeTitle}.mp3`;
-
-              try {
-                await sock.sendMessage(from, {
-                  audio: audioBuffer,
-                  mimetype: 'audio/mpeg',
-                  fileName: fileName,
-                  caption: `🎵 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success (Prince)*`
-                });
-                return;
-              } catch (sendErr) {
-                await sock.sendMessage(from, {
-                  document: audioBuffer,
-                  mimetype: 'audio/mpeg',
-                  fileName: fileName,
-                  caption: `🎵 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
-                });
-                return;
-              }
-            }
-          }
-        }
-      }
-    } catch (princeErr) {
-      console.warn('Prince API failed:', princeErr.message);
-    }
-
-    // ==========================================================
-    // STEP 6: Final Fallback - OmegaTech (existing)
-    // ==========================================================
-    try {
-      const baseUrl = 'https://omegatech-api.dixonomega.tech';
-      const omegaRes = await fetch(`${baseUrl}/api/download/play?url=${encodeURIComponent(videoUrl)}`, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-      });
-
-      if (omegaRes.ok) {
-        const omegaData = await omegaRes.json();
-        let audioUrl = omegaData.download_url || omegaData.download || omegaData.url || 
-                       omegaData.result?.download_url || omegaData.result?.download || omegaData.result?.url;
-
-        if (!audioUrl) {
-          const jsonString = JSON.stringify(omegaData);
-          const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp3|m4a|ogg|wav)/i);
-          if (urlMatch) audioUrl = urlMatch[0];
-        }
-
-        if (audioUrl && audioUrl.startsWith('http')) {
-          const audioResponse = await fetch(audioUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-          });
-
-          if (audioResponse.ok) {
-            const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
-            if (audioBuffer.length > 5000) {
-              const fileSizeMB = (audioBuffer.length / 1024 / 1024).toFixed(1);
-              const safeTitle = title.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'audio';
-              const fileName = `${safeTitle}.mp3`;
-
-              try {
-                await sock.sendMessage(from, {
-                  audio: audioBuffer,
-                  mimetype: 'audio/mpeg',
-                  fileName: fileName,
-                  caption: `🎵 *${title}*\n📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success (OmegaTech)*`
-                });
-                return;
-              } catch (sendErr) {
-                await sock.sendMessage(from, {
-                  document: audioBuffer,
-                  mimetype: 'audio/mpeg',
-                  fileName: fileName,
-                  caption: `🎵 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
-                });
-                return;
-              }
-            }
-          }
-        }
-      }
-    } catch (omegaErr) {
-      console.warn('OmegaTech API failed:', omegaErr.message);
-    }
-
-    // ==========================================================
-    // STEP 7: All APIs failed
-    // ==========================================================
-    await sock.sendMessage(from, { 
-      text: `⚠️ All download methods failed for "${query}".\n\n💡 Try:\n• A different song name\n• A direct YouTube URL\n• Wait a few minutes and retry\n\n${isUrl ? 'The video might be age-restricted or private.' : ''}` 
-    });
   }
 });
 
