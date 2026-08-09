@@ -682,6 +682,144 @@ register({
   },
 });
 
+// ==========================================
+//     INTERACTIVE (BUTTON/LIST) RICH MENU
+// ==========================================
+
+// Splits the category list into two roughly equal groups so the rich menu
+// mirrors a classic two-column layout (Menu1 / Menu2 list buttons), the
+// same shape as the reference "Rich Menu" screenshot.
+function buildRichMenuSections(commandPrefix) {
+  const byCategory = {};
+  for (const cmd of new Set(commands.values())) {
+    byCategory[cmd.category] = byCategory[cmd.category] || [];
+    if (!byCategory[cmd.category].includes(cmd.name)) byCategory[cmd.category].push(cmd.name);
+  }
+
+  const orderedCats = [
+    ...CATEGORY_ORDER.filter((c) => byCategory[c]),
+    ...Object.keys(byCategory).filter((c) => !CATEGORY_ORDER.includes(c)),
+  ];
+
+  // WhatsApp list sections cap out at 10 rows — split oversized categories
+  // into numbered sub-sections instead of silently dropping commands.
+  const toSections = (cat) => {
+    const names = byCategory[cat];
+    const icon = CATEGORY_STYLE[cat] || '📁';
+    const chunks = [];
+    for (let i = 0; i < names.length; i += 10) chunks.push(names.slice(i, i + 10));
+    return chunks.map((chunk, idx) => ({
+      title: `${icon} ${cat}${chunks.length > 1 ? ` (${idx + 1}/${chunks.length})` : ''}`,
+      rows: chunk.map((n) => ({
+        title: `${commandPrefix}${n}`,
+        description: (commands.get(n) && commands.get(n).description) || '',
+        id: `${commandPrefix}${n}`,
+      })),
+    }));
+  };
+
+  const mid = Math.ceil(orderedCats.length / 2);
+  return {
+    left: orderedCats.slice(0, mid).flatMap(toSections),
+    right: orderedCats.slice(mid).flatMap(toSections),
+  };
+}
+
+// Builds and relays a native-flow interactive message: header image, body
+// text, two list buttons (categories as sections, commands as rows), and
+// an optional CTA URL button linking to the bot's channel.
+async function sendRichMenu({ sock, from, sessionId, prefix, name }) {
+  const commandPrefix = prefix || getGlobalSetting(sessionId, 'prefix') || PREFIX;
+  const totalCommands = new Set(commands.values()).size;
+  const { left, right } = buildRichMenuSections(commandPrefix);
+
+  const buttons = [];
+  if (left.length) {
+    buttons.push({
+      name: 'single_select',
+      buttonParamsJson: JSON.stringify({ title: 'Menu1', sections: left }),
+    });
+  }
+  if (right.length) {
+    buttons.push({
+      name: 'single_select',
+      buttonParamsJson: JSON.stringify({ title: 'Menu2', sections: right }),
+    });
+  }
+  if (CHANNEL_CODE) {
+    buttons.push({
+      name: 'cta_url',
+      buttonParamsJson: JSON.stringify({
+        display_text: CHANNEL_NAME || 'Our Channel',
+        url: `https://whatsapp.com/channel/${CHANNEL_CODE}`,
+      }),
+    });
+  }
+
+  let header = proto.Message.InteractiveMessage.Header.create({
+    title: BOT_NAME,
+    hasMediaAttachment: false,
+  });
+
+  if (MENU_IMAGE_URL) {
+    try {
+      const media = await prepareWAMessageMedia(
+        { image: { url: MENU_IMAGE_URL } },
+        { upload: sock.waUploadToServer }
+      );
+      header = proto.Message.InteractiveMessage.Header.create({
+        title: BOT_NAME,
+        hasMediaAttachment: true,
+        imageMessage: media.imageMessage,
+      });
+    } catch (e) {
+      console.error('Rich menu image upload failed:', e.message);
+    }
+  }
+
+  const interactiveMessage = proto.Message.InteractiveMessage.create({
+    header,
+    body: proto.Message.InteractiveMessage.Body.create({
+      text: `🤖 *${BOT_NAME}*\n${greeting()}, *${name}* — ${totalCommands} commands · prefix [${commandPrefix}]`,
+    }),
+    footer: proto.Message.InteractiveMessage.Footer.create({ text: `Powered by ${BOT_NAME}` }),
+    nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({ buttons }),
+  });
+
+  const waMsg = generateWAMessageFromContent(
+    from,
+    {
+      viewOnceMessage: {
+        message: {
+          messageContextInfo: { deviceListMetadata: {}, deviceListMetadataVersion: 2 },
+          interactiveMessage,
+        },
+      },
+    },
+    {}
+  );
+
+  await sock.relayMessage(from, waMsg.message, { messageId: waMsg.key.id });
+}
+
+register({
+  name: 'richmenu',
+  aliases: ['rmenu', 'imenu'],
+  category: 'MAIN',
+  description: 'Show the interactive button/list version of the menu',
+  async execute({ sock, from, sender, sessionId, prefix, msg }) {
+    const name = (msg && msg.pushName) || sender.split('@')[0];
+    try {
+      await sendRichMenu({ sock, from, sessionId, prefix, name });
+    } catch (e) {
+      console.error('richmenu error:', e);
+      await sock.sendMessage(from, {
+        text: '⚠️ Could not send the interactive menu — falling back to text.\nUse .menu instead.',
+      });
+    }
+  },
+});
+
 register({
   name: 'setprefix',
   category: 'MAIN',
