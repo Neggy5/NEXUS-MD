@@ -290,26 +290,39 @@ register({
   aliases: ['gif', 'togifconvert', 'makegif'],
   category: 'TOOLS',
   description: 'Convert sticker/video to GIF and send',
-  async execute({ sock, from, msg, quoted, prefix, command }) {
-    const target = quoted || msg;
-    const mime = target.mimetype || '';
+  async execute({ sock, from, msg, args, prefix, command }) {
+    // ─── FIX: Get quoted message properly ───
+    const quoted = msg?.quoted || msg;
+    
+    if (!quoted) {
+      return await sock.sendMessage(from, { 
+        text: `🎬 Reply to a video or sticker with: ${prefix || '.'}togif` 
+      });
+    }
 
-    // Check if it's a video or sticker
+    // ─── FIX: Check for video/sticker properly ───
     let isVideo = false;
     let isSticker = false;
+    let mime = '';
 
-    if (target.message?.videoMessage) {
+    if (quoted.message?.videoMessage) {
       isVideo = true;
-    } else if (target.message?.stickerMessage) {
+      mime = quoted.message.videoMessage.mimetype || 'video/mp4';
+    } else if (quoted.message?.stickerMessage) {
       isSticker = true;
-    } else if (mime.includes('video') || mime.includes('webp') || mime.includes('gif')) {
-      isVideo = mime.includes('video') || mime.includes('gif');
-      isSticker = mime.includes('webp');
+      mime = quoted.message.stickerMessage.mimetype || 'image/webp';
+    } else if (quoted.message?.imageMessage?.mimetype?.includes('webp')) {
+      isSticker = true;
+      mime = quoted.message.imageMessage.mimetype;
+    } else if (quoted.mimetype) {
+      mime = quoted.mimetype;
+      if (mime.includes('video') || mime.includes('gif')) isVideo = true;
+      if (mime.includes('webp')) isSticker = true;
     }
 
     if (!isVideo && !isSticker) {
-      return await sock.sendMessage(from, {
-        text: `🎬 Reply to a video or sticker with: ${prefix || '.'}togif`
+      return await sock.sendMessage(from, { 
+        text: `🎬 Reply to a *video* or *sticker* with: ${prefix || '.'}togif` 
       });
     }
 
@@ -318,12 +331,18 @@ register({
     try {
       const { downloadMediaMessage } = require('@whiskeysockets/baileys');
       
-      let mediaBuffer = await downloadMediaMessage(
-        target.message || target,
-        'buffer',
-        {},
-        { reuploadRequest: sock.updateMediaMessage }
-      );
+      let mediaBuffer = null;
+      
+      try {
+        mediaBuffer = await downloadMediaMessage(
+          quoted.message || quoted,
+          'buffer',
+          {},
+          { reuploadRequest: sock.updateMediaMessage }
+        );
+      } catch (dlErr) {
+        mediaBuffer = await sock.downloadMediaMessage(quoted);
+      }
 
       if (!mediaBuffer || mediaBuffer.length < 100) {
         return await sock.sendMessage(from, { text: '❌ Failed to download media.' });
@@ -331,7 +350,7 @@ register({
 
       let finalBuffer = mediaBuffer;
 
-      // If it's a sticker (webp), convert to video first
+      // ─── If sticker, convert to video ───
       if (isSticker || mime.includes('webp')) {
         try {
           const ffmpeg = require('ffmpeg-static');
@@ -6056,23 +6075,36 @@ register({
   aliases: ['img', 'toimg', 'convertimg'],
   category: 'TOOLS',
   description: 'Convert sticker to image and send',
-  async execute({ sock, from, msg, quoted, prefix, command }) {
-    const target = quoted || msg;
-    const mime = target.mimetype || '';
+  async execute({ sock, from, msg, args, prefix, command }) {
+    // ─── FIX: Get quoted message properly ───
+    const quoted = msg?.quoted || msg;
+    
+    if (!quoted) {
+      return await sock.sendMessage(from, { 
+        text: `🖼️ Reply to a sticker with: ${prefix || '.'}toimage` 
+      });
+    }
 
-    // Check if it's a sticker
+    // ─── FIX: Check for sticker properly ───
     let isSticker = false;
-    if (target.message?.stickerMessage) {
+    let mediaBuffer = null;
+
+    // Check if message has stickerMessage
+    if (quoted.message?.stickerMessage) {
       isSticker = true;
-    } else if (target.message?.imageMessage?.mimetype?.includes('webp')) {
+    }
+    // Check if it's an image with webp mimetype
+    else if (quoted.message?.imageMessage?.mimetype?.includes('webp')) {
       isSticker = true;
-    } else if (mime.includes('webp')) {
+    }
+    // Check mimetype directly
+    else if (quoted.mimetype && quoted.mimetype.includes('webp')) {
       isSticker = true;
     }
 
     if (!isSticker) {
-      return await sock.sendMessage(from, {
-        text: `🖼️ Reply to a sticker with: ${prefix || '.'}toimage`
+      return await sock.sendMessage(from, { 
+        text: `🖼️ Reply to a *sticker* with: ${prefix || '.'}toimage` 
       });
     }
 
@@ -6081,19 +6113,26 @@ register({
     try {
       const { downloadMediaMessage } = require('@whiskeysockets/baileys');
       
-      let mediaBuffer = await downloadMediaMessage(
-        target.message || target,
-        'buffer',
-        {},
-        { reuploadRequest: sock.updateMediaMessage }
-      );
+      // ─── FIX: Download properly ───
+      try {
+        mediaBuffer = await downloadMediaMessage(
+          quoted.message || quoted,
+          'buffer',
+          {},
+          { reuploadRequest: sock.updateMediaMessage }
+        );
+      } catch (dlErr) {
+        // Fallback: try using sock.downloadMediaMessage
+        mediaBuffer = await sock.downloadMediaMessage(quoted);
+      }
 
       if (!mediaBuffer || mediaBuffer.length < 100) {
         return await sock.sendMessage(from, { text: '❌ Failed to download sticker.' });
       }
 
-      // Convert webp to jpg using sharp
+      // ─── CONVERT WEBP TO IMAGE ───
       let imageBuffer = null;
+      
       try {
         const sharp = require('sharp');
         imageBuffer = await sharp(mediaBuffer).toFormat('jpeg').toBuffer();
@@ -8001,15 +8040,17 @@ register({
   aliases: ['song', 'music', 'ytplay', 'ytaudio'],
   category: 'DOWNLOADER',
   description: 'Search and download YouTube audio as MP3',
-  async execute({ sock, from, args, prefix, command }) {
-    if (!args[0]) {
+  async execute({ sock, from, msg, args, prefix, command }) {
+    // ─── BUILD TEXT FROM ARGS ───
+    const text = args.join(' ');
+    
+    if (!text) {
       return await sock.sendMessage(from, { 
-        text: `🎵 Usage: ${prefix}${command} <song name or URL>\nExample: ${prefix}${command} Alone` 
+        text: `🎵 Usage: ${prefix || '.'}play <song name or URL>\nExample: ${prefix || '.'}play Alone` 
       });
     }
 
-    const text = args.join(' ');
-    await sock.sendMessage(from, { text: `🔍 Searching...` });
+    await sock.sendMessage(from, { text: `🔍 Searching for: ${text}` });
 
     try {
       // ─── GET VIDEO INFO ───
@@ -8042,6 +8083,16 @@ register({
         thumbnail = video.thumbnail || '';
       }
 
+      // ─── SEND THUMBNAIL ───
+      if (thumbnail) {
+        try {
+          await sock.sendMessage(from, {
+            image: { url: thumbnail },
+            caption: `🎵 *${videoTitle}*\n⏳ Downloading...`
+          });
+        } catch (e) {}
+      }
+
       // ─── DOWNLOAD AUDIO ───
       let audioData = null;
       const apis = [
@@ -8053,26 +8104,39 @@ register({
 
       for (const api of apis) {
         try {
-          const res = await fetch(api.url, { timeout: 30000 });
+          const res = await fetch(api.url, { 
+            method: 'GET',
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+          });
+          if (!res.ok) continue;
           const data = await res.json();
           const download = data?.result?.url || data?.result?.download_url || data?.download_url || data?.url || data?.download;
           if (download) {
             audioData = { download, title: data?.result?.title || data?.title || videoTitle };
             break;
           }
-        } catch (e) {}
+        } catch (e) {
+          console.log(`❌ ${api.name} failed:`, e.message);
+        }
       }
 
       if (!audioData) {
-        return await sock.sendMessage(from, { text: '❌ Failed to get audio. Try again.' });
+        return await sock.sendMessage(from, { text: '❌ All download sources failed. Try again.' });
       }
 
       // ─── FETCH AUDIO BUFFER ───
-      const audioRes = await fetch(audioData.download);
+      const audioRes = await fetch(audioData.download, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
+
+      if (!audioRes.ok) {
+        return await sock.sendMessage(from, { text: '❌ Failed to download audio file.' });
+      }
+
       let audioBuffer = Buffer.from(await audioRes.arrayBuffer());
 
       if (audioBuffer.length < 1000) {
-        return await sock.sendMessage(from, { text: '❌ File too small.' });
+        return await sock.sendMessage(from, { text: '❌ Downloaded file is too small.' });
       }
 
       // ─── SEND AUDIO ───
@@ -8085,7 +8149,7 @@ register({
           fileName: `${safeTitle}.mp3`,
           ptt: false
         });
-      } catch (e) {
+      } catch (sendErr) {
         await sock.sendMessage(from, {
           document: audioBuffer,
           mimetype: 'audio/mpeg',
@@ -8096,21 +8160,10 @@ register({
 
     } catch (err) {
       console.error('Play error:', err);
-      await sock.sendMessage(from, { text: `❌ Error: ${err.message}` });
+      await sock.sendMessage(from, { text: `❌ Error: ${err.message || 'Unknown error'}` });
     }
   }
 });
-register({
-  name: 'alive',
-  category: 'MAIN',
-  description: 'Check if the bot is online',
-  async execute({ sock, from }) {
-    await sock.sendMessage(from, {
-      text: `✅ *${BOT_NAME}* is alive and running.\nUptime: ${formatUptime(Date.now() - START_TIME)}`,
-    });
-  },
-});
-
 register({
   name: 'runtime',
   category: 'MAIN',
