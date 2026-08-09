@@ -7999,32 +7999,37 @@ register({
 });
 register({
   name: 'play',
-  aliases: ['song', 'music', 'ytplay', 'ytaudio'],
+  aliases: ['song', 'music', 'ytplay', 'ytaudio', 'playv2'],
   category: 'DOWNLOADER',
-  description: 'Search YouTube and download as MP3 audio',
+  description: 'Search and download YouTube audio as MP3 (David Cyril API)',
   async execute({ sock, from, args, prefix, command }) {
     // ==========================================================
-    // Check if user provided a search query
+    // Check if user provided a query or URL
     // ==========================================================
     if (!args[0]) {
       return await sock.sendMessage(from, { 
-        text: `🎵 *YouTube Music Player*\n\nUsage: ${prefix}${command} <song name>\nExample: ${prefix}${command} Alone\n\n*Examples:*\n${prefix}${command} Shape of You\n${prefix}${command} Blinding Lights\n${prefix}${command} Bohemian Rhapsody\n\n*Note:* Searches YouTube and returns the top result as MP3 audio.` 
+        text: `🎵 *YouTube Music Player (v2)*\n\nUsage: ${prefix}${command} <song name or URL>\nExample: ${prefix}${command} Alone\n\n*Examples:*\n${prefix}${command} Shape of You\n${prefix}${command} https://www.youtube.com/watch?v=xxxxxxxxxxx\n\n*Note:* Searches YouTube and returns the top result as MP3 audio.` 
       });
     }
 
     const query = args.join(" ");
+    const isUrl = query.includes('youtube.com') || query.includes('youtu.be');
 
     await sock.sendMessage(from, { 
-      text: `🎵 *Searching YouTube for:* ${query}` 
+      text: `🎵 *Searching for:* ${query}` 
     });
 
     try {
       // ==========================================================
-      // Call YouTube Play API
+      // Build API URL
       // ==========================================================
-      const baseUrl = 'https://api.omegatech.app';
-      const apiUrl = new URL(`${baseUrl}/api/download/play`);
-      apiUrl.searchParams.append('search', query);
+      const apiUrl = new URL('https://apis.davidcyril.name.ng/download/ytmp3v2');
+      
+      if (isUrl) {
+        apiUrl.searchParams.append('url', query);
+      } else {
+        apiUrl.searchParams.append('search', query);
+      }
 
       const response = await fetch(apiUrl.toString(), {
         method: 'GET',
@@ -8041,27 +8046,24 @@ register({
       const data = await response.json();
 
       // ==========================================================
-      // Check if search was successful
+      // Extract data from response
       // ==========================================================
-      if (!data.success) {
-        return await sock.sendMessage(from, { 
-          text: `❌ Search failed: ${data.message || 'Unknown error'}` 
-        });
-      }
+      let title = data.result?.title || data.title || data.videoTitle || 'YouTube Audio';
+      let artist = data.result?.artist || data.artist || data.channel || 'Unknown';
+      let duration = data.result?.duration || data.duration || 'N/A';
+      let thumbnail = data.result?.thumbnail || data.thumbnail || data.thumb || '';
+      let audioUrl = data.result?.url || data.result?.download_url || data.url || data.download_url;
 
-      // ==========================================================
-      // Extract video data
-      // ==========================================================
-      const title = data.title || data.result?.title || 'Unknown';
-      const artist = data.artist || data.result?.artist || data.channel || 'Unknown';
-      const duration = data.duration || data.result?.duration || 'N/A';
-      const thumbnail = data.thumbnail || data.result?.thumbnail || data.result?.thumb || '';
-      const audioUrl = data.download_url || data.result?.download_url || data.url || data.result?.url;
-      const videoUrl = data.video_url || data.result?.video_url || data.result?.url;
+      // Fallback: try to find any URL in the response
+      if (!audioUrl) {
+        const jsonString = JSON.stringify(data);
+        const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp3|m4a|ogg|wav)/i);
+        if (urlMatch) audioUrl = urlMatch[0];
+      }
 
       if (!audioUrl) {
         return await sock.sendMessage(from, { 
-          text: `❌ No audio download URL found for "${query}".` 
+          text: `❌ No audio download URL found for "${query}".\n\n💡 Try a different search term or direct URL.` 
         });
       }
 
@@ -8070,8 +8072,7 @@ register({
       // ==========================================================
       let infoMsg = `🎵 *${title}*\n`;
       infoMsg += `👤 *Artist:* ${artist}\n`;
-      infoMsg += `⏱️ *Duration:* ${duration}\n`;
-      if (videoUrl) infoMsg += `🔗 *Watch:* ${videoUrl}\n\n`;
+      infoMsg += `⏱️ *Duration:* ${duration}\n\n`;
       infoMsg += `⬇️ *Downloading audio...*`;
 
       if (thumbnail) {
@@ -8088,7 +8089,7 @@ register({
       }
 
       // ==========================================================
-      // Download and send the audio
+      // Download the audio
       // ==========================================================
       const audioResponse = await fetch(audioUrl, {
         headers: {
@@ -8135,12 +8136,11 @@ register({
     } catch (error) {
       console.error('Play error:', error);
       await sock.sendMessage(from, { 
-        text: `⚠️ Error: ${error.message || 'Could not search or download.'}\n\n💡 Try:\n• ${prefix}${command} Alone\n• ${prefix}${command} Shape of You\n• ${prefix}${command} Blinding Lights\n\n💡 Or try again later.` 
+        text: `⚠️ Error: ${error.message || 'Could not search or download.'}\n\n💡 Try:\n• ${prefix}${command} Alone\n• ${prefix}${command} Shape of You\n• ${prefix}${command} https://youtube.com/watch?v=xxxxx\n\n💡 Or try again later.` 
       });
     }
   }
 });
-
 register({
   name: 'alive',
   category: 'MAIN',
