@@ -291,49 +291,44 @@ register({
   category: 'TOOLS',
   description: 'Convert sticker/video to GIF and send',
   async execute({ sock, from, msg, args, prefix, command }) {
-    // ─── FIX: Get quoted message properly ───
-    let quoted = msg?.quoted || msg;
+    // ─── FIX: Extract quoted message from contextInfo ───
+    let quoted = null;
     
-    // If msg has message but no quoted, try to get from contextInfo
-    if (!quoted || !quoted.message) {
-      if (msg?.message?.extendedTextMessage?.contextInfo?.quotedMessage) {
-        quoted = {
-          message: msg.message.extendedTextMessage.contextInfo.quotedMessage,
-          key: msg.message.extendedTextMessage.contextInfo
-        };
-      }
+    if (msg?.quoted) {
+      quoted = msg.quoted;
+    }
+    
+    if (!quoted && msg?.message?.extendedTextMessage?.contextInfo?.quotedMessage) {
+      const contextInfo = msg.message.extendedTextMessage.contextInfo;
+      quoted = {
+        message: contextInfo.quotedMessage,
+        key: {
+          id: contextInfo.stanzaId,
+          fromMe: false,
+          remoteJid: from,
+          participant: contextInfo.participant || from
+        }
+      };
+    }
+
+    if (!quoted && msg?.message?.videoMessage) {
+      quoted = { message: msg.message };
+    }
+    if (!quoted && msg?.message?.stickerMessage) {
+      quoted = { message: msg.message };
     }
 
     if (!quoted || !quoted.message) {
       return await sock.sendMessage(from, { 
-        text: `🎬 Reply to a video or sticker with: ${prefix || '.'}togif\n\nNo quoted message found.` 
+        text: `🎬 Reply to a video or sticker with: ${prefix || '.'}togif` 
       });
     }
 
-    // ─── FIX: Check for video/sticker properly ───
-    let isVideo = false;
-    let isSticker = false;
-    let mime = '';
-
-    // Check all possible locations
-    if (quoted.message?.videoMessage) {
-      isVideo = true;
-      mime = quoted.message.videoMessage.mimetype || 'video/mp4';
-    } else if (quoted.message?.stickerMessage) {
-      isSticker = true;
-      mime = quoted.message.stickerMessage.mimetype || 'image/webp';
-    } else if (quoted.message?.imageMessage?.mimetype?.includes('webp')) {
-      isSticker = true;
-      mime = quoted.message.imageMessage.mimetype;
-    } else if (quoted.mimetype) {
-      mime = quoted.mimetype;
-      if (mime.includes('video') || mime.includes('gif')) isVideo = true;
-      if (mime.includes('webp')) isSticker = true;
-    } else if (quoted.key?.message?.videoMessage) {
-      isVideo = true;
-    } else if (quoted.key?.message?.stickerMessage) {
-      isSticker = true;
-    }
+    // ─── Check media type ───
+    const isVideo = !!quoted.message.videoMessage;
+    const isSticker = !!quoted.message.stickerMessage || 
+                      quoted.message.imageMessage?.mimetype?.includes('webp') ||
+                      quoted.mimetype?.includes('webp');
 
     if (!isVideo && !isSticker) {
       return await sock.sendMessage(from, { 
@@ -350,7 +345,7 @@ register({
       
       try {
         mediaBuffer = await downloadMediaMessage(
-          quoted.message || quoted,
+          quoted,
           'buffer',
           {},
           { reuploadRequest: sock.updateMediaMessage }
@@ -375,7 +370,7 @@ register({
       let finalBuffer = mediaBuffer;
 
       // ─── If sticker, convert to video ───
-      if (isSticker || mime.includes('webp')) {
+      if (isSticker) {
         try {
           const ffmpeg = require('ffmpeg-static');
           const { exec } = require('child_process');
@@ -4038,6 +4033,95 @@ register({
   }
 });
 register({
+  name: 'gifreact',
+  aliases: ['gr', 'reaction', 'reactgif'],
+  category: 'TOOLS',
+  description: 'Send a random GIF reaction based on keyword',
+  async execute({ sock, from, args, prefix, command }) {
+    // ─── CHECK IF USER PROVIDED A KEYWORD ───
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🎬 *GIF Reaction*\n\nUsage: ${prefix || '.'}gifreact <keyword>\nExample: ${prefix || '.'}gifreact happy\n\n*Keywords:*\n• happy, sad, angry, laugh, cry, love, hug, kiss, dance, wave, hello, bye, yes, no, sorry, thank you, welcome, good morning, good night, fire, cool, wow, omg, lol, bruh, shocked, confused, thinking, sleepy, hungry, eat, party, celebrate, workout, running, singing, dancing, gaming, reading, sleeping, crying, laughing, smiling, waving, hugging, kissing, fighting, running, jumping, swimming, flying, driving, cooking, eating, drinking, working, studying, playing, shopping, traveling` 
+      });
+    }
+
+    const keyword = args.join(' ').toLowerCase();
+    await sock.sendMessage(from, { text: `⏳ Finding reaction for: *${keyword}*...` });
+
+    try {
+      // ─── GIF API ENDPOINTS ───
+      const apis = [
+        {
+          name: 'Tenor',
+          url: `https://api.tenor.com/v1/search?q=${encodeURIComponent(keyword)}&key=LIVDSRZULELA&limit=20`
+        },
+        {
+          name: 'Giphy',
+          url: `https://api.giphy.com/v1/gifs/search?api_key=dc6zaTOxFJmzC&q=${encodeURIComponent(keyword)}&limit=20&rating=g`
+        }
+      ];
+
+      let gifUrl = null;
+      let usedApi = '';
+
+      for (const api of apis) {
+        try {
+          const res = await fetch(api.url, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+          });
+          
+          if (!res.ok) continue;
+          const data = await res.json();
+          
+          let results = [];
+          
+          // ─── Tenor Response ───
+          if (data.results) {
+            results = data.results.filter(r => r.media && r.media.length > 0);
+            if (results.length > 0) {
+              const random = results[Math.floor(Math.random() * results.length)];
+              gifUrl = random.media[0].gif.url || random.media[0].tinygif.url;
+              usedApi = 'Tenor';
+              break;
+            }
+          }
+          
+          // ─── Giphy Response ───
+          if (data.data) {
+            results = data.data.filter(r => r.images && r.images.original);
+            if (results.length > 0) {
+              const random = results[Math.floor(Math.random() * results.length)];
+              gifUrl = random.images.original.url || random.images.downsized.url;
+              usedApi = 'Giphy';
+              break;
+            }
+          }
+        } catch (e) {
+          console.log(`❌ ${api.name} failed:`, e.message);
+        }
+      }
+
+      if (!gifUrl) {
+        return await sock.sendMessage(from, { 
+          text: `❌ No GIF found for "${keyword}". Try a different keyword.` 
+        });
+      }
+
+      // ─── SEND THE GIF ───
+      await sock.sendMessage(from, {
+        image: { url: gifUrl },
+        caption: `🎬 *${keyword.toUpperCase()}*\n📌 ${usedApi}\n\n✨ _Powered by NEXUS-MD_`
+      });
+
+    } catch (error) {
+      console.error('GIF reaction error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not fetch GIF.'}\n\n💡 Try again later.` 
+      });
+    }
+  }
+});
+register({
   name: 'nanoedit',
   aliases: ['editimage', 'nanoe', 'imageedit', 'nanoeditor'],
   category: 'AI',
@@ -4337,6 +4421,108 @@ register({
       console.error('Spotify error:', error);
       await sock.sendMessage(from, { 
         text: `⚠️ Error: ${error.message || 'Could not search Spotify.'}\n\n💡 Try:\n• ${prefix}${command} Alone\n• ${prefix}${command} Shape of You\n• ${prefix}${command} Drake\n\n💡 Or try again later.` 
+      });
+    }
+  }
+});
+register({
+  name: 'bible',
+  aliases: ['verse', 'scripture', 'bibleverse'],
+  category: 'TOOLS',
+  description: 'Get Bible verses with translation options',
+  async execute({ sock, from, args, prefix, command }) {
+    const query = args.join(' ');
+
+    // ─── CHECK FOR TRANSLATION FLAG ───
+    let translation = 'kjv'; // Default
+    let cleanQuery = query;
+
+    const translationMatch = query.match(/--(kjv|asv|web|bbe|akjv|ylt|dby|nkjv|niv|esv|nasb|nlt|msg|amp)/i);
+    if (translationMatch) {
+      translation = translationMatch[1].toLowerCase();
+      cleanQuery = query.replace(/--\w+/i, '').trim();
+    }
+
+    // ─── PARSE VERSE REFERENCE ───
+    const verseMatch = cleanQuery.match(/^(\d?\s?\w+)\s+(\d+):(\d+)(?:-(\d+))?$/);
+    const isSearch = cleanQuery.length > 0 && !verseMatch;
+
+    // ─── BUILD TRANSLATION TEXT ───
+    const transMap = {
+      'kjv': 'King James Version',
+      'asv': 'American Standard Version',
+      'web': 'World English Bible',
+      'bbe': 'Bible in Basic English',
+      'akjv': 'Authorized King James Version',
+      'ylt': 'Young\'s Literal Translation',
+      'dby': 'Darby Bible',
+      'nkjv': 'New King James Version',
+      'niv': 'New International Version',
+      'esv': 'English Standard Version',
+      'nasb': 'New American Standard Bible',
+      'nlt': 'New Living Translation',
+      'msg': 'The Message',
+      'amp': 'Amplified Bible'
+    };
+    const transName = transMap[translation] || 'KJV';
+
+    try {
+      let url = '';
+      let label = '';
+
+      // ─── DETERMINE QUERY TYPE ───
+      if (verseMatch) {
+        // ─── SPECIFIC VERSE ───
+        const book = verseMatch[1].trim();
+        const chapter = parseInt(verseMatch[2]);
+        const startVerse = parseInt(verseMatch[3]);
+        const endVerse = verseMatch[4] ? parseInt(verseMatch[4]) : startVerse;
+        
+        url = `https://bible-api.com/${encodeURIComponent(book)} ${chapter}:${startVerse}${endVerse !== startVerse ? '-' + endVerse : ''}?translation=${translation}`;
+        label = `${book} ${chapter}:${startVerse}${endVerse !== startVerse ? '-' + endVerse : ''}`;
+        
+        await sock.sendMessage(from, { text: `📖 *Searching for ${label} (${transName})...*` });
+      } else if (isSearch) {
+        // ─── SEARCH ───
+        url = `https://bible-api.com/${encodeURIComponent(cleanQuery)}?translation=${translation}`;
+        label = `"${cleanQuery}"`;
+        await sock.sendMessage(from, { text: `📖 *Searching for ${label} (${transName})...*` });
+      } else {
+        // ─── RANDOM VERSE ───
+        url = `https://bible-api.com/?random=1&translation=${translation}`;
+        label = 'Random Verse';
+        await sock.sendMessage(from, { text: `📖 *Fetching a random verse (${transName})...*` });
+      }
+
+      // ─── FETCH ───
+      const response = await fetch(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.error || !data.text) {
+        return await sock.sendMessage(from, { 
+          text: `❌ No verses found.\n\n💡 Try: ${prefix || '.'}bible John 3:16\n${prefix || '.'}bible love --kjv\n${prefix || '.'}bible --niv` 
+        });
+      }
+
+      const text = data.text.replace(/\n/g, ' ');
+      const reference = data.reference || 'Unknown';
+      const translationDisplay = data.translation_name || transName;
+
+      const msg = `📖 *${reference} (${translationDisplay})*\n\n"${text}"\n\n📌 *Available Translations:*\n--kjv, --asv, --web, --bbe, --nkjv, --niv, --esv, --nasb, --nlt, --msg, --amp\n\n💡 ${prefix || '.'}bible John 3:16 --niv`;
+
+      await sock.sendMessage(from, { text: msg });
+
+    } catch (error) {
+      console.error('Bible error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not fetch Bible verse.'}\n\n💡 Try: ${prefix || '.'}bible John 3:16` 
       });
     }
   }
@@ -6097,62 +6283,48 @@ register({
   category: 'TOOLS',
   description: 'Convert sticker to image and send',
   async execute({ sock, from, msg, args, prefix, command }) {
-    // ─── DEBUG: Log what we received ───
-    console.log('Message keys:', Object.keys(msg || {}));
-    console.log('Has quoted:', !!msg?.quoted);
-    console.log('Has message:', !!msg?.message);
+    // ─── FIX: Extract quoted message from contextInfo ───
+    let quoted = null;
     
-    // ─── FIX: Get quoted message properly ───
-    let quoted = msg?.quoted || msg;
+    // Method 1: Check msg.quoted (if your bot sets it)
+    if (msg?.quoted) {
+      quoted = msg.quoted;
+    }
     
-    // If msg has message but no quoted, try to get from contextInfo
-    if (!quoted || !quoted.message) {
-      // Try to get from contextInfo
-      if (msg?.message?.extendedTextMessage?.contextInfo?.quotedMessage) {
-        quoted = {
-          message: msg.message.extendedTextMessage.contextInfo.quotedMessage,
-          key: msg.message.extendedTextMessage.contextInfo
-        };
-      }
+    // Method 2: Extract from contextInfo (most reliable for your bot)
+    if (!quoted && msg?.message?.extendedTextMessage?.contextInfo?.quotedMessage) {
+      const contextInfo = msg.message.extendedTextMessage.contextInfo;
+      quoted = {
+        message: contextInfo.quotedMessage,
+        key: {
+          id: contextInfo.stanzaId,
+          fromMe: false,
+          remoteJid: from,
+          participant: contextInfo.participant || from
+        }
+      };
+    }
+
+    // Method 3: Check if the message itself is a sticker (if no command text)
+    if (!quoted && msg?.message?.stickerMessage) {
+      quoted = { message: msg.message };
     }
 
     if (!quoted || !quoted.message) {
       return await sock.sendMessage(from, { 
-        text: `🖼️ Reply to a sticker with: ${prefix || '.'}toimage\n\nNo quoted message found.` 
+        text: `🖼️ Reply to a *sticker* with: ${prefix || '.'}toimage\n\nNo sticker found in reply.` 
       });
     }
 
-    // ─── FIX: Check for sticker properly ───
-    let isSticker = false;
-    let mediaBuffer = null;
+    // ─── Check if it's a sticker ───
+    const stickerMsg = quoted.message.stickerMessage || 
+                       quoted.message.imageMessage?.mimetype?.includes('webp') ||
+                       quoted.mimetype?.includes('webp');
 
-    // Check all possible sticker locations
-    if (quoted.message?.stickerMessage) {
-      isSticker = true;
-    } else if (quoted.message?.imageMessage?.mimetype?.includes('webp')) {
-      isSticker = true;
-    } else if (quoted.mimetype && quoted.mimetype.includes('webp')) {
-      isSticker = true;
-    }
-    // Check if it's in the contextInfo
-    else if (quoted.key?.message?.stickerMessage) {
-      isSticker = true;
-    } else if (quoted.key?.message?.imageMessage?.mimetype?.includes('webp')) {
-      isSticker = true;
-    }
-
-    if (!isSticker) {
-      // ─── DEBUG: Show what we detected ───
-      let debugInfo = 'Detected message types:\n';
-      if (quoted.message) {
-        debugInfo += Object.keys(quoted.message).join(', ');
-      } else if (quoted.key) {
-        debugInfo += 'Has key object';
-      } else {
-        debugInfo += 'No message found';
-      }
+    if (!stickerMsg) {
+      const msgKeys = Object.keys(quoted.message).join(', ');
       return await sock.sendMessage(from, { 
-        text: `🖼️ Reply to a *sticker* with: ${prefix || '.'}toimage\n\nDebug: ${debugInfo}` 
+        text: `🖼️ Reply to a *sticker* with: ${prefix || '.'}toimage\n\nFound: ${msgKeys || 'unknown'}` 
       });
     }
 
@@ -6161,18 +6333,16 @@ register({
     try {
       const { downloadMediaMessage } = require('@whiskeysockets/baileys');
       
-      // ─── FIX: Download from the correct message source ───
+      let mediaBuffer = null;
+      
       try {
-        // Try with the full message
         mediaBuffer = await downloadMediaMessage(
-          quoted.message || quoted,
+          quoted,
           'buffer',
           {},
           { reuploadRequest: sock.updateMediaMessage }
         );
       } catch (dlErr) {
-        console.log('First download failed:', dlErr.message);
-        // Try with just the key
         try {
           mediaBuffer = await downloadMediaMessage(
             { key: quoted.key, message: quoted.message },
@@ -6181,8 +6351,6 @@ register({
             { reuploadRequest: sock.updateMediaMessage }
           );
         } catch (dlErr2) {
-          console.log('Second download failed:', dlErr2.message);
-          // Fallback: use sock.downloadMediaMessage
           mediaBuffer = await sock.downloadMediaMessage(quoted);
         }
       }
@@ -6198,7 +6366,6 @@ register({
         const sharp = require('sharp');
         imageBuffer = await sharp(mediaBuffer).toFormat('jpeg').toBuffer();
       } catch (sharpErr) {
-        // Fallback: ffmpeg
         try {
           const ffmpeg = require('ffmpeg-static');
           const { exec } = require('child_process');
