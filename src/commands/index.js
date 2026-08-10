@@ -826,7 +826,7 @@ register({
     // Text is deliberately styled like the reference screenshot. The actual
     // clickable controls are supplied by the modern native-flow message below.
     const menuText = [
-      '☐ *LORD ZUKO 👿*',
+      '☐ *Velox Et Exactus*',
       '',
       '│',
       `├── ☐ User : ${userName}`,
