@@ -5,9 +5,9 @@ let packageName = requested;
 try {
   baileys = require(requested);
 } catch (firstError) {
-  if (requested !== '@whiskeysockets/baileys') {
+  if (requested !== '@vansnowi/baileys') {
     try {
-      packageName = '@whiskeysockets/baileys';
+      packageName = '@vansnowi/baileys';
       baileys = require(packageName);
       console.warn(`[baileys] ${requested} is unavailable; falling back to ${packageName}.`);
     } catch (fallbackError) {
