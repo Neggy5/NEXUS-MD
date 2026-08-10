@@ -6,7 +6,7 @@ const {
   DisconnectReason,
   fetchLatestBaileysVersion,
   Browsers,
-} = require('@whiskeysockets/baileys');
+} = require('./baileys');
 const { Boom } = require('@hapi/boom');
 const logger = require('./logger');
 const { handleMessage } = require('./bot');
@@ -42,6 +42,26 @@ function listSessions() {
  * Resolves with the pairing code once WhatsApp issues one (only needed on first link).
  * If a session is already linked/connected, resolves with { alreadyLinked: true }.
  */
+function patchMessageBeforeSending(msg) {
+  // The vanSnowi fork historically handles legacy interactive payloads by
+  // wrapping them in viewOnceMessage. Keep the same compatibility behavior
+  // used by Octopus V7, while leaving modern messages untouched.
+  try {
+    const unwrap = msg?.viewOnceMessage?.message || msg?.message || msg;
+    const requiresViewOnce = !!(
+      unwrap?.buttonsMessage ||
+      unwrap?.templateMessage ||
+      unwrap?.listMessage
+    );
+    if (requiresViewOnce && !msg?.viewOnceMessage) {
+      return { viewOnceMessage: { message: unwrap } };
+    }
+  } catch (e) {
+    console.warn('[baileys] message patch failed:', e.message);
+  }
+  return msg;
+}
+
 async function startSession(phoneRaw) {
   const phone = phoneRaw.replace(/[^0-9]/g, '');
   const sessionId = sanitizeId(phone);
@@ -64,6 +84,7 @@ async function startSession(phoneRaw) {
     printQRInTerminal: false,
     auth: state,
     browser: Browsers.macOS('Chrome'),
+    patchMessageBeforeSending: patchMessageBeforeSending,
   });
 
   const sessionEntry = { sock, status: 'pairing', pairingCode: null, phone, saveCreds };

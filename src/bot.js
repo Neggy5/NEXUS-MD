@@ -5,28 +5,20 @@ const { DEFAULT_PREFIX } = require('./config');
 
 function extractText(message) {
   if (!message) return '';
-
-  // Native-flow replies (list rows / quick-reply buttons from an
-  // interactiveMessage, e.g. the .richmenu command) come back as a JSON
-  // string on nativeFlowResponseMessage.paramsJson, not as plain text.
-  const nativeFlow = message.interactiveResponseMessage?.nativeFlowResponseMessage;
-  if (nativeFlow?.paramsJson) {
-    try {
-      const params = JSON.parse(nativeFlow.paramsJson);
-      if (params.id) return params.id;
-    } catch {
-      // fall through to the plain-text checks below
-    }
-  }
-
   return (
     message.conversation ||
     message.extendedTextMessage?.text ||
     message.imageMessage?.caption ||
     message.videoMessage?.caption ||
-    // Older-style list/button messages, for compatibility.
-    message.listResponseMessage?.singleSelectReply?.selectedRowId ||
     message.buttonsResponseMessage?.selectedButtonId ||
+    message.templateButtonReplyMessage?.selectedId ||
+    message.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    (() => {
+      try {
+        const params = message.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+        return params ? (JSON.parse(params).id || JSON.parse(params).selectedId || '') : '';
+      } catch { return ''; }
+    })() ||
     ''
   );
 }
