@@ -30,6 +30,15 @@ const GROUP_DEFAULTS = {
   antisticker: false,
   antigroupmention: false,
   antilink: false,
+
+  // Welcome / goodbye are group-scoped toggles.
+  // They must exist in the defaults; otherwise `undefined` is falsy and
+  // the participant-update handler will silently return even after the
+  // command files are loaded.
+  welcome: false,
+  goodbye: false,
+  welcomeMessage: '',
+  goodbyeMessage: '',
 };
 
 function getGroupSettings(jid) {
