@@ -763,178 +763,311 @@ register({
     }
   },
 });
+
+// ============================================================
+//                  NEXUS-MD COMMAND CENTER
+// ============================================================
+
+const MENU_INTERNAL_COMMANDS = new Set([
+  'menu', 'help', 'commands',
+  'menucat', 'allmenu', 'menupage',
+  'buttons', 'buttonmenu', 'btnmenu',
+  'setmenustyle'
+]);
+
+const MENU_CATEGORY_EMOJI = {
+  'MAIN': '🏠',
+  'AI': '🤖',
+  'DOWNLOADER': '📥',
+  'TOOLS': '🛠️',
+  'GROUP-ADMIN': '👥',
+  'GROUP': '👥',
+  'OWNER': '👑',
+  'MEDIA': '🎨',
+  'FUN': '🎮',
+  'INFO': 'ℹ️',
+  'UTILITY': '⚙️',
+  'SEARCH': '🔎',
+  'OTHER': '✨'
+};
+
+function getUniqueMenuCommands() {
+  return [...new Set(commands.values())]
+    .filter(c => c && c.name && !MENU_INTERNAL_COMMANDS.has(c.name))
+    .sort((a, b) => {
+      const ca = String(a.category || 'OTHER');
+      const cb = String(b.category || 'OTHER');
+      return ca.localeCompare(cb) || a.name.localeCompare(b.name);
+    });
+}
+
+function menuCategoryMap() {
+  const map = new Map();
+  for (const c of getUniqueMenuCommands()) {
+    const cat = String(c.category || 'OTHER').toUpperCase();
+    if (!map.has(cat)) map.set(cat, []);
+    map.get(cat).push(c);
+  }
+  return map;
+}
+
+function menuButton(display_text, id) {
+  return {
+    name: 'quick_reply',
+    buttonParamsJson: JSON.stringify({ display_text, id })
+  };
+}
+
+async function sendNativeMenu(sock, from, {
+  title = 'NEXUS-MD',
+  body,
+  footer = 'NEXUS-MD • Velox Et Exactus',
+  buttons = []
+}) {
+  let imageMessage = {};
+  if (MENU_IMAGE_URL) {
+    try {
+      imageMessage = await prepareWAMessageMedia(
+        { image: { url: MENU_IMAGE_URL } },
+        { upload: sock.waUploadToServer }
+      );
+    } catch (e) {
+      console.warn('[menu] image preparation failed:', e.message);
+    }
+  }
+
+  const interactiveMessage = {
+    interactiveMessage: {
+      header: {
+        title,
+        hasMediaAttachment: Boolean(imageMessage?.imageMessage),
+        ...(imageMessage || {})
+      },
+      body: { text: body },
+      footer: { text: footer },
+      nativeFlowMessage: {
+        buttons: buttons.slice(0, 10),
+        messageParamsJson: JSON.stringify({})
+      }
+    }
+  };
+
+  const generated = generateWAMessageFromContent(
+    from,
+    { viewOnceMessage: { message: interactiveMessage } },
+    { userJid: sock.user?.id }
+  );
+
+  await sock.relayMessage(from, generated.message, { messageId: generated.key.id });
+}
+
+function commandLabel(command, prefix) {
+  const name = `${prefix}${command.name}`;
+  return name.length <= 18 ? name : name.slice(0, 17) + '…';
+}
+
+function commandPageBody({ heading, page, totalPages, commandsOnPage, totalCommands, prefix, userName, ownerName, version, uptime, date }) {
+  const lines = [
+    '🤖 *NEXUS-MD*',
+    '📦 *Velox Et Exactus*',
+    '',
+    '╭━━〔 ⚡ COMMAND CENTER 〕━━╮',
+    `┃ 👤 User    : ${userName}`,
+    `┃ 👑 Owner   : ${ownerName}`,
+    `┃ 🧬 Version : ${version}`,
+    `┃ ⚡ Prefix  : ${prefix}`,
+    `┃ ⏱️ Uptime  : ${uptime}`,
+    `┃ 📚 Commands: ${totalCommands}`,
+    `┃ 📅 Date    : ${date}`,
+    '╰━━━━━━━━━━━━━━━━━━━━━━━━━━╯',
+    '',
+    `${heading}`,
+    `📄 Page ${page}/${totalPages}`,
+    ''
+  ];
+
+  commandsOnPage.forEach((c, i) => {
+    const emoji = MENU_CATEGORY_EMOJI[String(c.category || 'OTHER').toUpperCase()] || '✨';
+    lines.push(`${i + 1}. ${emoji} *${prefix}${c.name}*`);
+    if (c.description) lines.push(`   ${c.description}`);
+  });
+
+  lines.push('', '👇 *Tap a command below to run it.*');
+  return lines.join('\n');
+}
+
 register({
   name: 'menu',
   aliases: ['help', 'commands'],
   category: 'MAIN',
-  description: 'Show the Velox-style interactive command menu',
-  async execute({ sock, from, sender, isGroup, sessionId, prefix, msg }) {
-    const commandPrefix = prefix || getGlobalSetting(sessionId, 'prefix') || PREFIX;
-    const userName = msg?.pushName || sender.split('@')[0];
-    const version = require('../../package.json').version || '1.0.0';
+  description: 'Open the NEXUS-MD command center',
+  async execute({ sock, from, sender, msg, sessionId, prefix }) {
+    const p = prefix || getGlobalSetting(sessionId, 'prefix') || PREFIX;
+    const userName = msg?.pushName || (sender || '').split('@')[0] || 'User';
     const ownerName = process.env.OWNER_NAME || 'NEXUS-MD Developer';
-
-    // These are intentionally mapped to real commands where possible.
-    // If a command does not exist in a particular build, the button is simply
-    // omitted rather than sending a dead button.
-    const available = (name) => commands.has(name);
-
-    const columns = [
-      {
-        title: 'Tools',
-        buttons: [
-          ['Hexa', 'hex'],
-          ['Restart', 'restart'],
-          ['Ping', 'ping'],
-          ['Osint', 'osint'],
-        ],
-      },
-      {
-        title: 'Other',
-        buttons: [
-          ['Info', 'info'],
-          ['From', 'from'],
-          ['Code', 'code'],
-          ['Test', 'test'],
-        ],
-      },
-      {
-        title: 'Exec',
-        buttons: [
-          ['Modder', 'modder'],
-          ['Xhome', 'xhome'],
-          ['Crash', 'crash'],
-          ['</>', 'code'],
-        ],
-      },
-    ];
-
-    // Keep only commands that are actually registered.
-    const groups = columns.map(group => ({
-      ...group,
-      buttons: group.buttons.filter(([, command]) => available(command)),
-    }));
-
-    const totalCommands = new Set(commands.values()).size;
+    const version = require('../../package.json').version || '1.0.0';
     const uptime = formatUptime(Date.now() - START_TIME);
-    const date = new Date().toLocaleDateString('en-GB', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
+    const date = new Date().toLocaleDateString('en-GB');
+
+    const categories = [...menuCategoryMap().keys()];
+    const total = getUniqueMenuCommands().length;
+
+    const categoryButtons = categories.slice(0, 8).map(cat => {
+      const emoji = MENU_CATEGORY_EMOJI[cat] || '✨';
+      const label = `${emoji} ${cat}`.slice(0, 20);
+      return menuButton(label, `${p}menucat ${cat} 1`);
     });
 
-    // Text is deliberately styled like the reference screenshot. The actual
-    // clickable controls are supplied by the modern native-flow message below.
-    const menuText = [
-      '☐ *Velox Et Exactus*',
+    categoryButtons.push(menuButton('📚 ALL COMMANDS', `${p}allmenu 1`));
+    categoryButtons.push(menuButton('👨‍💻 DEVELOPER', `${p}owner`));
+
+    const body = [
+      '🤖 *NEXUS-MD*',
+      '📦 *Velox Et Exactus*',
       '',
-      '│',
-      `├── ☐ User : ${userName}`,
-      `├── ☐ Owner : ${ownerName}`,
-      `├── ☐ Version : ${version}`,
-      '│',
-      `├── ☐ Prefix : ${commandPrefix}`,
-      `├── ☐ Uptime : ${uptime}`,
-      `└── ☐ Date : ${date}`,
+      '╭━━〔 ⚡ COMMAND CENTER 〕━━╮',
+      `┃ 👤 User    : ${userName}`,
+      `┃ 👑 Owner   : ${ownerName}`,
+      `┃ 🧬 Version : ${version}`,
+      `┃ ⚡ Prefix  : ${p}`,
+      `┃ ⏱️ Uptime  : ${uptime}`,
+      `┃ 📚 Commands: ${total}`,
+      `┃ 📅 Date    : ${date}`,
+      '╰━━━━━━━━━━━━━━━━━━━━━━━━━━╯',
+      '',
+      '✨ *EXPLORE YOUR BOT*',
+      'Choose a category below.',
+      '',
+      '📚 *Every command is available as a button inside its category.*',
+      '⚡ *No need to memorize commands.*'
     ].join('\n');
 
-    const flowButtons = groups.flatMap(group =>
-      group.buttons.map(([displayText, command]) => ({
-        name: 'quick_reply',
-        buttonParamsJson: JSON.stringify({
-          display_text: displayText,
-          id: `${commandPrefix}${command}`,
-        }),
-      }))
-    );
-
-    // Add a developer button similar to the reference menu.
-    flowButtons.push({
-      name: 'quick_reply',
-      buttonParamsJson: JSON.stringify({
-        display_text: 'Developer',
-        id: `${commandPrefix}owner`,
-      }),
-    });
-
     try {
-      let imageMessage;
-      if (MENU_IMAGE_URL) {
-        imageMessage = await prepareWAMessageMedia(
-          { image: { url: MENU_IMAGE_URL } },
-          { upload: sock.waUploadToServer }
-        );
-      }
-
-      const bodyText = [
-        menuText,
-        '',
-        ...groups.map(group =>
-          `${group.title}\n${group.buttons.map(([label]) => `• ${label}`).join('  •  ')}`
-        ),
-        '',
-        'Tap a button below to run a command.',
-      ].join('\n');
-
-      const nativeMessage = {
-        interactiveMessage: {
-          header: {
-            title: 'NEXUS-MD',
-            hasMediaAttachment: Boolean(imageMessage),
-            ...(imageMessage || {}),
-          },
-          body: { text: bodyText },
-          footer: { text: `NEXUS-MD • ${totalCommands} commands • ${isGroup ? 'Group' : 'Private'}` },
-          nativeFlowMessage: {
-            buttons: flowButtons,
-            messageParamsJson: JSON.stringify({
-              limited_time_offer: null,
-              bottom_sheet: null,
-            }),
-          },
-        },
-      };
-
-      const generated = generateWAMessageFromContent(
-        from,
-        { viewOnceMessage: { message: nativeMessage } },
-        { userJid: sock.user?.id }
-      );
-
-      await sock.relayMessage(from, generated.message, {
-        messageId: generated.key.id,
+      await sendNativeMenu(sock, from, {
+        title: '🤖 NEXUS-MD',
+        body,
+        footer: 'NEXUS-MD • Select a category',
+        buttons: categoryButtons
       });
-    } catch (error) {
-      console.warn('[menu] native-flow menu failed:', error.message);
-
-      // Reliable fallback: send the same information as an image/text menu.
-      const fallback = [
-        menuText,
-        '',
-        ...groups.map(group =>
-          `*${group.title}*\n${group.buttons.length
-            ? group.buttons.map(([label, command]) => `${commandPrefix}${command} — ${label}`).join('\n')
-            : '_No matching commands in this build._'}`
-        ),
-        '',
-        `*Tip:* use ${commandPrefix}buttons for the compact button menu.`,
-      ].join('\n\n');
-
-      if (MENU_IMAGE_URL) {
-        await sock.sendMessage(from, {
-          image: { url: MENU_IMAGE_URL },
-          caption: fallback,
-          ...channelContext(),
-        });
-      } else {
-        await sock.sendMessage(from, {
-          text: fallback,
-          ...channelContext(),
-        });
-      }
+    } catch (e) {
+      console.warn('[menu] native menu failed:', e.message);
+      await sock.sendMessage(from, {
+        text: body + '\n\n' + categories.map(c => `• ${c}`).join('\n'),
+        ...channelContext()
+      });
     }
-  },
+  }
 });
+
+register({
+  name: 'menucat',
+  aliases: [],
+  category: 'MAIN',
+  description: 'Open a paginated command category',
+  async execute({ sock, from, args, sessionId, prefix }) {
+    const p = prefix || getGlobalSetting(sessionId, 'prefix') || PREFIX;
+    const category = String(args[0] || '').toUpperCase();
+    const page = Math.max(1, parseInt(args[1] || '1', 10) || 1);
+    const map = menuCategoryMap();
+
+    if (!category || !map.has(category)) {
+      return sock.sendMessage(from, {
+        text: `❌ Unknown category.\nUse ${p}menu to open the command center.`
+      });
+    }
+
+    return sendMenuCommandPage(sock, from, {
+      title: `${MENU_CATEGORY_EMOJI[category] || '✨'} ${category}`,
+      heading: `╭━━〔 ${MENU_CATEGORY_EMOJI[category] || '✨'} ${category} 〕━━╮`,
+      commandsList: map.get(category),
+      page,
+      category,
+      prefix: p
+    });
+  }
+});
+
+register({
+  name: 'allmenu',
+  aliases: ['menupage'],
+  category: 'MAIN',
+  description: 'Browse every NEXUS-MD command',
+  async execute({ sock, from, args, sessionId, prefix }) {
+    const p = prefix || getGlobalSetting(sessionId, 'prefix') || PREFIX;
+    const page = Math.max(1, parseInt(args[0] || '1', 10) || 1);
+    return sendMenuCommandPage(sock, from, {
+      title: '📚 ALL COMMANDS',
+      heading: '╭━━〔 📚 ALL COMMANDS 〕━━╮',
+      commandsList: getUniqueMenuCommands(),
+      page,
+      category: 'ALL',
+      prefix: p
+    });
+  }
+});
+
+async function sendMenuCommandPage(sock, from, {
+  title, heading, commandsList, page, category, prefix
+}) {
+  const PAGE_SIZE = 7;
+  const totalCommands = getUniqueMenuCommands().length;
+  const totalPages = Math.max(1, Math.ceil(commandsList.length / PAGE_SIZE));
+  const safePage = Math.min(Math.max(page, 1), totalPages);
+  const start = (safePage - 1) * PAGE_SIZE;
+  const pageCommands = commandsList.slice(start, start + PAGE_SIZE);
+
+  // 7 real commands + navigation buttons = 9 max.
+  const buttons = pageCommands.map(c =>
+    menuButton(commandLabel(c, prefix), `${prefix}${c.name}`)
+  );
+
+  if (safePage > 1) {
+    buttons.push(menuButton('⬅️ PREVIOUS', category === 'ALL'
+      ? `${prefix}allmenu ${safePage - 1}`
+      : `${prefix}menucat ${category} ${safePage - 1}`));
+  }
+  if (safePage < totalPages) {
+    buttons.push(menuButton('➡️ NEXT', category === 'ALL'
+      ? `${prefix}allmenu ${safePage + 1}`
+      : `${prefix}menucat ${category} ${safePage + 1}`));
+  }
+  buttons.push(menuButton('🏠 MAIN MENU', `${prefix}menu`));
+
+  const userName = sock?.user?.name || (sock?.user?.id || '').split('@')[0] || 'User';
+  const ownerName = process.env.OWNER_NAME || 'NEXUS-MD Developer';
+  const version = require('../../package.json').version || '1.0.0';
+  const uptime = formatUptime(Date.now() - START_TIME);
+  const date = new Date().toLocaleDateString('en-GB');
+
+  const body = commandPageBody({
+    heading,
+    page: safePage,
+    totalPages,
+    commandsOnPage: pageCommands,
+    totalCommands,
+    prefix,
+    userName,
+    ownerName,
+    version,
+    uptime,
+    date
+  });
+
+  try {
+    await sendNativeMenu(sock, from, {
+      title,
+      body,
+      footer: `${title} • ${pageCommands.length} commands on this page`,
+      buttons
+    });
+  } catch (e) {
+    await sock.sendMessage(from, {
+      text: body + '\n\n' + pageCommands.map(c => `${prefix}${c.name}`).join('\n'),
+      ...channelContext()
+    });
+  }
+}
+
 register({
   name: 'setprefix',
   category: 'MAIN',
@@ -4923,101 +5056,224 @@ register({
   name: 'play',
   aliases: ['song', 'music', 'audio'],
   category: 'DOWNLOADER',
-  description: 'Search YouTube and send the best matching audio',
+  description: 'Search and play music from YouTube',
   async execute({ sock, from, args, prefix, command }) {
     if (!args[0]) {
-      return sock.sendMessage(from, {
-        text:
-          `🎵 *NEXUS-MD Music Player*\n\n` +
-          `Usage: ${prefix}${command} <song name or YouTube URL>\n\n` +
-          `Example:\n${prefix}${command} Faded\n` +
-          `${prefix}${command} https://youtu.be/60ItHLz5WEA`
+      return await sock.sendMessage(from, { 
+        text: `🎵 *Music Player*\n\nUsage: ${prefix}${command} <song name or URL>\nExample: ${prefix}${command} Faded\n\n*Examples:*\n${prefix}${command} Shape of You\n${prefix}${command} https://youtu.be/60ItHLz5WEA\n\n*Options:*\n${prefix}${command} <song name> (plays best match)\n${prefix}${command} <url> (plays specific video)` 
       });
     }
 
-    const query = args.join(' ').trim();
-    await sock.sendMessage(from, { text: `🔎 Searching YouTube for: *${query}*` });
+    const query = args.join(" ");
+    const isUrl = query.includes('youtube.com') || query.includes('youtu.be');
+
+    await sock.sendMessage(from, { text: `⏳ Searching for "${query}"...` });
 
     try {
-      let videoId = extractYouTubeId(query);
-      let title = 'YouTube Audio';
+      let videoUrl = query;
+      let title = '';
       let thumbnail = '';
-      let artist = '';
       let duration = '';
+      let artist = '';
 
-      if (!videoId) {
+      // If it's not a URL, search for it
+      if (!isUrl) {
         const yts = require('yt-search');
-        const result = await yts(query);
-        const target = result?.videos?.[0];
-        if (!target) throw new Error(`No YouTube result found for "${query}"`);
+        const searchResults = await yts(query);
+        
+        if (!searchResults || !searchResults.videos || searchResults.videos.length === 0) {
+          return await sock.sendMessage(from, { 
+            text: `❌ No results found for "${query}".\n\n💡 Try a different search term.` 
+          });
+        }
 
-        videoId = extractYouTubeId(target.url);
-        title = target.title || title;
+        const target = searchResults.videos[0];
+        videoUrl = target.url;
+        title = target.title || 'YouTube Audio';
         thumbnail = target.thumbnail || target.image || '';
-        artist = target.author?.name || target.author || '';
         duration = target.timestamp || target.duration || '';
+        artist = target.author?.name || target.author || '';
       }
 
-      if (!videoId) throw new Error('Could not determine the YouTube video ID.');
-
-      const streams = await pipedStreams(videoId);
-      title = streams.title || title;
-      thumbnail = streams.thumbnailUrl || thumbnail;
-      artist = streams.uploader || artist;
-      duration = streams.duration ? `${Math.floor(streams.duration / 60)}:${String(streams.duration % 60).padStart(2, '0')}` : duration;
-
-      const audio = pickPipedAudio(streams);
-      if (!audio) throw new Error('Piped returned no usable audio stream.');
-
-      if (thumbnail) {
-        await sock.sendMessage(from, {
-          image: { url: thumbnail },
-          caption:
-            `🎵 *${title}*\n` +
-            `${artist ? `👤 ${artist}\n` : ''}` +
-            `${duration ? `⏱️ ${duration}\n` : ''}` +
-            `\n⬇️ Downloading audio...`
-        }).catch(() => {});
-      }
-
-      const audioBuffer = await fetchBuffer(audio.url, 24 * 1024 * 1024, 'Audio');
-
-      let finalBuffer = audioBuffer;
-      let mimetype = audio.mimeType || 'audio/mp4';
-      let extension = /mpeg|mp3/i.test(mimetype) ? 'mp3' : 'm4a';
-
-      // Convert to MP3 only when the existing converter is available and
-      // the source isn't already MP3. If conversion fails, send the original
-      // supported audio rather than failing the whole command.
-      if (!/audio\/mpeg/i.test(mimetype)) {
-        try {
-          const { toAudio } = require('../lib/converter');
-          const converted = await toAudio(audioBuffer);
-          if (converted?.length > 1000) {
-            finalBuffer = converted;
-            mimetype = 'audio/mpeg';
-            extension = 'mp3';
-          }
-        } catch (convErr) {
-          console.warn('[play] audio conversion skipped:', convErr.message);
+      // Try to extract metadata if not already set
+      if (!title && !isUrl) {
+        const yts = require('yt-search');
+        const searchResults = await yts(videoUrl);
+        if (searchResults && searchResults.videos && searchResults.videos.length > 0) {
+          const target = searchResults.videos[0];
+          title = target.title || 'YouTube Audio';
+          thumbnail = target.thumbnail || target.image || '';
+          duration = target.timestamp || target.duration || '';
+          artist = target.author?.name || target.author || '';
         }
       }
 
-      const safeTitle = title.replace(/[\\/:*?"<>|]/g, '').slice(0, 80).trim() || 'nexus-audio';
+      // If still no title, use a default
+      if (!title) title = 'YouTube Audio';
 
-      await sock.sendMessage(from, {
-        audio: finalBuffer,
-        mimetype,
-        fileName: `${safeTitle}.${extension}`,
-        caption: `🎵 *${title}*\n${artist ? `👤 ${artist}\n` : ''}✅ *Ready*`
+      // Send thumbnail if available
+      if (thumbnail) {
+        try {
+          await sock.sendMessage(from, {
+            image: { url: thumbnail },
+            caption: `🎵 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}${duration ? `⏱️ *Duration:* ${duration}\n` : ''}\n\n⬇️ *Downloading audio...*`
+          });
+        } catch (thumbErr) {
+          await sock.sendMessage(from, { 
+            text: `🎵 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}${duration ? `⏱️ *Duration:* ${duration}\n` : ''}\n\n⬇️ *Downloading audio...*` 
+          });
+        }
+      }
+
+      // Download via OmegaTech API
+      const baseUrl = 'https://omegatech-api.dixonomega.tech';
+      const response = await fetch(`${baseUrl}/api/download/play?url=${encodeURIComponent(videoUrl)}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
       });
 
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Extract audio URL
+      let audioUrl = data.download_url || data.download || data.url || 
+                     data.result?.download_url || data.result?.download || data.result?.url ||
+                     data.data?.download_url || data.data?.download || data.data?.url;
+
+      if (!audioUrl) {
+        const jsonString = JSON.stringify(data);
+        const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp3|m4a|ogg|wav)/i);
+        if (urlMatch) audioUrl = urlMatch[0];
+      }
+
+      if (!audioUrl) {
+        throw new Error("Could not extract download URL from API response.");
+      }
+
+      // Download the audio
+      const audioResponse = await fetch(audioUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!audioResponse.ok) {
+        throw new Error(`Audio download failed: ${audioResponse.status}`);
+      }
+
+      const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+
+      if (audioBuffer.length < 5000) {
+        throw new Error("Downloaded file is too small. The link may be invalid.");
+      }
+
+      const fileSizeMB = (audioBuffer.length / 1024 / 1024).toFixed(1);
+
+      // Detect if it's MP3 or needs conversion
+      const isMP3 = audioBuffer.toString('ascii', 0, 3) === 'ID3' ||
+                    (audioBuffer[0] === 0xFF && (audioBuffer[1] & 0xE0) === 0xE0);
+
+      let finalBuffer = audioBuffer;
+      if (!isMP3) {
+        try {
+          const { toAudio } = require('../lib/converter');
+          const converted = await toAudio(audioBuffer);
+          if (converted && converted.length > 1000) {
+            finalBuffer = converted;
+          }
+        } catch (convErr) {
+          console.warn('Conversion skipped:', convErr.message);
+        }
+      }
+
+      // Send the audio
+      const safeTitle = title.replace(/[^a-zA-Z0-9\s]/g, '').trim();
+      const fileName = `${safeTitle}.mp3`;
+
+      try {
+        await sock.sendMessage(from, {
+          audio: finalBuffer,
+          mimetype: 'audio/mpeg',
+          fileName: fileName,
+          caption: `🎵 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success*`
+        });
+      } catch (sendErr) {
+        // Fallback: send as document
+        await sock.sendMessage(from, {
+          document: finalBuffer,
+          mimetype: 'audio/mpeg',
+          fileName: fileName,
+          caption: `🎵 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
+        });
+      }
+
     } catch (error) {
-      console.error('[play] error:', error);
-      await sock.sendMessage(from, {
-        text:
-          `❌ *Play failed*\n\n${error.message}\n\n` +
-          `💡 Try another search term or a direct YouTube URL.`
+      console.error('Play error:', error);
+
+      // Fallback: Prince API
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/download/ytmp3';
+        const fallbackRes = await fetch(`${princeUrl}?apikey=prince&url=${encodeURIComponent(query)}`);
+        const fallbackData = await fallbackRes.json();
+
+        let fallbackAudio = fallbackData.result?.download_url || fallbackData.result?.url || 
+                            fallbackData.download_url || fallbackData.url;
+        let fallbackTitle = fallbackData.result?.title || fallbackData.title || 'YouTube Audio';
+
+        if (fallbackAudio) {
+          const aRes = await fetch(fallbackAudio);
+          const aBuf = Buffer.from(await aRes.arrayBuffer());
+          if (aBuf.length > 5000) {
+            return await sock.sendMessage(from, {
+              audio: aBuf,
+              mimetype: 'audio/mpeg',
+              fileName: `${fallbackTitle}.mp3`,
+              caption: `🎵 *${fallbackTitle}*\n✅ *Download Success (fallback)*`
+            });
+          }
+        }
+      } catch (fallbackErr) {
+        // Silent fail
+      }
+
+      // Fallback: Try yt-search with Prince API
+      try {
+        if (!isUrl) {
+          const yts = require('yt-search');
+          const searchResults = await yts(query);
+          if (searchResults && searchResults.videos && searchResults.videos.length > 0) {
+            const target = searchResults.videos[0];
+            const ytUrl = target.url;
+            
+            const princeUrl = 'https://api.princetechn.com/api/download/ytmp3';
+            const fallbackRes = await fetch(`${princeUrl}?apikey=prince&url=${encodeURIComponent(ytUrl)}`);
+            const fallbackData = await fallbackRes.json();
+            
+            let fallbackAudio = fallbackData.result?.download_url || fallbackData.result?.url || 
+                                fallbackData.download_url || fallbackData.url;
+            
+            if (fallbackAudio) {
+              const aRes = await fetch(fallbackAudio);
+              const aBuf = Buffer.from(await aRes.arrayBuffer());
+              if (aBuf.length > 5000) {
+                return await sock.sendMessage(from, {
+                  audio: aBuf,
+                  mimetype: 'audio/mpeg',
+                  fileName: `${target.title}.mp3`,
+                  caption: `🎵 *${target.title}*\n✅ *Download Success (search fallback)*`
+                });
+              }
+            }
+          }
+        }
+      } catch (ytErr) {}
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Play Error: ${error.message || 'Unknown error'}\n\n💡 Try again or use a different song name.` 
       });
     }
   }
@@ -5025,49 +5281,199 @@ register({
 
 register({
   name: 'playvideo',
-  aliases: ['ytvideo', 'video'],
+  aliases: ['ytvideo', 'video', 'ytmp4'],
   category: 'DOWNLOADER',
-  description: 'Search YouTube and send the best matching video',
+  description: 'Download YouTube videos with quality selection',
   async execute({ sock, from, args, prefix, command }) {
     if (!args[0]) {
-      return sock.sendMessage(from, {
-        text: `🎬 Usage: ${prefix}${command} <video name or YouTube URL>\nExample: ${prefix}${command} Never Gonna Give You Up`
+      return await sock.sendMessage(from, { 
+        text: `🎬 *YouTube MP4 Downloader*\n\nUsage: ${prefix}${command} <url> [quality]\nExample: ${prefix}${command} https://youtu.be/wdJrTQJh1ZQ\n\n*Quality options:*\n• 1080p (best)\n• 720p (default)\n• 480p\n• 360p\n• 240p\n• 144p\n\n*Examples:*\n${prefix}${command} https://youtu.be/xxxxx 1080p\n${prefix}${command} https://youtu.be/xxxxx 720p\n\n*Note:* Download URL expires in 10 minutes.` 
       });
     }
 
-    const query = args.join(' ').trim();
-    await sock.sendMessage(from, { text: `🎬 Searching YouTube for: *${query}*` });
+    const url = args[0];
+    let quality = '720p'; // Default quality
+
+    // Check if user specified quality
+    const qualityArg = (args[1] || '').toLowerCase();
+    const validQualities = ['1080p', '720p', '480p', '360p', '240p', '144p'];
+    if (validQualities.includes(qualityArg)) {
+      quality = qualityArg;
+    }
+
+    if (!url.includes('youtube.com') && !url.includes('youtu.be')) {
+      return await sock.sendMessage(from, { 
+        text: `❌ Invalid URL. Please provide a valid YouTube link.` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `⏳ Processing YouTube video... (${quality})` });
 
     try {
-      let videoId = extractYouTubeId(query);
-      let title = 'YouTube Video';
+      // Primary: GiftedTech API
+      const response = await fetch(
+        `https://api.giftedtech.co.ke/api/download/ytmp4?apikey=gifted&url=${encodeURIComponent(url)}&quality=${quality}`,
+        {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        }
+      );
 
-      if (!videoId) {
-        const yts = require('yt-search');
-        const result = await yts(query);
-        const target = result?.videos?.[0];
-        if (!target) throw new Error(`No YouTube result found for "${query}"`);
-        videoId = extractYouTubeId(target.url);
-        title = target.title || title;
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
       }
 
-      const streams = await pipedStreams(videoId);
-      title = streams.title || title;
+      const data = await response.json();
 
-      const video = pickPipedVideo(streams);
-      if (!video) throw new Error('Piped returned no compatible MP4 video stream.');
+      // Extract data
+      let title = data.result?.title || 'YouTube Video';
+      let thumbnail = data.result?.thumbnail || null;
+      let downloadUrl = data.result?.download_url || null;
+      let format = data.result?.format || 'mp4';
+      let qualityReturned = data.result?.quality || quality;
+      let availableQualities = data.result?.availableQualities || [];
+      let message = data.result?.message || '';
 
-      const buffer = await fetchBuffer(video.url, 60 * 1024 * 1024, 'Video');
+      if (!downloadUrl) {
+        throw new Error("Could not extract download URL from API response.");
+      }
 
-      await sock.sendMessage(from, {
-        video: buffer,
-        mimetype: video.mimeType || 'video/mp4',
-        caption: `🎬 *${title}*\n📺 ${video.quality || `${video.height || '?'}p`}\n✅ *Ready*`
+      // Send thumbnail if available
+      if (thumbnail) {
+        try {
+          await sock.sendMessage(from, {
+            image: { url: thumbnail },
+            caption: `🎬 *${title}*\n📊 *Quality:* ${qualityReturned}\n📦 *Format:* ${format}\n${message ? `\n${message}` : ''}\n\n⬇️ *Downloading video...*`
+          });
+        } catch (thumbErr) {
+          await sock.sendMessage(from, { 
+            text: `🎬 *${title}*\n📊 *Quality:* ${qualityReturned}\n📦 *Format:* ${format}\n${message ? `\n${message}` : ''}\n\n⬇️ *Downloading video...*` 
+          });
+        }
+      }
+
+      // Download the video
+      const videoResponse = await fetch(downloadUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
       });
+
+      if (!videoResponse.ok) {
+        throw new Error(`Video download failed: ${videoResponse.status}`);
+      }
+
+      const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+
+      if (videoBuffer.length < 5000) {
+        throw new Error("Downloaded file is too small. The link may be invalid.");
+      }
+
+      const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
+
+      // Build available qualities message
+      let qualityList = '';
+      if (availableQualities.length > 0) {
+        qualityList = availableQualities.map(q => `${q}p`).join(', ');
+      }
+
+      const caption = `🎬 *${title}*\n📊 *Quality:* ${qualityReturned}\n📦 *Format:* ${format}\n📦 *Size:* ${fileSizeMB} MB\n${qualityList ? `📥 *Available:* ${qualityList}` : ''}\n\n✅ *Download Success*\n${message ? `\n⚠️ ${message}` : ''}`;
+
+      // Try to send as video
+      try {
+        await sock.sendMessage(from, {
+          video: videoBuffer,
+          mimetype: 'video/mp4',
+          caption: caption
+        });
+      } catch (sendErr) {
+        // Fallback: send as document
+        await sock.sendMessage(from, {
+          document: videoBuffer,
+          mimetype: 'video/mp4',
+          fileName: `${title.replace(/[^a-zA-Z0-9]/g, '_')}.${format}`,
+          caption: caption
+        });
+      }
+
     } catch (error) {
-      console.error('[playvideo] error:', error);
-      await sock.sendMessage(from, {
-        text: `❌ *Video download failed*\n\n${error.message}\n\n💡 Try a shorter/smaller video or another YouTube URL.`
+      console.error('YouTube MP4 download error:', error);
+
+      // Fallback: OmegaTech API
+      try {
+        const omegaUrl = 'https://omegatech-api.dixonomega.tech/api/download/ytmp4';
+        const fallbackRes = await fetch(`${omegaUrl}?url=${encodeURIComponent(url)}&quality=${quality}`);
+        const fallbackData = await fallbackRes.json();
+
+        let fallbackVideo = fallbackData.download_url || fallbackData.url || fallbackData.video;
+        let fallbackTitle = fallbackData.title || 'YouTube Video';
+
+        if (fallbackVideo) {
+          const vRes = await fetch(fallbackVideo);
+          const vBuf = Buffer.from(await vRes.arrayBuffer());
+          if (vBuf.length > 5000) {
+            return await sock.sendMessage(from, {
+              video: vBuf,
+              mimetype: 'video/mp4',
+              caption: `🎬 *${fallbackTitle}*\n\n✅ *YouTube Download (fallback)*`
+            });
+          }
+        }
+      } catch (fallbackErr) {}
+
+      // Fallback: Prince API
+      try {
+        const princeUrl = 'https://api.princetechn.com/api/download/ytmp4';
+        const princeRes = await fetch(`${princeUrl}?apikey=prince&url=${encodeURIComponent(url)}&quality=${quality}`);
+        const princeData = await princeRes.json();
+
+        let princeVideo = princeData.result?.download_url || princeData.result?.url || princeData.download_url || princeData.url;
+        let princeTitle = princeData.result?.title || princeData.title || 'YouTube Video';
+
+        if (princeVideo) {
+          const vRes = await fetch(princeVideo);
+          const vBuf = Buffer.from(await vRes.arrayBuffer());
+          if (vBuf.length > 5000) {
+            return await sock.sendMessage(from, {
+              video: vBuf,
+              mimetype: 'video/mp4',
+              caption: `🎬 *${princeTitle}*\n\n✅ *YouTube Download (fallback)*`
+            });
+          }
+        }
+      } catch (princeErr) {}
+
+      // Fallback: Try yt-search with GiftedTech
+      try {
+        const yts = require('yt-search');
+        const searchResults = await yts(url);
+        if (searchResults && searchResults.videos && searchResults.videos.length > 0) {
+          const target = searchResults.videos[0];
+          const ytUrl = target.url;
+
+          const giftedRes = await fetch(
+            `https://api.giftedtech.co.ke/api/download/ytmp4?apikey=gifted&url=${encodeURIComponent(ytUrl)}&quality=${quality}`
+          );
+          const giftedData = await giftedRes.json();
+
+          let giftedVideo = giftedData.result?.download_url || giftedData.download_url || giftedData.url;
+          if (giftedVideo) {
+            const vRes = await fetch(giftedVideo);
+            const vBuf = Buffer.from(await vRes.arrayBuffer());
+            if (vBuf.length > 5000) {
+              return await sock.sendMessage(from, {
+                video: vBuf,
+                mimetype: 'video/mp4',
+                caption: `🎬 *${target.title}*\n\n✅ *YouTube Download (search fallback)*`
+              });
+            }
+          }
+        }
+      } catch (ytErr) {}
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Download Error: ${error.message || 'Could not download video.'}\n\n💡 Make sure the URL is valid and try again.` 
       });
     }
   }
