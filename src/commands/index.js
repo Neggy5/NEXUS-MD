@@ -20,6 +20,72 @@ const {
 // ==========================================
 const P_KEY = 'prince';
 const P_BASE = 'https://api.princetechn.com/api';
+// ==========================================
+// DAVID CYRIL API HELPERS
+// ==========================================
+const DAVID_API_BASE = 'https://apis.davidcyril.name.ng';
+
+async function davidApi(path, body = {}, timeoutMs = 45000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${DAVID_API_BASE}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    const raw = await response.text();
+    let data;
+    try { data = JSON.parse(raw); }
+    catch { throw new Error(`David Cyril API returned invalid JSON (${response.status})`); }
+
+    if (!response.ok || data?.success === false) {
+      throw new Error(data?.message || data?.error || `David Cyril API returned ${response.status}`);
+    }
+    return data;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function extractApiText(data) {
+  const candidates = [
+    data?.result,
+    data?.response,
+    data?.reply,
+    data?.message,
+    data?.data?.result,
+    data?.data?.response,
+    data?.data?.reply,
+    data?.data?.message,
+  ];
+  const value = candidates.find(v => typeof v === 'string' && v.trim());
+  return value ? value.trim() : null;
+}
+
+function cleanAiReply(reply) {
+  if (typeof reply !== 'string') return null;
+  return reply.replace(/\\n/g, '\n').replace(/\\"/g, '"').trim();
+}
+
+function splitWhatsAppText(text, max = 3800) {
+  const out = [];
+  for (let i = 0; i < text.length; i += max) out.push(text.slice(i, i + max));
+  return out.length ? out : [''];
+}
+
+async function sendAiReply(sock, from, label, reply) {
+  const clean = cleanAiReply(reply);
+  if (!clean) throw new Error('AI returned an empty response.');
+  for (const [i, chunk] of splitWhatsAppText(clean).entries()) {
+    await sock.sendMessage(from, {
+      text: `${i === 0 ? `🤖 *${label}*` : '🤖 *Continued*'}\n\n${chunk}`
+    });
+  }
+}
+
 /**
  * Helper to handle media downloads to reduce repetitive code
  */
@@ -42,6 +108,64 @@ const princeDownload = async (sock, from, url, path, type = 'video') => {
   }
 };
 
+
+
+// ==========================================
+// YOUTUBE DOWNLOAD HELPERS
+// ==========================================
+function deepFindUrl(value, wanted = null) {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    if (/^https?:\/\//i.test(value)) {
+      if (!wanted || wanted.test(value)) return value;
+    }
+    return null;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = deepFindUrl(item, wanted);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (typeof value === 'object') {
+    const preferred = ['download_url', 'downloadUrl', 'url', 'video', 'audio', 'link', 'src'];
+    for (const key of preferred) {
+      const found = deepFindUrl(value[key], wanted);
+      if (found) return found;
+    }
+    for (const val of Object.values(value)) {
+      const found = deepFindUrl(val, wanted);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+async function fetchBinary(url, timeoutMs = 120000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 NEXUS-MD' },
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`Media server returned ${res.status}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length < 5000) throw new Error('Downloaded media is unexpectedly small.');
+    return { buffer: buf, contentType: res.headers.get('content-type') || '' };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function getYoutubeFirst(query) {
+  const yts = require('yt-search');
+  const result = await yts(query);
+  const video = result?.videos?.[0];
+  if (!video?.url) throw new Error(`No YouTube result found for "${query}".`);
+  return video;
+}
 
 const BOT_NAME = 'NEXUS-MD';
 // Fallback shown in help text before a session sets its own prefix with .setprefix.
@@ -871,28 +995,33 @@ function commandPageBody({ heading, page, totalPages, commandsOnPage, totalComma
     '🤖 *NEXUS-MD*',
     '📦 *Velox Et Exactus*',
     '',
-    '╭━━〔 ⚡ COMMAND CENTER 〕━━╮',
-    `┃ 👤 User    : ${userName}`,
-    `┃ 👑 Owner   : ${ownerName}`,
-    `┃ 🧬 Version : ${version}`,
-    `┃ ⚡ Prefix  : ${prefix}`,
-    `┃ ⏱️ Uptime  : ${uptime}`,
-    `┃ 📚 Commands: ${totalCommands}`,
-    `┃ 📅 Date    : ${date}`,
-    '╰━━━━━━━━━━━━━━━━━━━━━━━━━━╯',
+    '╭━━〔 👤 USER • INFO 〕━━╮',
+    `┃ ◦ 👤 *NAME* : ${userName}`,
+    `┃ ◦ 🏷️ *PREFIX* : ${prefix}`,
+    `┃ ◦ 🧬 *VERSION* : ${version}`,
+    `┃ ◦ 📚 *COMMANDS* : ${totalCommands}`,
+    `┃ ◦ ⏱️ *UPTIME* : ${uptime}`,
+    '╰━━━━━━━━━━━━━━━━━━━━━━╯',
     '',
-    `${heading}`,
-    `📄 Page ${page}/${totalPages}`,
+    heading,
+    `📄 *PAGE ${page}/${totalPages}*`,
     ''
   ];
 
-  commandsOnPage.forEach((c, i) => {
+  commandsOnPage.forEach((c) => {
     const emoji = MENU_CATEGORY_EMOJI[String(c.category || 'OTHER').toUpperCase()] || '✨';
-    lines.push(`${i + 1}. ${emoji} *${prefix}${c.name}*`);
-    if (c.description) lines.push(`   ${c.description}`);
+    lines.push(`│ ◦ ${emoji} *${prefix}${c.name}*`);
   });
 
-  lines.push('', '👇 *Tap a command below to run it.*');
+  lines.push(
+    '',
+    '╭━━〔 💡 QUICK ACCESS 〕━━╮',
+    '┃ Type a category command shown above',
+    '┃ or use the buttons below.',
+    '╰━━━━━━━━━━━━━━━━━━━━━━━━╯',
+    '',
+    `_${BOT_NAME} • ${totalCommands} commands_`
+  );
   return lines.join('\n');
 }
 
@@ -900,7 +1029,7 @@ register({
   name: 'menu',
   aliases: ['help', 'commands'],
   category: 'MAIN',
-  description: 'Open the NEXUS-MD command center',
+  description: 'Open the compact NEXUS-MD command menu',
   async execute({ sock, from, sender, msg, sessionId, prefix }) {
     const p = prefix || getGlobalSetting(sessionId, 'prefix') || PREFIX;
     const userName = msg?.pushName || (sender || '').split('@')[0] || 'User';
@@ -908,53 +1037,57 @@ register({
     const version = require('../../package.json').version || '1.0.0';
     const uptime = formatUptime(Date.now() - START_TIME);
     const date = new Date().toLocaleDateString('en-GB');
-
     const categories = [...menuCategoryMap().keys()];
     const total = getUniqueMenuCommands().length;
 
-    const categoryButtons = categories.slice(0, 8).map(cat => {
+    // Compact, screenshot-inspired menu: category list is text; only three
+    // persistent navigation buttons are shown instead of a long button wall.
+    const categoryLines = categories.map((cat, i) => {
       const emoji = MENU_CATEGORY_EMOJI[cat] || '✨';
-      const label = `${emoji} ${cat}`.slice(0, 20);
-      return menuButton(label, `${p}menucat ${cat} 1`);
+      const commandCount = (menuCategoryMap().get(cat) || []).length;
+      return `│ ◦ ${emoji} *${p}menu ${cat.toLowerCase()}*  · ${commandCount}`;
     });
-
-    categoryButtons.push(menuButton('📚 ALL COMMANDS', `${p}allmenu 1`));
-    categoryButtons.push(menuButton('👨‍💻 DEVELOPER', `${p}owner`));
 
     const body = [
       '🤖 *NEXUS-MD*',
       '📦 *Velox Et Exactus*',
       '',
-      '╭━━〔 ⚡ COMMAND CENTER 〕━━╮',
-      `┃ 👤 User    : ${userName}`,
-      `┃ 👑 Owner   : ${ownerName}`,
-      `┃ 🧬 Version : ${version}`,
-      `┃ ⚡ Prefix  : ${p}`,
-      `┃ ⏱️ Uptime  : ${uptime}`,
-      `┃ 📚 Commands: ${total}`,
-      `┃ 📅 Date    : ${date}`,
-      '╰━━━━━━━━━━━━━━━━━━━━━━━━━━╯',
+      '╭━━〔 👤 USER • INFO 〕━━╮',
+      `┃ ◦ 👤 *NAME* : ${userName}`,
+      `┃ ◦ 🏷️ *TAG* : ${sender || userName}`,
+      `┃ ◦ 👑 *OWNER* : ${ownerName}`,
+      `┃ ◦ 🧬 *VERSION* : ${version}`,
+      `┃ ◦ 📚 *COMMANDS* : ${total}`,
+      `┃ ◦ ⏱️ *UPTIME* : ${uptime}`,
+      `┃ ◦ 📅 *DATE* : ${date}`,
+      '╰━━━━━━━━━━━━━━━━━━━━━━╯',
       '',
-      '✨ *EXPLORE YOUR BOT*',
-      'Choose a category below.',
+      '╭━━〔 📋 LIST • MENU 〕━━╮',
+      ...categoryLines,
+      `│ ◦ 📚 *${p}allmenu*  · all commands`,
+      '╰━━━━━━━━━━━━━━━━━━━━━━━━╯',
       '',
-      '📚 *Every command is available as a button inside its category.*',
-      '⚡ *No need to memorize commands.*'
+      '💡 *Click a button below for instant access.*',
+      '',
+      `_${BOT_NAME} • ${total} commands_`
     ].join('\n');
+
+    const buttons = [
+      menuButton('📋 MENU', 'NEXUS_MENU_HOME'),
+      menuButton('ℹ️ ABOUT', 'NEXUS_MENU_ABOUT'),
+      menuButton('👥 GROUP', 'NEXUS_MENU_GROUP')
+    ];
 
     try {
       await sendNativeMenu(sock, from, {
         title: '🤖 NEXUS-MD',
         body,
-        footer: 'NEXUS-MD • Select a category',
-        buttons: categoryButtons
+        footer: 'NEXUS-MD • Velox Et Exactus',
+        buttons
       });
     } catch (e) {
       console.warn('[menu] native menu failed:', e.message);
-      await sock.sendMessage(from, {
-        text: body + '\n\n' + categories.map(c => `• ${c}`).join('\n'),
-        ...channelContext()
-      });
+      await sock.sendMessage(from, { text: body, ...channelContext() });
     }
   }
 });
@@ -1009,29 +1142,12 @@ register({
 async function sendMenuCommandPage(sock, from, {
   title, heading, commandsList, page, category, prefix
 }) {
-  const PAGE_SIZE = 7;
+  const PAGE_SIZE = 14;
   const totalCommands = getUniqueMenuCommands().length;
   const totalPages = Math.max(1, Math.ceil(commandsList.length / PAGE_SIZE));
   const safePage = Math.min(Math.max(page, 1), totalPages);
   const start = (safePage - 1) * PAGE_SIZE;
   const pageCommands = commandsList.slice(start, start + PAGE_SIZE);
-
-  // 7 real commands + navigation buttons = 9 max.
-  const buttons = pageCommands.map(c =>
-    menuButton(commandLabel(c, prefix), `${prefix}${c.name}`)
-  );
-
-  if (safePage > 1) {
-    buttons.push(menuButton('⬅️ PREVIOUS', category === 'ALL'
-      ? `${prefix}allmenu ${safePage - 1}`
-      : `${prefix}menucat ${category} ${safePage - 1}`));
-  }
-  if (safePage < totalPages) {
-    buttons.push(menuButton('➡️ NEXT', category === 'ALL'
-      ? `${prefix}allmenu ${safePage + 1}`
-      : `${prefix}menucat ${category} ${safePage + 1}`));
-  }
-  buttons.push(menuButton('🏠 MAIN MENU', `${prefix}menu`));
 
   const userName = sock?.user?.name || (sock?.user?.id || '').split('@')[0] || 'User';
   const ownerName = process.env.OWNER_NAME || 'NEXUS-MD Developer';
@@ -1053,20 +1169,108 @@ async function sendMenuCommandPage(sock, from, {
     date
   });
 
+  const buttons = [];
+  if (safePage > 1) {
+    buttons.push(menuButton('⬅️ BACK', category === 'ALL'
+      ? `${prefix}allmenu ${safePage - 1}`
+      : `${prefix}menucat ${category} ${safePage - 1}`));
+  } else {
+    buttons.push(menuButton('📋 MENU', 'NEXUS_MENU_HOME'));
+  }
+  buttons.push(menuButton('ℹ️ ABOUT', 'NEXUS_MENU_ABOUT'));
+  if (safePage < totalPages) {
+    buttons.push(menuButton('➡️ NEXT', category === 'ALL'
+      ? `${prefix}allmenu ${safePage + 1}`
+      : `${prefix}menucat ${category} ${safePage + 1}`));
+  } else {
+    buttons.push(menuButton('👥 GROUP', 'NEXUS_MENU_GROUP'));
+  }
+
   try {
     await sendNativeMenu(sock, from, {
       title,
       body,
-      footer: `${title} • ${pageCommands.length} commands on this page`,
+      footer: `${title} • Page ${safePage}/${totalPages}`,
       buttons
     });
   } catch (e) {
     await sock.sendMessage(from, {
-      text: body + '\n\n' + pageCommands.map(c => `${prefix}${c.name}`).join('\n'),
+      text: body,
       ...channelContext()
     });
   }
 }
+
+register({
+  name: 'menumain',
+  aliases: ['menuhome'],
+  category: 'MAIN',
+  description: 'Open the compact main menu',
+  async execute(ctx) {
+    return commands.get('menu').execute(ctx);
+  }
+});
+
+register({
+  name: 'menuabout',
+  aliases: ['aboutmenu'],
+  category: 'MAIN',
+  description: 'Show NEXUS-MD information',
+  async execute({ sock, from, sessionId, prefix }) {
+    const p = prefix || getGlobalSetting(sessionId, 'prefix') || PREFIX;
+    const total = getUniqueMenuCommands().length;
+    const version = require('../../package.json').version || '1.0.0';
+    const owner = process.env.OWNER_NAME || 'NEXUS-MD Developer';
+    const body = [
+      '╭━━〔 ℹ️ ABOUT • NEXUS-MD 〕━━╮',
+      '┃ 🤖 *Velox Et Exactus*',
+      `┃ 🧬 Version : ${version}`,
+      `┃ 📚 Commands: ${total}`,
+      `┃ ⚡ Prefix  : ${p}`,
+      `┃ 👑 Owner   : ${owner}`,
+      '┃',
+      '┃ Built for fast, compact',
+      '┃ WhatsApp command access.',
+      '╰━━━━━━━━━━━━━━━━━━━━━━━━━━╯',
+      '',
+      'Use the buttons below to navigate.'
+    ].join('\n');
+
+    await sendNativeMenu(sock, from, {
+      title: 'ℹ️ ABOUT NEXUS-MD',
+      body,
+      footer: 'NEXUS-MD • Velox Et Exactus',
+      buttons: [
+        menuButton('📋 MENU', 'NEXUS_MENU_HOME'),
+        menuButton('ℹ️ ABOUT', 'NEXUS_MENU_ABOUT'),
+        menuButton('👥 GROUP', 'NEXUS_MENU_GROUP')
+      ]
+    });
+  }
+});
+
+register({
+  name: 'menugroup',
+  aliases: ['groupmenu'],
+  category: 'MAIN',
+  description: 'Open group command category',
+  async execute({ sock, from, sessionId, prefix }) {
+    const p = prefix || getGlobalSetting(sessionId, 'prefix') || PREFIX;
+    const map = menuCategoryMap();
+    const category = map.has('GROUP-ADMIN') ? 'GROUP-ADMIN' : (map.has('GROUP') ? 'GROUP' : null);
+    if (!category) {
+      return sock.sendMessage(from, { text: `No group commands are registered. Use ${p}menu to view all commands.` });
+    }
+    return sendMenuCommandPage(sock, from, {
+      title: '👥 GROUP COMMANDS',
+      heading: '╭━━〔 👥 GROUP • MENU 〕━━╮',
+      commandsList: map.get(category),
+      page: 1,
+      category,
+      prefix: p
+    });
+  }
+});
 
 register({
   name: 'setprefix',
@@ -4192,98 +4396,32 @@ register({
   name: 'gpt',
   aliases: ['ai', 'chatgpt', 'ask'],
   category: 'AI',
-  description: 'Chat with ChatGPT AI assistant',
-  async execute({ sock, from, args, prefix, command }) {
-    if (!args[0]) {
-      return await sock.sendMessage(from, { 
-        text: `🤖 *GPT Assistant*\n\nUsage: ${prefix}${command} <your question>\nExample: ${prefix}${command} What is the capital of France?\n\n*Examples:*\n${prefix}${command} Write a poem about AI\n${prefix}${command} Explain quantum computing in simple terms\n${prefix}${command} Create a JavaScript function to reverse a string` 
+  description: 'Chat with NEXUS AI (David Cyril DeepSeek v3)',
+  async execute({ sock, from, args, prefix, command, sessionId }) {
+    if (!args.length) {
+      return await sock.sendMessage(from, {
+        text: `🤖 *AI Assistant*\n\nUsage: ${prefix}${command} <your question>\nExample: ${prefix}${command} Explain quantum computing simply.`
       });
     }
 
-    const query = args.join(" ");
-
-    await sock.sendMessage(from, { text: `⏳ Thinking...` });
+    const query = args.join(' ').trim();
+    await sock.sendMessage(from, { text: '⏳ *Thinking…*' });
 
     try {
-      // Primary: EliteProTech API
-      const response = await fetch(
-        `https://eliteprotech-apis.zone.id/chatgpt?prompt=${encodeURIComponent(query)}`,
-        {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-          }
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`API returned ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      // Extract response
-      let reply = data.response || data.result || data.reply || data.message;
-
-      if (!reply) {
-        // Fallback: try to find any text in the response
-        const jsonString = JSON.stringify(data);
-        const textMatch = jsonString.match(/"response":"([^"]+)"/) || 
-                          jsonString.match(/"result":"([^"]+)"/) ||
-                          jsonString.match(/"reply":"([^"]+)"/) ||
-                          jsonString.match(/"message":"([^"]+)"/);
-        if (textMatch) reply = textMatch[1];
-      }
-
-      if (!reply) {
-        throw new Error("Could not extract response from AI.");
-      }
-
-      // Clean up
-      reply = reply.replace(/\\n/g, '\n').replace(/\\"/g, '"');
-
-      // Truncate if too long
-      if (reply.length > 65000) {
-        reply = reply.slice(0, 65000) + '\n\n... (truncated)';
-      }
-
-      // Send the response
-      await sock.sendMessage(from, { 
-        text: `🤖 *GPT:*\n\n${reply}` 
+      // David Cyril's documented AI endpoint.
+      const data = await davidApi('/ai/deepseek-v3', {
+        text: query,
+        systemPrompt: 'You are NEXUS-MD AI, a helpful, accurate and concise WhatsApp assistant.',
+        sessionId: `nexus-${sessionId || from}`,
       });
 
+      const reply = extractApiText(data);
+      if (!reply) throw new Error('No text was returned by the AI API.');
+      return await sendAiReply(sock, from, 'NEXUS AI', reply);
     } catch (error) {
-      console.error('GPT error:', error);
-
-      // Fallback: OmegaTech API
-      try {
-        const omegaUrl = 'https://omegatech-api.dixonomega.tech/api/ai/gpt';
-        const fallbackRes = await fetch(`${omegaUrl}?q=${encodeURIComponent(query)}`);
-        const fallbackData = await fallbackRes.json();
-        const fallbackReply = fallbackData.result || fallbackData.reply || fallbackData.message;
-
-        if (fallbackReply) {
-          return await sock.sendMessage(from, { 
-            text: `🤖 *GPT (fallback):*\n\n${fallbackReply}` 
-          });
-        }
-      } catch (fallbackErr) {}
-
-      // Fallback: Prince API
-      try {
-        const princeUrl = 'https://api.princetechn.com/api/ai/gpt';
-        const princeRes = await fetch(`${princeUrl}?apikey=prince&query=${encodeURIComponent(query)}`);
-        const princeData = await princeRes.json();
-        const princeReply = princeData.result || princeData.reply || princeData.message;
-
-        if (princeReply) {
-          return await sock.sendMessage(from, { 
-            text: `🤖 *GPT (fallback):*\n\n${princeReply}` 
-          });
-        }
-      } catch (princeErr) {}
-
-      await sock.sendMessage(from, { 
-        text: `⚠️ GPT Error: ${error.message || 'Unknown error'}\n\n💡 Try again later.` 
+      console.error(`[AI:${command}]`, error);
+      return await sock.sendMessage(from, {
+        text: `❌ *AI Error*\n\n${error.name === 'AbortError' ? 'The AI request timed out.' : (error.message || 'Unable to reach the AI service.')}\n\nPlease try again in a moment.`
       });
     }
   }
@@ -4445,113 +4583,32 @@ register({
   name: 'letmegpt',
   aliases: ['giftedai', 'gptai'],
   category: 'AI',
-  description: 'Chat with LetMeGPT AI from GiftedTech',
-  async execute({ sock, from, args, prefix, command }) {
-    if (!args[0]) {
-      return await sock.sendMessage(from, { 
-        text: `🤖 *LetMeGPT AI Assistant*\n\nUsage: ${prefix}${command} <your question>\nExample: ${prefix}${command} What is the capital of France?` 
+  description: 'Chat with NEXUS AI (David Cyril DeepSeek v3)',
+  async execute({ sock, from, args, prefix, command, sessionId }) {
+    if (!args.length) {
+      return await sock.sendMessage(from, {
+        text: `🤖 *AI Assistant*\n\nUsage: ${prefix}${command} <your question>\nExample: ${prefix}${command} Explain quantum computing simply.`
       });
     }
 
-    const query = args.join(" ");
-    const apiKey = 'gifted'; // Public test key
-
-    await sock.sendMessage(from, { text: `⏳ Thinking...` });
+    const query = args.join(' ').trim();
+    await sock.sendMessage(from, { text: '⏳ *Thinking…*' });
 
     try {
-      // Primary: GiftedTech API
-      const response = await fetch(
-        `https://api.giftedtech.co.ke/api/ai/letmegpt?apikey=${apiKey}&q=${encodeURIComponent(query)}`,
-        {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-          }
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`API returned ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      // Extract response
-      let reply = data.result || data.response || data.reply || data.message;
-
-      if (!reply) {
-        const jsonString = JSON.stringify(data);
-        const textMatch = jsonString.match(/"result":"([^"]+)"/) || 
-                          jsonString.match(/"response":"([^"]+)"/) ||
-                          jsonString.match(/"reply":"([^"]+)"/) ||
-                          jsonString.match(/"message":"([^"]+)"/);
-        if (textMatch) reply = textMatch[1];
-      }
-
-      // Handle null result
-      if (!reply) {
-        // Try alternative parameter name
-        const altRes = await fetch(
-          `https://api.giftedtech.co.ke/api/ai/letmegpt?apikey=${apiKey}&prompt=${encodeURIComponent(query)}`,
-          {
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-          }
-        );
-
-        if (altRes.ok) {
-          const altData = await altRes.json();
-          reply = altData.result || altData.response || altData.reply || altData.message;
-        }
-      }
-
-      if (!reply) {
-        throw new Error("Could not extract response from LetMeGPT AI.");
-      }
-
-      reply = reply.replace(/\\n/g, '\n').replace(/\\"/g, '"');
-
-      if (reply.length > 65000) {
-        reply = reply.slice(0, 65000) + '\n\n... (truncated)';
-      }
-
-      await sock.sendMessage(from, { 
-        text: `🤖 *LetMeGPT:*\n\n${reply}` 
+      // David Cyril's documented AI endpoint.
+      const data = await davidApi('/ai/deepseek-v3', {
+        text: query,
+        systemPrompt: 'You are NEXUS-MD AI, a helpful, accurate and concise WhatsApp assistant.',
+        sessionId: `nexus-${sessionId || from}`,
       });
 
+      const reply = extractApiText(data);
+      if (!reply) throw new Error('No text was returned by the AI API.');
+      return await sendAiReply(sock, from, 'NEXUS AI', reply);
     } catch (error) {
-      console.error('LetMeGPT error:', error);
-
-      // Fallback: EliteProTech ChatGPT API
-      try {
-        const eliteUrl = 'https://eliteprotech-apis.zone.id/chatgpt';
-        const fallbackRes = await fetch(`${eliteUrl}?prompt=${encodeURIComponent(query)}`);
-        const fallbackData = await fallbackRes.json();
-        const fallbackReply = fallbackData.response || fallbackData.result || fallbackData.reply;
-
-        if (fallbackReply) {
-          return await sock.sendMessage(from, { 
-            text: `🤖 *GPT (fallback):*\n\n${fallbackReply}` 
-          });
-        }
-      } catch (fallbackErr) {}
-
-      // Fallback: OmegaTech GPT
-      try {
-        const omegaUrl = 'https://omegatech-api.dixonomega.tech/api/ai/gpt';
-        const omegaRes = await fetch(`${omegaUrl}?q=${encodeURIComponent(query)}`);
-        const omegaData = await omegaRes.json();
-        const omegaReply = omegaData.result || omegaData.reply || omegaData.message;
-
-        if (omegaReply) {
-          return await sock.sendMessage(from, { 
-            text: `🤖 *GPT (fallback):*\n\n${omegaReply}` 
-          });
-        }
-      } catch (omegaErr) {}
-
-      await sock.sendMessage(from, { 
-        text: `⚠️ LetMeGPT Error: ${error.message || 'Unknown error'}\n\n💡 Try again later.` 
+      console.error(`[AI:${command}]`, error);
+      return await sock.sendMessage(from, {
+        text: `❌ *AI Error*\n\n${error.name === 'AbortError' ? 'The AI request timed out.' : (error.message || 'Unable to reach the AI service.')}\n\nPlease try again in a moment.`
       });
     }
   }
@@ -4679,136 +4736,32 @@ register({
   name: 'unlimitedai',
   aliases: ['uai', 'unlimited'],
   category: 'AI',
-  description: 'Chat with Unlimited AI from GiftedTech',
-  async execute({ sock, from, args, prefix, command }) {
-    if (!args[0]) {
-      return await sock.sendMessage(from, { 
-        text: `🤖 *Unlimited AI Assistant*\n\nUsage: ${prefix}${command} <your question>\nExample: ${prefix}${command} What is the capital of France?\n\n*Examples:*\n${prefix}${command} Write a poem about AI\n${prefix}${command} Explain quantum computing\n${prefix}${command} Create a JavaScript function\n\n*Features:*\n• Powered by GPT-4\n• No usage limits\n• Fast responses` 
+  description: 'Chat with NEXUS AI (David Cyril DeepSeek v3)',
+  async execute({ sock, from, args, prefix, command, sessionId }) {
+    if (!args.length) {
+      return await sock.sendMessage(from, {
+        text: `🤖 *AI Assistant*\n\nUsage: ${prefix}${command} <your question>\nExample: ${prefix}${command} Explain quantum computing simply.`
       });
     }
 
-    const query = args.join(" ");
-    const apiKey = 'gifted';
-
-    await sock.sendMessage(from, { text: `⏳ Thinking...` });
+    const query = args.join(' ').trim();
+    await sock.sendMessage(from, { text: '⏳ *Thinking…*' });
 
     try {
-      // Primary: GiftedTech API
-      const response = await fetch(
-        `https://api.giftedtech.co.ke/api/ai/unlimitedai?apikey=${apiKey}&q=${encodeURIComponent(query)}`,
-        {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-          }
-        }
-      );
+      // David Cyril's documented AI endpoint.
+      const data = await davidApi('/ai/deepseek-v3', {
+        text: query,
+        systemPrompt: 'You are NEXUS-MD AI, a helpful, accurate and concise WhatsApp assistant.',
+        sessionId: `nexus-${sessionId || from}`,
+      });
 
-      if (!response.ok) {
-        throw new Error(`API returned ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      // Extract response
-      let reply = data.result || data.response || data.reply || data.message;
-
-      if (!reply) {
-        const jsonString = JSON.stringify(data);
-        const textMatch = jsonString.match(/"result":"([^"]+)"/) || 
-                          jsonString.match(/"response":"([^"]+)"/) ||
-                          jsonString.match(/"reply":"([^"]+)"/) ||
-                          jsonString.match(/"message":"([^"]+)"/);
-        if (textMatch) reply = textMatch[1];
-      }
-
-      if (!reply) {
-        // Try alternative parameter name
-        const altRes = await fetch(
-          `https://api.giftedtech.co.ke/api/ai/unlimitedai?apikey=${apiKey}&prompt=${encodeURIComponent(query)}`,
-          {
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-          }
-        );
-
-        if (altRes.ok) {
-          const altData = await altRes.json();
-          reply = altData.result || altData.response || altData.reply || altData.message;
-        }
-      }
-
-      if (!reply) {
-        throw new Error("Could not extract response from Unlimited AI.");
-      }
-
-      reply = reply.replace(/\\n/g, '\n').replace(/\\"/g, '"');
-
-      if (reply.length > 65000) {
-        reply = reply.slice(0, 65000) + '\n\n... (truncated)';
-      }
-
-      // Split into chunks if needed
-      if (reply.length > 1000) {
-        const chunks = reply.match(/.{1,1000}/g) || [reply];
-        for (let i = 0; i < Math.min(chunks.length, 5); i++) {
-          const chunk = chunks[i];
-          const prefix = i === 0 ? `🤖 *Unlimited AI:*\n\n` : `\n\n*Continued...*\n\n`;
-          await sock.sendMessage(from, { text: prefix + chunk });
-        }
-      } else {
-        await sock.sendMessage(from, { 
-          text: `🤖 *Unlimited AI:*\n\n${reply}` 
-        });
-      }
-
+      const reply = extractApiText(data);
+      if (!reply) throw new Error('No text was returned by the AI API.');
+      return await sendAiReply(sock, from, 'NEXUS AI', reply);
     } catch (error) {
-      console.error('Unlimited AI error:', error);
-
-      // Fallback: EliteProTech ChatGPT API
-      try {
-        const eliteUrl = 'https://eliteprotech-apis.zone.id/chatgpt';
-        const fallbackRes = await fetch(`${eliteUrl}?prompt=${encodeURIComponent(query)}`);
-        const fallbackData = await fallbackRes.json();
-        const fallbackReply = fallbackData.response || fallbackData.result || fallbackData.reply;
-
-        if (fallbackReply) {
-          return await sock.sendMessage(from, { 
-            text: `🤖 *GPT (fallback):*\n\n${fallbackReply}` 
-          });
-        }
-      } catch (fallbackErr) {}
-
-      // Fallback: OmegaTech GPT
-      try {
-        const omegaUrl = 'https://omegatech-api.dixonomega.tech/api/ai/gpt';
-        const omegaRes = await fetch(`${omegaUrl}?q=${encodeURIComponent(query)}`);
-        const omegaData = await omegaRes.json();
-        const omegaReply = omegaData.result || omegaData.reply || omegaData.message;
-
-        if (omegaReply) {
-          return await sock.sendMessage(from, { 
-            text: `🤖 *GPT (fallback):*\n\n${omegaReply}` 
-          });
-        }
-      } catch (omegaErr) {}
-
-      // Fallback: Prince API GPT
-      try {
-        const princeUrl = 'https://api.princetechn.com/api/ai/gpt';
-        const princeRes = await fetch(`${princeUrl}?apikey=prince&query=${encodeURIComponent(query)}`);
-        const princeData = await princeRes.json();
-        const princeReply = princeData.result || princeData.reply || princeData.message;
-
-        if (princeReply) {
-          return await sock.sendMessage(from, { 
-            text: `🤖 *GPT (fallback):*\n\n${princeReply}` 
-          });
-        }
-      } catch (princeErr) {}
-
-      await sock.sendMessage(from, { 
-        text: `⚠️ Unlimited AI Error: ${error.message || 'Unknown error'}\n\n💡 Try again later.` 
+      console.error(`[AI:${command}]`, error);
+      return await sock.sendMessage(from, {
+        text: `❌ *AI Error*\n\n${error.name === 'AbortError' ? 'The AI request timed out.' : (error.message || 'Unable to reach the AI service.')}\n\nPlease try again in a moment.`
       });
     }
   }
@@ -5056,429 +5009,225 @@ register({
   name: 'play',
   aliases: ['song', 'music', 'audio'],
   category: 'DOWNLOADER',
-  description: 'Search and play music from YouTube',
-  async execute({ sock, from, args, prefix, command }) {
-    if (!args[0]) {
-      return await sock.sendMessage(from, { 
-        text: `🎵 *Music Player*\n\nUsage: ${prefix}${command} <song name or URL>\nExample: ${prefix}${command} Faded\n\n*Examples:*\n${prefix}${command} Shape of You\n${prefix}${command} https://youtu.be/60ItHLz5WEA\n\n*Options:*\n${prefix}${command} <song name> (plays best match)\n${prefix}${command} <url> (plays specific video)` 
+  description: 'Search and play YouTube music',
+  async execute({ sock, from, args, prefix, command, sessionId }) {
+    if (!args.length) {
+      return await sock.sendMessage(from, {
+        text: `🎵 *Play Music*\n\nUsage: ${prefix}${command} <song name or YouTube URL>\nExample: ${prefix}${command} Faded`
       });
     }
 
-    const query = args.join(" ");
-    const isUrl = query.includes('youtube.com') || query.includes('youtu.be');
-
-    await sock.sendMessage(from, { text: `⏳ Searching for "${query}"...` });
+    const query = args.join(' ').trim();
+    const isUrl = /^https?:\/\/(?:www\.)?(?:youtube\.com|youtu\.be)\//i.test(query);
+    await sock.sendMessage(from, { text: `🔎 *Searching:* ${query}` });
 
     try {
+      let video = null;
       let videoUrl = query;
-      let title = '';
-      let thumbnail = '';
-      let duration = '';
-      let artist = '';
 
-      // If it's not a URL, search for it
       if (!isUrl) {
-        const yts = require('yt-search');
-        const searchResults = await yts(query);
-        
-        if (!searchResults || !searchResults.videos || searchResults.videos.length === 0) {
-          return await sock.sendMessage(from, { 
-            text: `❌ No results found for "${query}".\n\n💡 Try a different search term.` 
-          });
-        }
-
-        const target = searchResults.videos[0];
-        videoUrl = target.url;
-        title = target.title || 'YouTube Audio';
-        thumbnail = target.thumbnail || target.image || '';
-        duration = target.timestamp || target.duration || '';
-        artist = target.author?.name || target.author || '';
+        video = await getYoutubeFirst(query);
+        videoUrl = video.url;
+      } else {
+        try {
+          const yts = require('yt-search');
+          const r = await yts(query);
+          video = r?.videos?.[0] || null;
+        } catch {}
       }
 
-      // Try to extract metadata if not already set
-      if (!title && !isUrl) {
-        const yts = require('yt-search');
-        const searchResults = await yts(videoUrl);
-        if (searchResults && searchResults.videos && searchResults.videos.length > 0) {
-          const target = searchResults.videos[0];
-          title = target.title || 'YouTube Audio';
-          thumbnail = target.thumbnail || target.image || '';
-          duration = target.timestamp || target.duration || '';
-          artist = target.author?.name || target.author || '';
-        }
-      }
+      const title = video?.title || 'YouTube Audio';
+      const thumbnail = video?.thumbnail || '';
+      const artist = video?.author?.name || '';
+      const duration = video?.timestamp || video?.duration?.timestamp || '';
 
-      // If still no title, use a default
-      if (!title) title = 'YouTube Audio';
-
-      // Send thumbnail if available
       if (thumbnail) {
         try {
           await sock.sendMessage(from, {
             image: { url: thumbnail },
-            caption: `🎵 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}${duration ? `⏱️ *Duration:* ${duration}\n` : ''}\n\n⬇️ *Downloading audio...*`
+            caption: `🎵 *${title}*\n${artist ? `👤 ${artist}\n` : ''}${duration ? `⏱️ ${duration}\n` : ''}\n⬇️ Downloading audio…`
           });
-        } catch (thumbErr) {
-          await sock.sendMessage(from, { 
-            text: `🎵 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}${duration ? `⏱️ *Duration:* ${duration}\n` : ''}\n\n⬇️ *Downloading audio...*` 
-          });
-        }
+        } catch {}
       }
 
-      // Download via OmegaTech API
-      const baseUrl = 'https://omegatech-api.dixonomega.tech';
-      const response = await fetch(`${baseUrl}/api/download/play?url=${encodeURIComponent(videoUrl)}`, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
+      // Primary download route currently used by NEXUS-MD.
+      const api = await fetch(`https://omegatech-api.dixonomega.tech/api/download/play?url=${encodeURIComponent(videoUrl)}`, {
+        headers: { 'User-Agent': 'Mozilla/5.0 NEXUS-MD' }
       });
+      if (!api.ok) throw new Error(`Audio API returned ${api.status}`);
+      const data = await api.json();
+      const audioUrl = deepFindUrl(data, /\.(?:mp3|m4a|aac|ogg|wav)(?:[?#]|$)/i) || deepFindUrl(data);
+      if (!audioUrl) throw new Error('Audio API did not return a download link.');
 
-      if (!response.ok) {
-        throw new Error(`API returned ${response.status}`);
-      }
+      let media = await fetchBinary(audioUrl);
+      let finalBuffer = media.buffer;
 
-      const data = await response.json();
+      const looksLikeAudio = /audio\//i.test(media.contentType) ||
+        media.buffer.subarray(0, 3).toString() === 'ID3' ||
+        (media.buffer[0] === 0xff && (media.buffer[1] & 0xe0) === 0xe0);
 
-      // Extract audio URL
-      let audioUrl = data.download_url || data.download || data.url || 
-                     data.result?.download_url || data.result?.download || data.result?.url ||
-                     data.data?.download_url || data.data?.download || data.data?.url;
-
-      if (!audioUrl) {
-        const jsonString = JSON.stringify(data);
-        const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp3|m4a|ogg|wav)/i);
-        if (urlMatch) audioUrl = urlMatch[0];
-      }
-
-      if (!audioUrl) {
-        throw new Error("Could not extract download URL from API response.");
-      }
-
-      // Download the audio
-      const audioResponse = await fetch(audioUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-      });
-
-      if (!audioResponse.ok) {
-        throw new Error(`Audio download failed: ${audioResponse.status}`);
-      }
-
-      const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
-
-      if (audioBuffer.length < 5000) {
-        throw new Error("Downloaded file is too small. The link may be invalid.");
-      }
-
-      const fileSizeMB = (audioBuffer.length / 1024 / 1024).toFixed(1);
-
-      // Detect if it's MP3 or needs conversion
-      const isMP3 = audioBuffer.toString('ascii', 0, 3) === 'ID3' ||
-                    (audioBuffer[0] === 0xFF && (audioBuffer[1] & 0xE0) === 0xE0);
-
-      let finalBuffer = audioBuffer;
-      if (!isMP3) {
+      if (!looksLikeAudio) {
         try {
-          const { toAudio } = require('../lib/converter');
-          const converted = await toAudio(audioBuffer);
-          if (converted && converted.length > 1000) {
-            finalBuffer = converted;
-          }
-        } catch (convErr) {
-          console.warn('Conversion skipped:', convErr.message);
+          finalBuffer = await require('../lib/converter').toAudio(media.buffer);
+        } catch (e) {
+          console.warn('Audio conversion skipped:', e.message);
         }
       }
 
-      // Send the audio
-      const safeTitle = title.replace(/[^a-zA-Z0-9\s]/g, '').trim();
-      const fileName = `${safeTitle}.mp3`;
-
-      try {
-        await sock.sendMessage(from, {
-          audio: finalBuffer,
-          mimetype: 'audio/mpeg',
-          fileName: fileName,
-          caption: `🎵 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success*`
-        });
-      } catch (sendErr) {
-        // Fallback: send as document
-        await sock.sendMessage(from, {
-          document: finalBuffer,
-          mimetype: 'audio/mpeg',
-          fileName: fileName,
-          caption: `🎵 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
-        });
-      }
-
+      const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80) || 'audio';
+      return await sock.sendMessage(from, {
+        audio: finalBuffer,
+        mimetype: 'audio/mpeg',
+        fileName: `${safeTitle}.mp3`,
+        caption: `🎵 *${title}*\n${artist ? `👤 ${artist}\n` : ''}✅ *Play complete*`
+      });
     } catch (error) {
       console.error('Play error:', error);
 
-      // Fallback: Prince API
+      // Fallback: PrinceTech downloader, including search-to-URL handling.
       try {
-        const princeUrl = 'https://api.princetechn.com/api/download/ytmp3';
-        const fallbackRes = await fetch(`${princeUrl}?apikey=prince&url=${encodeURIComponent(query)}`);
-        const fallbackData = await fallbackRes.json();
-
-        let fallbackAudio = fallbackData.result?.download_url || fallbackData.result?.url || 
-                            fallbackData.download_url || fallbackData.url;
-        let fallbackTitle = fallbackData.result?.title || fallbackData.title || 'YouTube Audio';
-
-        if (fallbackAudio) {
-          const aRes = await fetch(fallbackAudio);
-          const aBuf = Buffer.from(await aRes.arrayBuffer());
-          if (aBuf.length > 5000) {
-            return await sock.sendMessage(from, {
-              audio: aBuf,
-              mimetype: 'audio/mpeg',
-              fileName: `${fallbackTitle}.mp3`,
-              caption: `🎵 *${fallbackTitle}*\n✅ *Download Success (fallback)*`
-            });
-          }
-        }
-      } catch (fallbackErr) {
-        // Silent fail
-      }
-
-      // Fallback: Try yt-search with Prince API
-      try {
+        let targetUrl = query;
+        let title = 'YouTube Audio';
         if (!isUrl) {
-          const yts = require('yt-search');
-          const searchResults = await yts(query);
-          if (searchResults && searchResults.videos && searchResults.videos.length > 0) {
-            const target = searchResults.videos[0];
-            const ytUrl = target.url;
-            
-            const princeUrl = 'https://api.princetechn.com/api/download/ytmp3';
-            const fallbackRes = await fetch(`${princeUrl}?apikey=prince&url=${encodeURIComponent(ytUrl)}`);
-            const fallbackData = await fallbackRes.json();
-            
-            let fallbackAudio = fallbackData.result?.download_url || fallbackData.result?.url || 
-                                fallbackData.download_url || fallbackData.url;
-            
-            if (fallbackAudio) {
-              const aRes = await fetch(fallbackAudio);
-              const aBuf = Buffer.from(await aRes.arrayBuffer());
-              if (aBuf.length > 5000) {
-                return await sock.sendMessage(from, {
-                  audio: aBuf,
-                  mimetype: 'audio/mpeg',
-                  fileName: `${target.title}.mp3`,
-                  caption: `🎵 *${target.title}*\n✅ *Download Success (search fallback)*`
-                });
-              }
-            }
-          }
+          const video = await getYoutubeFirst(query);
+          targetUrl = video.url;
+          title = video.title || title;
         }
-      } catch (ytErr) {}
-
-      await sock.sendMessage(from, { 
-        text: `⚠️ Play Error: ${error.message || 'Unknown error'}\n\n💡 Try again or use a different song name.` 
-      });
+        const res = await fetch(`${P_BASE}/download/ytmp3?apikey=${P_KEY}&url=${encodeURIComponent(targetUrl)}`);
+        if (!res.ok) throw new Error(`Fallback API returned ${res.status}`);
+        const data = await res.json();
+        const audioUrl = deepFindUrl(data, /\.(?:mp3|m4a|aac|ogg|wav)(?:[?#]|$)/i) || deepFindUrl(data);
+        if (!audioUrl) throw new Error('Fallback returned no audio URL.');
+        let media = await fetchBinary(audioUrl);
+        if (!/audio\//i.test(media.contentType) && media.buffer.subarray(0,3).toString() !== 'ID3') {
+          try { media.buffer = await require('../lib/converter').toAudio(media.buffer); } catch {}
+        }
+        const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80) || 'audio';
+        return await sock.sendMessage(from, {
+          audio: media.buffer, mimetype: 'audio/mpeg', fileName: `${safeTitle}.mp3`,
+          caption: `🎵 *${title}*\n✅ *Play complete (fallback)*`
+        });
+      } catch (fallbackError) {
+        console.error('Play fallback error:', fallbackError);
+        return await sock.sendMessage(from, {
+          text: `❌ *Play failed*\n\n${error.message || 'Unable to download audio.'}\n\nTry another song or YouTube URL.`
+        });
+      }
     }
   }
 });
-
 register({
   name: 'playvideo',
   aliases: ['ytvideo', 'video', 'ytmp4'],
   category: 'DOWNLOADER',
-  description: 'Download YouTube videos with quality selection',
-  async execute({ sock, from, args, prefix, command }) {
-    if (!args[0]) {
-      return await sock.sendMessage(from, { 
-        text: `🎬 *YouTube MP4 Downloader*\n\nUsage: ${prefix}${command} <url> [quality]\nExample: ${prefix}${command} https://youtu.be/wdJrTQJh1ZQ\n\n*Quality options:*\n• 1080p (best)\n• 720p (default)\n• 480p\n• 360p\n• 240p\n• 144p\n\n*Examples:*\n${prefix}${command} https://youtu.be/xxxxx 1080p\n${prefix}${command} https://youtu.be/xxxxx 720p\n\n*Note:* Download URL expires in 10 minutes.` 
+  description: 'Search/download YouTube videos',
+  async execute({ sock, from, args, prefix, command, sessionId }) {
+    if (!args.length) {
+      return await sock.sendMessage(from, {
+        text: `🎬 *Play Video*\n\nUsage: ${prefix}${command} <song/video name or YouTube URL> [quality]\nExample: ${prefix}${command} Faded 720p`
       });
     }
 
-    const url = args[0];
-    let quality = '720p'; // Default quality
+    const qualityArg = (args[args.length - 1] || '').toLowerCase();
+    const qualities = ['1080p','720p','480p','360p','240p','144p'];
+    const quality = qualities.includes(qualityArg) ? qualityArg : '720p';
+    const rawQuery = qualities.includes(qualityArg) ? args.slice(0, -1).join(' ') : args.join(' ');
+    const isUrl = /^https?:\/\/(?:www\.)?(?:youtube\.com|youtu\.be)\//i.test(rawQuery);
 
-    // Check if user specified quality
-    const qualityArg = (args[1] || '').toLowerCase();
-    const validQualities = ['1080p', '720p', '480p', '360p', '240p', '144p'];
-    if (validQualities.includes(qualityArg)) {
-      quality = qualityArg;
+    if (!rawQuery) {
+      return await sock.sendMessage(from, { text: `❌ Enter a YouTube URL or video name.` });
     }
 
-    if (!url.includes('youtube.com') && !url.includes('youtu.be')) {
-      return await sock.sendMessage(from, { 
-        text: `❌ Invalid URL. Please provide a valid YouTube link.` 
-      });
-    }
-
-    await sock.sendMessage(from, { text: `⏳ Processing YouTube video... (${quality})` });
+    await sock.sendMessage(from, { text: `🎬 *Preparing video:* ${rawQuery}\n📊 Quality: *${quality}*` });
 
     try {
-      // Primary: GiftedTech API
-      const response = await fetch(
-        `https://api.giftedtech.co.ke/api/download/ytmp4?apikey=gifted&url=${encodeURIComponent(url)}&quality=${quality}`,
-        {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-          }
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`API returned ${response.status}`);
+      let video = null;
+      let videoUrl = rawQuery;
+      if (!isUrl) {
+        video = await getYoutubeFirst(rawQuery);
+        videoUrl = video.url;
+      } else {
+        try {
+          const yts = require('yt-search');
+          const r = await yts(rawQuery);
+          video = r?.videos?.[0] || null;
+        } catch {}
       }
+
+      const title = video?.title || 'YouTube Video';
+      const thumbnail = video?.thumbnail || '';
+
+      const response = await fetch(
+        `https://api.giftedtech.co.ke/api/download/ytmp4?apikey=gifted&url=${encodeURIComponent(videoUrl)}&quality=${encodeURIComponent(quality)}`,
+        { headers: { 'User-Agent': 'Mozilla/5.0 NEXUS-MD' } }
+      );
+      if (!response.ok) throw new Error(`Video API returned ${response.status}`);
 
       const data = await response.json();
+      const videoUrlOut = deepFindUrl(data, /\.(?:mp4|mkv|webm|mov)(?:[?#]|$)/i) || deepFindUrl(data);
+      if (!videoUrlOut) throw new Error('Video API did not return a download link.');
 
-      // Extract data
-      let title = data.result?.title || 'YouTube Video';
-      let thumbnail = data.result?.thumbnail || null;
-      let downloadUrl = data.result?.download_url || null;
-      let format = data.result?.format || 'mp4';
-      let qualityReturned = data.result?.quality || quality;
-      let availableQualities = data.result?.availableQualities || [];
-      let message = data.result?.message || '';
+      const media = await fetchBinary(videoUrlOut);
+      let finalBuffer = media.buffer;
 
-      if (!downloadUrl) {
-        throw new Error("Could not extract download URL from API response.");
+      // WhatsApp is much more reliable with MP4/H.264 than arbitrary containers.
+      if (!/video\/mp4/i.test(media.contentType) && media.buffer.subarray(4, 8).toString() !== 'ftyp') {
+        try { finalBuffer = await require('../lib/converter').toMP4(media.buffer); }
+        catch (e) { console.warn('Video conversion skipped:', e.message); }
       }
 
-      // Send thumbnail if available
-      if (thumbnail) {
-        try {
-          await sock.sendMessage(from, {
-            image: { url: thumbnail },
-            caption: `🎬 *${title}*\n📊 *Quality:* ${qualityReturned}\n📦 *Format:* ${format}\n${message ? `\n${message}` : ''}\n\n⬇️ *Downloading video...*`
-          });
-        } catch (thumbErr) {
-          await sock.sendMessage(from, { 
-            text: `🎬 *${title}*\n📊 *Quality:* ${qualityReturned}\n📦 *Format:* ${format}\n${message ? `\n${message}` : ''}\n\n⬇️ *Downloading video...*` 
-          });
-        }
-      }
+      const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80) || 'video';
 
-      // Download the video
-      const videoResponse = await fetch(downloadUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-      });
-
-      if (!videoResponse.ok) {
-        throw new Error(`Video download failed: ${videoResponse.status}`);
-      }
-
-      const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
-
-      if (videoBuffer.length < 5000) {
-        throw new Error("Downloaded file is too small. The link may be invalid.");
-      }
-
-      const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
-
-      // Build available qualities message
-      let qualityList = '';
-      if (availableQualities.length > 0) {
-        qualityList = availableQualities.map(q => `${q}p`).join(', ');
-      }
-
-      const caption = `🎬 *${title}*\n📊 *Quality:* ${qualityReturned}\n📦 *Format:* ${format}\n📦 *Size:* ${fileSizeMB} MB\n${qualityList ? `📥 *Available:* ${qualityList}` : ''}\n\n✅ *Download Success*\n${message ? `\n⚠️ ${message}` : ''}`;
-
-      // Try to send as video
       try {
-        await sock.sendMessage(from, {
-          video: videoBuffer,
+        return await sock.sendMessage(from, {
+          video: finalBuffer,
           mimetype: 'video/mp4',
-          caption: caption
+          fileName: `${safeTitle}.mp4`,
+          caption: `🎬 *${title}*\n📊 *Quality:* ${quality}\n✅ *Download complete*`
         });
-      } catch (sendErr) {
-        // Fallback: send as document
-        await sock.sendMessage(from, {
-          document: videoBuffer,
+      } catch (sendError) {
+        return await sock.sendMessage(from, {
+          document: finalBuffer,
           mimetype: 'video/mp4',
-          fileName: `${title.replace(/[^a-zA-Z0-9]/g, '_')}.${format}`,
-          caption: caption
+          fileName: `${safeTitle}.mp4`,
+          caption: `🎬 *${title}*\n📊 *Quality:* ${quality}\n✅ *Download complete*`
         });
       }
-
     } catch (error) {
-      console.error('YouTube MP4 download error:', error);
+      console.error('Playvideo error:', error);
 
-      // Fallback: OmegaTech API
       try {
-        const omegaUrl = 'https://omegatech-api.dixonomega.tech/api/download/ytmp4';
-        const fallbackRes = await fetch(`${omegaUrl}?url=${encodeURIComponent(url)}&quality=${quality}`);
-        const fallbackData = await fallbackRes.json();
-
-        let fallbackVideo = fallbackData.download_url || fallbackData.url || fallbackData.video;
-        let fallbackTitle = fallbackData.title || 'YouTube Video';
-
-        if (fallbackVideo) {
-          const vRes = await fetch(fallbackVideo);
-          const vBuf = Buffer.from(await vRes.arrayBuffer());
-          if (vBuf.length > 5000) {
-            return await sock.sendMessage(from, {
-              video: vBuf,
-              mimetype: 'video/mp4',
-              caption: `🎬 *${fallbackTitle}*\n\n✅ *YouTube Download (fallback)*`
-            });
-          }
+        let targetUrl = rawQuery;
+        let title = 'YouTube Video';
+        if (!isUrl) {
+          const video = await getYoutubeFirst(rawQuery);
+          targetUrl = video.url;
+          title = video.title || title;
         }
-      } catch (fallbackErr) {}
-
-      // Fallback: Prince API
-      try {
-        const princeUrl = 'https://api.princetechn.com/api/download/ytmp4';
-        const princeRes = await fetch(`${princeUrl}?apikey=prince&url=${encodeURIComponent(url)}&quality=${quality}`);
-        const princeData = await princeRes.json();
-
-        let princeVideo = princeData.result?.download_url || princeData.result?.url || princeData.download_url || princeData.url;
-        let princeTitle = princeData.result?.title || princeData.title || 'YouTube Video';
-
-        if (princeVideo) {
-          const vRes = await fetch(princeVideo);
-          const vBuf = Buffer.from(await vRes.arrayBuffer());
-          if (vBuf.length > 5000) {
-            return await sock.sendMessage(from, {
-              video: vBuf,
-              mimetype: 'video/mp4',
-              caption: `🎬 *${princeTitle}*\n\n✅ *YouTube Download (fallback)*`
-            });
-          }
+        const res = await fetch(`${P_BASE}/download/ytmp4?apikey=${P_KEY}&url=${encodeURIComponent(targetUrl)}&quality=${encodeURIComponent(quality)}`);
+        if (!res.ok) throw new Error(`Fallback API returned ${res.status}`);
+        const data = await res.json();
+        const videoUrlOut = deepFindUrl(data, /\.(?:mp4|mkv|webm|mov)(?:[?#]|$)/i) || deepFindUrl(data);
+        if (!videoUrlOut) throw new Error('Fallback returned no video URL.');
+        const media = await fetchBinary(videoUrlOut);
+        let finalBuffer = media.buffer;
+        if (!/video\/mp4/i.test(media.contentType)) {
+          try { finalBuffer = await require('../lib/converter').toMP4(media.buffer); } catch {}
         }
-      } catch (princeErr) {}
-
-      // Fallback: Try yt-search with GiftedTech
-      try {
-        const yts = require('yt-search');
-        const searchResults = await yts(url);
-        if (searchResults && searchResults.videos && searchResults.videos.length > 0) {
-          const target = searchResults.videos[0];
-          const ytUrl = target.url;
-
-          const giftedRes = await fetch(
-            `https://api.giftedtech.co.ke/api/download/ytmp4?apikey=gifted&url=${encodeURIComponent(ytUrl)}&quality=${quality}`
-          );
-          const giftedData = await giftedRes.json();
-
-          let giftedVideo = giftedData.result?.download_url || giftedData.download_url || giftedData.url;
-          if (giftedVideo) {
-            const vRes = await fetch(giftedVideo);
-            const vBuf = Buffer.from(await vRes.arrayBuffer());
-            if (vBuf.length > 5000) {
-              return await sock.sendMessage(from, {
-                video: vBuf,
-                mimetype: 'video/mp4',
-                caption: `🎬 *${target.title}*\n\n✅ *YouTube Download (search fallback)*`
-              });
-            }
-          }
-        }
-      } catch (ytErr) {}
-
-      await sock.sendMessage(from, { 
-        text: `⚠️ Download Error: ${error.message || 'Could not download video.'}\n\n💡 Make sure the URL is valid and try again.` 
-      });
+        const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80) || 'video';
+        return await sock.sendMessage(from, {
+          video: finalBuffer, mimetype: 'video/mp4', fileName: `${safeTitle}.mp4`,
+          caption: `🎬 *${title}*\n📊 *Quality:* ${quality}\n✅ *Download complete (fallback)*`
+        });
+      } catch (fallbackError) {
+        console.error('Playvideo fallback error:', fallbackError);
+        return await sock.sendMessage(from, {
+          text: `❌ *Video download failed*\n\n${error.message || 'Unable to download video.'}\n\nCheck the YouTube URL/name and try again.`
+        });
+      }
     }
   }
 });
-
 register({
   name: 'alive',
   category: 'MAIN',
