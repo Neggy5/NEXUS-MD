@@ -1,16 +1,17 @@
 # ⚡ NEXUS-MD
 
-A multi-user WhatsApp bot built with [Baileys](https://github.com/WhiskeySockets/Baileys), linked via a **web pairing-code page** (no QR scanning needed). Any number of users can visit the same deployed URL, link their own WhatsApp number, and the bot starts working for them automatically and independently.
+A multi-user WhatsApp bot built with [Baileys](https://github.com/WhiskeySockets/Baileys), linked via a **web pairing-code page** or a **Telegram bot** (no QR scanning needed, either way). Any number of users can link their own WhatsApp number through whichever channel they prefer — both run at the same time and share the same sessions.
 
 ## How it works
 
 1. You deploy this once to Railway.
-2. Anyone visits your Railway URL (`https://your-app.up.railway.app`).
-3. They enter their WhatsApp number (with country code).
-4. The site shows an 8-character pairing code.
-5. On their phone: **WhatsApp → Settings → Linked Devices → Link a Device → Link with phone number instead**, then they type the code.
-6. Once linked, the bot instantly starts responding to that user's chats — commands like `.menu`, `.ping`, `.sticker`, etc.
-7. Each linked number runs as its own isolated session (own auth folder, own socket), so many users can be linked at the same time with no interference.
+2. Users link a number either by:
+   - visiting your Railway URL (`https://your-app.up.railway.app`) and entering their WhatsApp number, or
+   - messaging your Telegram bot with `/pair <number>` (only if `TELEGRAM_BOT_TOKEN` is set).
+3. Either way they get an 8-character pairing code.
+4. On their phone: **WhatsApp → Settings → Linked Devices → Link a Device → Link with phone number instead**, then they type the code.
+5. Once linked, the bot instantly starts responding to that user's chats — commands like `.menu`, `.ping`, `.sticker`, etc.
+6. Each linked number runs as its own isolated session (own auth folder, own socket), so many users can be linked at the same time with no interference — regardless of which pairing method they used.
 
 ## Local setup
 
@@ -20,7 +21,7 @@ cp .env.example .env
 npm start
 ```
 
-Visit `http://localhost:3000`.
+Visit `http://localhost:3000`. To also enable Telegram pairing, set `TELEGRAM_BOT_TOKEN` in `.env` (get one from [@BotFather](https://t.me/BotFather)) before starting — the bot then supports `/start`, `/pair <number>`, and `/status <number>`.
 
 ## Deploying to Railway
 
@@ -109,27 +110,8 @@ nexus-md/
 - Don't use this for bulk/unsolicited messaging — that risks the linked number being banned.
 
 
-## Baileys fork + interactive buttons
+### Telegram membership gate
 
-NEXUS-MD now loads Baileys through `src/baileys.js` and prefers `@vansnowi/baileys`.
-Set `BAILEYS_PACKAGE` if your deployment uses a different compatible package.
+Set `TELEGRAM_FORCE_JOIN=true` and configure `TELEGRAM_JOIN_GROUP_1`, `TELEGRAM_JOIN_GROUP_2`, and `TELEGRAM_JOIN_CHANNEL`. Telegram users must be members of all three before `/start`, `/pair`, `/status`, `/ping`, or `/runtime` is allowed. The bot sends inline join buttons plus a membership re-check button. `/adminid` is always available so you can discover your Telegram user/chat IDs; the admin Telegram ID is hard-coded in `src/config.js` to enable the admin-only `/listpair` command.
 
-Interactive commands:
-- `.buttons`
-- `.buttonmenu`
-- `.btnmenu`
-
-The bot also recognizes legacy button responses, list responses, template button replies, and compatible native-flow response IDs as command IDs.
-
-**Important:** `@vansnowi/baileys` was not available in the package registry used while this archive was prepared. If your deployment cannot resolve it, provide/install the fork package (or set `BAILEYS_PACKAGE` to a compatible installed package). The compatibility layer has a fallback to upstream Baileys so the rest of the project can still boot where the fork is unavailable.
-
-## Velox-style menu
-
-The `.menu` command now uses a modern WhatsApp native-flow interactive message:
-- Velox-style header with user, owner, version, prefix, uptime and date
-- Tools / Other / Exec command groups
-- Clickable quick-reply buttons
-- Configurable menu image through `MENU_IMAGE_URL`
-- Automatic text/image fallback when native-flow delivery is unavailable
-
-The `.buttons` command remains available as a compact interactive-menu test.
+The WhatsApp `.menu`/`.richmenu` no longer contains interactive buttons. The only Telegram inline button is the deployment-success button linking to the configured channel.

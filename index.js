@@ -1,7 +1,10 @@
 const express = require('express');
 const path = require('path');
-const { startSession, getStatus, getStats, listSessions, sanitizeId, resumeAllSessions } = require('./src/sessionManager');
+const { startSession, getStatus, getStats, listSessions, sanitizeId, autoloadAllSessions } = require('./src/sessionManager');
 const { CHANNEL_LINK, GROUP_LINK } = require('./src/config');
+const { startTelegramBot } = require('./src/telegramPair');
+
+global.__NEXUS_START_TIME = Date.now();
 
 const app = express();
 app.use(express.json());
@@ -51,5 +54,6 @@ app.get('/api/sessions', (_req, res) => {
 
 app.listen(PORT, () => {
   console.log(`NEXUS-MD web server listening on port ${PORT}`);
-  resumeAllSessions().catch((e) => console.error('resumeAllSessions error:', e.message));
+  autoloadAllSessions().catch((e) => console.error('autoloadAllSessions error:', e.message));
+  startTelegramBot();
 });

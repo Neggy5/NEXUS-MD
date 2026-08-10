@@ -1,7 +1,7 @@
 {
   "name": "nexus-md",
   "version": "1.0.0",
-  "description": "NEXUS-MD \u2014 multi-user WhatsApp bot with web pairing-code linking, deployable on Railway",
+  "description": "NEXUS-MD — multi-user WhatsApp bot with web pairing-code linking, deployable on Railway",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
@@ -12,6 +12,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "@whiskeysockets/baileys": "7.0.0-rc14",
     "@hapi/boom": "^10.0.1",
     "express": "^4.19.2",
     "pino": "^9.3.2",
@@ -19,8 +20,10 @@
     "chalk": "^4.1.2",
     "wa-sticker-formatter": "^4.4.4",
     "yt-search": "^2.10.3",
+    "ytdl-core": "^4.11.5",
     "ffmpeg-static": "^5.2.0",
-    "@vansnowi/baileys": "^1.5.1"
-  },
-  "devDependencies": {}
+    "node-telegram-bot-api": "^0.66.0",
+    "axios": "^1.7.7",
+    "form-data": "^4.0.0"
+  }
 }
