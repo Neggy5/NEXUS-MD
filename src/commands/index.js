@@ -21,45 +21,39 @@ const {
 const P_KEY = 'prince';
 const P_BASE = 'https://api.princetechn.com/api';
 // ==========================================
-// DAVID CYRIL API HELPERS
+// OMEGATECH API HELPERS
 // ==========================================
-const DAVID_API_BASE = 'https://apis.davidcyril.name.ng';
+const OMEGA_API_BASE = 'https://omegatech-api.dixonomega.tech';
 
-async function davidApi(path, body = {}, timeoutMs = 45000) {
+async function omegaGet(path, params = {}, timeoutMs = 60000) {
+  const url = new URL(`${OMEGA_API_BASE}${path}`);
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value));
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(`${DAVID_API_BASE}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify(body),
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json', 'User-Agent': 'NEXUS-MD/1.0' },
       signal: controller.signal,
     });
-
     const raw = await response.text();
     let data;
     try { data = JSON.parse(raw); }
-    catch { throw new Error(`David Cyril API returned invalid JSON (${response.status})`); }
-
-    if (!response.ok || data?.success === false) {
-      throw new Error(data?.message || data?.error || `David Cyril API returned ${response.status}`);
+    catch { throw new Error(`OmegaTech returned invalid JSON (${response.status})`); }
+    if (!response.ok || data?.status === 'error' || data?.success === false) {
+      throw new Error(data?.message || data?.error || `OmegaTech returned HTTP ${response.status}`);
     }
     return data;
-  } finally {
-    clearTimeout(timer);
-  }
+  } finally { clearTimeout(timer); }
 }
 
 function extractApiText(data) {
   const candidates = [
-    data?.result,
-    data?.response,
-    data?.reply,
-    data?.message,
-    data?.data?.result,
-    data?.data?.response,
-    data?.data?.reply,
-    data?.data?.message,
+    data?.result, data?.response, data?.reply, data?.answer, data?.text, data?.message,
+    data?.data?.result, data?.data?.response, data?.data?.reply, data?.data?.answer,
+    data?.data?.text, data?.data?.message,
   ];
   const value = candidates.find(v => typeof v === 'string' && v.trim());
   return value ? value.trim() : null;
@@ -80,10 +74,17 @@ async function sendAiReply(sock, from, label, reply) {
   const clean = cleanAiReply(reply);
   if (!clean) throw new Error('AI returned an empty response.');
   for (const [i, chunk] of splitWhatsAppText(clean).entries()) {
-    await sock.sendMessage(from, {
-      text: `${i === 0 ? `🤖 *${label}*` : '🤖 *Continued*'}\n\n${chunk}`
-    });
+    await sock.sendMessage(from, { text: `${i === 0 ? `🤖 *${label}*` : '🤖 *Continued*'}\n\n${chunk}` });
   }
+}
+
+async function omegaAi(query) {
+  // OmegaTech Argen AI endpoint supplied by the bot owner.
+  // Example documented route: /api/ai/Argen?q=Hello
+  const data = await omegaGet('/api/ai/Argen', { q: query });
+  const reply = extractApiText(data);
+  if (!reply) throw new Error('OmegaTech Argen returned no text.');
+  return reply;
 }
 
 /**
@@ -1030,8 +1031,40 @@ register({
   aliases: ['help', 'commands'],
   category: 'MAIN',
   description: 'Open the compact NEXUS-MD command menu',
-  async execute({ sock, from, sender, msg, sessionId, prefix }) {
+  async execute({ sock, from, sender, msg, sessionId, prefix, args }) {
     const p = prefix || getGlobalSetting(sessionId, 'prefix') || PREFIX;
+
+    // `.menu ai`, `.menu games`, etc. must open that category instead of
+    // routing back to the main menu. Keep category aliases user-friendly.
+    const requested = String(args?.[0] || '').trim().toUpperCase();
+    const categoryAliases = {
+      GAMES: 'FUN', GAME: 'FUN', FUN: 'FUN',
+      AI: 'AI',
+      DOWNLOAD: 'DOWNLOADER', DOWNLOADS: 'DOWNLOADER', DOWNLOADER: 'DOWNLOADER',
+      GROUP: 'GROUP', 'GROUP-ADMIN': 'GROUP-ADMIN', ADMIN: 'GROUP-ADMIN',
+      TOOLS: 'TOOLS', TOOL: 'TOOLS',
+      INFO: 'INFO', INFORMATION: 'INFO',
+      UTILITY: 'UTILITY', UTILITIES: 'UTILITY',
+      SEARCH: 'SEARCH', MEDIA: 'MEDIA', OTHER: 'OTHER',
+    };
+    if (requested === 'ALL' || requested === 'ALLMENU') {
+      return sendMenuCommandPage(sock, from, {
+        title: '📚 ALL COMMANDS', heading: '╭━━〔 📚 ALL COMMANDS 〕━━╮',
+        commandsList: getUniqueMenuCommands(), page: 1, category: 'ALL', prefix: p
+      });
+    }
+    if (requested) {
+      const category = categoryAliases[requested] || requested;
+      const map = menuCategoryMap();
+      if (map.has(category)) {
+        return sendMenuCommandPage(sock, from, {
+          title: `${MENU_CATEGORY_EMOJI[category] || '✨'} ${category}`,
+          heading: `╭━━〔 ${MENU_CATEGORY_EMOJI[category] || '✨'} ${category} 〕━━╮`,
+          commandsList: map.get(category), page: 1, category, prefix: p
+        });
+      }
+    }
+
     const userName = msg?.pushName || (sender || '').split('@')[0] || 'User';
     const ownerName = process.env.OWNER_NAME || 'NEXUS-MD Developer';
     const version = require('../../package.json').version || '1.0.0';
@@ -4396,7 +4429,7 @@ register({
   name: 'gpt',
   aliases: ['ai', 'chatgpt', 'ask'],
   category: 'AI',
-  description: 'Chat with NEXUS AI (David Cyril DeepSeek v3)',
+  description: 'Chat with NEXUS AI (OmegaTech Argen)',
   async execute({ sock, from, args, prefix, command, sessionId }) {
     if (!args.length) {
       return await sock.sendMessage(from, {
@@ -4409,15 +4442,8 @@ register({
 
     try {
       // David Cyril's documented AI endpoint.
-      const data = await davidApi('/ai/deepseek-v3', {
-        text: query,
-        systemPrompt: 'You are NEXUS-MD AI, a helpful, accurate and concise WhatsApp assistant.',
-        sessionId: `nexus-${sessionId || from}`,
-      });
-
-      const reply = extractApiText(data);
-      if (!reply) throw new Error('No text was returned by the AI API.');
-      return await sendAiReply(sock, from, 'NEXUS AI', reply);
+      const reply = await omegaAi(query);
+      return await sendAiReply(sock, from, 'NEXUS AI • ARGEN', reply);
     } catch (error) {
       console.error(`[AI:${command}]`, error);
       return await sock.sendMessage(from, {
@@ -4583,7 +4609,7 @@ register({
   name: 'letmegpt',
   aliases: ['giftedai', 'gptai'],
   category: 'AI',
-  description: 'Chat with NEXUS AI (David Cyril DeepSeek v3)',
+  description: 'Chat with NEXUS AI (OmegaTech Argen)',
   async execute({ sock, from, args, prefix, command, sessionId }) {
     if (!args.length) {
       return await sock.sendMessage(from, {
@@ -4596,15 +4622,8 @@ register({
 
     try {
       // David Cyril's documented AI endpoint.
-      const data = await davidApi('/ai/deepseek-v3', {
-        text: query,
-        systemPrompt: 'You are NEXUS-MD AI, a helpful, accurate and concise WhatsApp assistant.',
-        sessionId: `nexus-${sessionId || from}`,
-      });
-
-      const reply = extractApiText(data);
-      if (!reply) throw new Error('No text was returned by the AI API.');
-      return await sendAiReply(sock, from, 'NEXUS AI', reply);
+      const reply = await omegaAi(query);
+      return await sendAiReply(sock, from, 'NEXUS AI • ARGEN', reply);
     } catch (error) {
       console.error(`[AI:${command}]`, error);
       return await sock.sendMessage(from, {
@@ -4736,7 +4755,7 @@ register({
   name: 'unlimitedai',
   aliases: ['uai', 'unlimited'],
   category: 'AI',
-  description: 'Chat with NEXUS AI (David Cyril DeepSeek v3)',
+  description: 'Chat with NEXUS AI (OmegaTech Argen)',
   async execute({ sock, from, args, prefix, command, sessionId }) {
     if (!args.length) {
       return await sock.sendMessage(from, {
@@ -4749,15 +4768,8 @@ register({
 
     try {
       // David Cyril's documented AI endpoint.
-      const data = await davidApi('/ai/deepseek-v3', {
-        text: query,
-        systemPrompt: 'You are NEXUS-MD AI, a helpful, accurate and concise WhatsApp assistant.',
-        sessionId: `nexus-${sessionId || from}`,
-      });
-
-      const reply = extractApiText(data);
-      if (!reply) throw new Error('No text was returned by the AI API.');
-      return await sendAiReply(sock, from, 'NEXUS AI', reply);
+      const reply = await omegaAi(query);
+      return await sendAiReply(sock, from, 'NEXUS AI • ARGEN', reply);
     } catch (error) {
       console.error(`[AI:${command}]`, error);
       return await sock.sendMessage(from, {
@@ -5050,14 +5062,23 @@ register({
         } catch {}
       }
 
-      // Primary download route currently used by NEXUS-MD.
-      const api = await fetch(`https://omegatech-api.dixonomega.tech/api/download/play?url=${encodeURIComponent(videoUrl)}`, {
-        headers: { 'User-Agent': 'Mozilla/5.0 NEXUS-MD' }
-      });
-      if (!api.ok) throw new Error(`Audio API returned ${api.status}`);
-      const data = await api.json();
+      // OmegaTech routes supplied by the bot owner.
+      // /api/download/play is the primary music route; yt-dl and Yt-mate
+      // are retained as real OmegaTech fallbacks.
+      let data;
+      let lastOmegaError;
+      const omegaAudioAttempts = [
+        ['/api/download/play', { url: videoUrl, q: query }],
+        ['/api/download/Yt-mate', { url: videoUrl }],
+        ['/api/download/yt-dl', { url: videoUrl }]
+      ];
+      for (const [path, params] of omegaAudioAttempts) {
+        try { data = await omegaGet(path, params, 120000); break; }
+        catch (e) { lastOmegaError = e; }
+      }
+      if (!data) throw lastOmegaError || new Error('OmegaTech audio service unavailable.');
       const audioUrl = deepFindUrl(data, /\.(?:mp3|m4a|aac|ogg|wav)(?:[?#]|$)/i) || deepFindUrl(data);
-      if (!audioUrl) throw new Error('Audio API did not return a download link.');
+      if (!audioUrl) throw new Error('OmegaTech did not return an audio download link.');
 
       let media = await fetchBinary(audioUrl);
       let finalBuffer = media.buffer;
@@ -5157,15 +5178,23 @@ register({
       const title = video?.title || 'YouTube Video';
       const thumbnail = video?.thumbnail || '';
 
-      const response = await fetch(
-        `https://api.giftedtech.co.ke/api/download/ytmp4?apikey=gifted&url=${encodeURIComponent(videoUrl)}&quality=${encodeURIComponent(quality)}`,
-        { headers: { 'User-Agent': 'Mozilla/5.0 NEXUS-MD' } }
-      );
-      if (!response.ok) throw new Error(`Video API returned ${response.status}`);
-
-      const data = await response.json();
+      // OmegaTech's supplied YouTube downloader routes.
+      // yt-dl is the primary direct-URL downloader; Yt-mate is a fallback.
+      let data;
+      let lastOmegaError;
+      const omegaVideoAttempts = [
+        ['/api/download/yt-dl', { url: videoUrl, quality }],
+        ['/api/download/Yt-mate', { url: videoUrl, quality }]
+      ];
+      for (const [path, params] of omegaVideoAttempts) {
+        try {
+          data = await omegaGet(path, params, 120000);
+          break;
+        } catch (e) { lastOmegaError = e; }
+      }
+      if (!data) throw lastOmegaError || new Error('OmegaTech video service unavailable.');
       const videoUrlOut = deepFindUrl(data, /\.(?:mp4|mkv|webm|mov)(?:[?#]|$)/i) || deepFindUrl(data);
-      if (!videoUrlOut) throw new Error('Video API did not return a download link.');
+      if (!videoUrlOut) throw new Error('OmegaTech did not return a video download link.');
 
       const media = await fetchBinary(videoUrlOut);
       let finalBuffer = media.buffer;
