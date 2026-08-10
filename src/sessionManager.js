@@ -6,7 +6,7 @@ const {
   DisconnectReason,
   fetchLatestBaileysVersion,
   Browsers,
-} = require('./baileys');
+} = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const logger = require('./logger');
 const { handleMessage } = require('./bot');
@@ -42,26 +42,6 @@ function listSessions() {
  * Resolves with the pairing code once WhatsApp issues one (only needed on first link).
  * If a session is already linked/connected, resolves with { alreadyLinked: true }.
  */
-function patchMessageBeforeSending(msg) {
-  // The vanSnowi fork historically handles legacy interactive payloads by
-  // wrapping them in viewOnceMessage. Keep the same compatibility behavior
-  // used by Octopus V7, while leaving modern messages untouched.
-  try {
-    const unwrap = msg?.viewOnceMessage?.message || msg?.message || msg;
-    const requiresViewOnce = !!(
-      unwrap?.buttonsMessage ||
-      unwrap?.templateMessage ||
-      unwrap?.listMessage
-    );
-    if (requiresViewOnce && !msg?.viewOnceMessage) {
-      return { viewOnceMessage: { message: unwrap } };
-    }
-  } catch (e) {
-    console.warn('[baileys] message patch failed:', e.message);
-  }
-  return msg;
-}
-
 async function startSession(phoneRaw) {
   const phone = phoneRaw.replace(/[^0-9]/g, '');
   const sessionId = sanitizeId(phone);
@@ -84,7 +64,6 @@ async function startSession(phoneRaw) {
     printQRInTerminal: false,
     auth: state,
     browser: Browsers.macOS('Chrome'),
-    patchMessageBeforeSending: patchMessageBeforeSending,
   });
 
   const sessionEntry = { sock, status: 'pairing', pairingCode: null, phone, saveCreds };
@@ -167,23 +146,54 @@ async function startSession(phoneRaw) {
  * finds valid saved creds and marks the socket as already registered.
  */
 async function resumeAllSessions() {
-  if (!fs.existsSync(SESSIONS_DIR)) return;
+  if (!fs.existsSync(SESSIONS_DIR)) return { loaded: 0, failed: 0 };
 
   const entries = fs.readdirSync(SESSIONS_DIR, { withFileTypes: true });
-  const folders = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+  const folders = entries
+    .filter((e) => e.isDirectory() && /^\d{7,15}$/.test(e.name))
+    .map((e) => e.name);
 
-  if (folders.length === 0) return;
-  console.log(`Resuming ${folders.length} previously linked session(s)…`);
+  if (folders.length === 0) {
+    console.log('[sessions] No saved sessions found.');
+    return { loaded: 0, failed: 0 };
+  }
 
+  console.log(`[sessions] Auto-loading ${folders.length} saved session(s)…`);
+  let loaded = 0;
+  let failed = 0;
+
+  // Start all saved accounts after a restart/redeploy. A small stagger keeps
+  // WhatsApp connections from all hitting the network at exactly the same time.
   for (const sessionId of folders) {
     try {
+      const authDir = path.join(SESSIONS_DIR, sessionId);
+      const credsFile = path.join(authDir, 'creds.json');
+      if (!fs.existsSync(credsFile)) {
+        console.log(`[session:${sessionId}] skipped — no creds.json`);
+        continue;
+      }
+
+      const existing = sessions.get(sessionId);
+      if (existing && (existing.status === 'connected' || existing.status === 'pairing')) {
+        continue;
+      }
+
       await startSession(sessionId);
-      console.log(`[session:${sessionId}] resumed ✅`);
+      loaded++;
+      console.log(`[session:${sessionId}] auto-loaded ✓`);
+      await new Promise((resolve) => setTimeout(resolve, 750));
     } catch (err) {
-      console.log(`[session:${sessionId}] resume failed: ${err.message}`);
+      failed++;
+      console.error(`[session:${sessionId}] auto-load failed: ${err.message}`);
     }
   }
+
+  console.log(`[sessions] Auto-load complete: ${loaded} loaded, ${failed} failed.`);
+  return { loaded, failed };
 }
+
+// Alias kept intentionally descriptive for deployment/update startup hooks.
+const autoloadAllSessions = resumeAllSessions;
 
 function getStatus(sessionId) {
   const s = sessions.get(sessionId);
@@ -201,4 +211,4 @@ function getStats() {
   };
 }
 
-module.exports = { startSession, getSession, getStatus, getStats, listSessions, sanitizeId, resumeAllSessions };
+module.exports = { startSession, getSession, getStatus, getStats, listSessions, sanitizeId, resumeAllSessions, autoloadAllSessions };

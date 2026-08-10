@@ -22,6 +22,21 @@ const DEFAULT_PREFIX = process.env.PREFIX || '.';
 // Default menu layout — can be changed per-account at runtime with .setmenustyle
 const DEFAULT_MENU_STYLE = process.env.MENU_STYLE || 'classic';
 
+// Telegram pairing bot. Optional — leave unset and only web pairing runs.
+// Create a bot with @BotFather on Telegram to get a token.
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8607752844:AAE7C42gGlm5_FAumLN7uRL6xJfM5s8VAMU';
+// Telegram access gate — intentionally kept in source, not .env.
+// Users must join both groups and the channel before using the Telegram bot.
+const TELEGRAM_JOIN_GROUP_1 = '@zukky445';
+const TELEGRAM_JOIN_CHANNEL = '@zukoxmd1';
+const TELEGRAM_JOIN_GROUP_2 = '@zukoxmd';
+const TELEGRAM_JOIN_GROUP_1_LINK = 'https://t.me/zukoxmd';
+const TELEGRAM_JOIN_CHANNEL_LINK = 'https://t.me/zukoxmd1';
+const TELEGRAM_JOIN_GROUP_2_LINK = 'https://t.me/zukky445';
+const TELEGRAM_FORCE_JOIN = true;
+// Set the owner/admin Telegram ID here after running /adminid.
+const TELEGRAM_ADMIN_ID = '8361355527';
+
 function extractChannelCode(link) {
   const m = link.match(/channel\/([A-Za-z0-9]+)/);
   return m ? m[1] : null;
@@ -41,6 +56,15 @@ module.exports = {
   ANTICALL_ENABLED,
   DEFAULT_PREFIX,
   DEFAULT_MENU_STYLE,
+  TELEGRAM_BOT_TOKEN,
+  TELEGRAM_JOIN_GROUP_1,
+  TELEGRAM_JOIN_GROUP_2,
+  TELEGRAM_JOIN_CHANNEL,
+  TELEGRAM_JOIN_GROUP_1_LINK,
+  TELEGRAM_JOIN_GROUP_2_LINK,
+  TELEGRAM_JOIN_CHANNEL_LINK,
+  TELEGRAM_FORCE_JOIN,
+  TELEGRAM_ADMIN_ID,
   CHANNEL_CODE: extractChannelCode(CHANNEL_LINK),
   GROUP_CODE: extractGroupCode(GROUP_LINK),
 };
