@@ -4857,228 +4857,217 @@ register({
     }
   },
 });
+// -------------------- PLAY / YOUTUBE --------------------
+// Piped exposes unauthenticated `/streams/:videoId` data containing direct
+// audio/video stream URLs. The API docs recommend configuring the API base URL;
+// we keep it configurable so a deployment can switch instances without code edits.
+const PIPED_API_URL = (process.env.PIPED_API_URL || 'https://pipedapi.kavin.rocks').replace(/\/+$/, '');
+
+function extractYouTubeId(value = '') {
+  try {
+    const u = new URL(value.trim());
+    if (u.hostname === 'youtu.be') return u.pathname.slice(1).split('/')[0];
+    if (u.hostname.endsWith('youtube.com')) {
+      if (u.pathname === '/watch') return u.searchParams.get('v');
+      if (u.pathname.startsWith('/shorts/')) return u.pathname.split('/')[2];
+      if (u.pathname.startsWith('/embed/')) return u.pathname.split('/')[2];
+    }
+  } catch {}
+  return null;
+}
+
+async function pipedStreams(videoId) {
+  const res = await fetch(`${PIPED_API_URL}/streams/${encodeURIComponent(videoId)}`, {
+    headers: { 'User-Agent': 'NEXUS-MD/1.0' },
+    signal: AbortSignal.timeout(25000),
+  });
+  if (!res.ok) throw new Error(`Piped API returned HTTP ${res.status}`);
+  return res.json();
+}
+
+function pickPipedAudio(streams) {
+  const audio = (streams.audioStreams || [])
+    .filter(s => s?.url && /^audio\//i.test(s.mimeType || '') && !s.videoOnly)
+    .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+
+  // Prefer a reasonable WhatsApp-friendly stream instead of blindly choosing
+  // an extremely high-bitrate file.
+  return audio.find(s => (s.bitrate || 0) <= 192000) || audio[0] || null;
+}
+
+function pickPipedVideo(streams) {
+  const video = (streams.videoStreams || [])
+    .filter(s => s?.url && /^video\/mp4/i.test(s.mimeType || '') && !s.videoOnly)
+    .sort((a, b) => (b.height || 0) - (a.height || 0));
+
+  return video.find(s => (s.height || 0) <= 720) || video[video.length - 1] || null;
+}
+
+async function fetchBuffer(url, maxBytes, label) {
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'NEXUS-MD/1.0' },
+    signal: AbortSignal.timeout(60000),
+  });
+  if (!res.ok) throw new Error(`${label} download returned HTTP ${res.status}`);
+
+  const len = Number(res.headers.get('content-length') || 0);
+  if (len && len > maxBytes) throw new Error(`${label} is too large for WhatsApp (${(len / 1024 / 1024).toFixed(1)} MB)`);
+
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (!buf.length) throw new Error(`${label} download was empty`);
+  if (buf.length > maxBytes) throw new Error(`${label} is too large for WhatsApp (${(buf.length / 1024 / 1024).toFixed(1)} MB)`);
+  return buf;
+}
+
 register({
   name: 'play',
   aliases: ['song', 'music', 'audio'],
   category: 'DOWNLOADER',
-  description: 'Search and play music from YouTube',
+  description: 'Search YouTube and send the best matching audio',
   async execute({ sock, from, args, prefix, command }) {
     if (!args[0]) {
-      return await sock.sendMessage(from, { 
-        text: `🎵 *Music Player*\n\nUsage: ${prefix}${command} <song name or URL>\nExample: ${prefix}${command} Faded\n\n*Examples:*\n${prefix}${command} Shape of You\n${prefix}${command} https://youtu.be/60ItHLz5WEA\n\n*Options:*\n${prefix}${command} <song name> (plays best match)\n${prefix}${command} <url> (plays specific video)` 
+      return sock.sendMessage(from, {
+        text:
+          `🎵 *NEXUS-MD Music Player*\n\n` +
+          `Usage: ${prefix}${command} <song name or YouTube URL>\n\n` +
+          `Example:\n${prefix}${command} Faded\n` +
+          `${prefix}${command} https://youtu.be/60ItHLz5WEA`
       });
     }
 
-    const query = args.join(" ");
-    const isUrl = query.includes('youtube.com') || query.includes('youtu.be');
-
-    await sock.sendMessage(from, { text: `⏳ Searching for "${query}"...` });
+    const query = args.join(' ').trim();
+    await sock.sendMessage(from, { text: `🔎 Searching YouTube for: *${query}*` });
 
     try {
-      let videoUrl = query;
-      let title = '';
+      let videoId = extractYouTubeId(query);
+      let title = 'YouTube Audio';
       let thumbnail = '';
-      let duration = '';
       let artist = '';
+      let duration = '';
 
-      // If it's not a URL, search for it
-      if (!isUrl) {
+      if (!videoId) {
         const yts = require('yt-search');
-        const searchResults = await yts(query);
-        
-        if (!searchResults || !searchResults.videos || searchResults.videos.length === 0) {
-          return await sock.sendMessage(from, { 
-            text: `❌ No results found for "${query}".\n\n💡 Try a different search term.` 
-          });
-        }
+        const result = await yts(query);
+        const target = result?.videos?.[0];
+        if (!target) throw new Error(`No YouTube result found for "${query}"`);
 
-        const target = searchResults.videos[0];
-        videoUrl = target.url;
-        title = target.title || 'YouTube Audio';
+        videoId = extractYouTubeId(target.url);
+        title = target.title || title;
         thumbnail = target.thumbnail || target.image || '';
-        duration = target.timestamp || target.duration || '';
         artist = target.author?.name || target.author || '';
+        duration = target.timestamp || target.duration || '';
       }
 
-      // Try to extract metadata if not already set
-      if (!title && !isUrl) {
-        const yts = require('yt-search');
-        const searchResults = await yts(videoUrl);
-        if (searchResults && searchResults.videos && searchResults.videos.length > 0) {
-          const target = searchResults.videos[0];
-          title = target.title || 'YouTube Audio';
-          thumbnail = target.thumbnail || target.image || '';
-          duration = target.timestamp || target.duration || '';
-          artist = target.author?.name || target.author || '';
-        }
-      }
+      if (!videoId) throw new Error('Could not determine the YouTube video ID.');
 
-      // If still no title, use a default
-      if (!title) title = 'YouTube Audio';
+      const streams = await pipedStreams(videoId);
+      title = streams.title || title;
+      thumbnail = streams.thumbnailUrl || thumbnail;
+      artist = streams.uploader || artist;
+      duration = streams.duration ? `${Math.floor(streams.duration / 60)}:${String(streams.duration % 60).padStart(2, '0')}` : duration;
 
-      // Send thumbnail if available
+      const audio = pickPipedAudio(streams);
+      if (!audio) throw new Error('Piped returned no usable audio stream.');
+
       if (thumbnail) {
-        try {
-          await sock.sendMessage(from, {
-            image: { url: thumbnail },
-            caption: `🎵 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}${duration ? `⏱️ *Duration:* ${duration}\n` : ''}\n\n⬇️ *Downloading audio...*`
-          });
-        } catch (thumbErr) {
-          await sock.sendMessage(from, { 
-            text: `🎵 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}${duration ? `⏱️ *Duration:* ${duration}\n` : ''}\n\n⬇️ *Downloading audio...*` 
-          });
-        }
+        await sock.sendMessage(from, {
+          image: { url: thumbnail },
+          caption:
+            `🎵 *${title}*\n` +
+            `${artist ? `👤 ${artist}\n` : ''}` +
+            `${duration ? `⏱️ ${duration}\n` : ''}` +
+            `\n⬇️ Downloading audio...`
+        }).catch(() => {});
       }
 
-      // Download via OmegaTech API
-      const baseUrl = 'https://omegatech-api.dixonomega.tech';
-      const response = await fetch(`${baseUrl}/api/download/play?url=${encodeURIComponent(videoUrl)}`, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`API returned ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      // Extract audio URL
-      let audioUrl = data.download_url || data.download || data.url || 
-                     data.result?.download_url || data.result?.download || data.result?.url ||
-                     data.data?.download_url || data.data?.download || data.data?.url;
-
-      if (!audioUrl) {
-        const jsonString = JSON.stringify(data);
-        const urlMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp3|m4a|ogg|wav)/i);
-        if (urlMatch) audioUrl = urlMatch[0];
-      }
-
-      if (!audioUrl) {
-        throw new Error("Could not extract download URL from API response.");
-      }
-
-      // Download the audio
-      const audioResponse = await fetch(audioUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-      });
-
-      if (!audioResponse.ok) {
-        throw new Error(`Audio download failed: ${audioResponse.status}`);
-      }
-
-      const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
-
-      if (audioBuffer.length < 5000) {
-        throw new Error("Downloaded file is too small. The link may be invalid.");
-      }
-
-      const fileSizeMB = (audioBuffer.length / 1024 / 1024).toFixed(1);
-
-      // Detect if it's MP3 or needs conversion
-      const isMP3 = audioBuffer.toString('ascii', 0, 3) === 'ID3' ||
-                    (audioBuffer[0] === 0xFF && (audioBuffer[1] & 0xE0) === 0xE0);
+      const audioBuffer = await fetchBuffer(audio.url, 24 * 1024 * 1024, 'Audio');
 
       let finalBuffer = audioBuffer;
-      if (!isMP3) {
+      let mimetype = audio.mimeType || 'audio/mp4';
+      let extension = /mpeg|mp3/i.test(mimetype) ? 'mp3' : 'm4a';
+
+      // Convert to MP3 only when the existing converter is available and
+      // the source isn't already MP3. If conversion fails, send the original
+      // supported audio rather than failing the whole command.
+      if (!/audio\/mpeg/i.test(mimetype)) {
         try {
           const { toAudio } = require('../lib/converter');
           const converted = await toAudio(audioBuffer);
-          if (converted && converted.length > 1000) {
+          if (converted?.length > 1000) {
             finalBuffer = converted;
+            mimetype = 'audio/mpeg';
+            extension = 'mp3';
           }
         } catch (convErr) {
-          console.warn('Conversion skipped:', convErr.message);
+          console.warn('[play] audio conversion skipped:', convErr.message);
         }
       }
 
-      // Send the audio
-      const safeTitle = title.replace(/[^a-zA-Z0-9\s]/g, '').trim();
-      const fileName = `${safeTitle}.mp3`;
+      const safeTitle = title.replace(/[\\/:*?"<>|]/g, '').slice(0, 80).trim() || 'nexus-audio';
 
-      try {
-        await sock.sendMessage(from, {
-          audio: finalBuffer,
-          mimetype: 'audio/mpeg',
-          fileName: fileName,
-          caption: `🎵 *${title}*\n${artist ? `👤 *Artist:* ${artist}\n` : ''}📦 *Size:* ${fileSizeMB} MB\n\n✅ *Download Success*`
-        });
-      } catch (sendErr) {
-        // Fallback: send as document
-        await sock.sendMessage(from, {
-          document: finalBuffer,
-          mimetype: 'audio/mpeg',
-          fileName: fileName,
-          caption: `🎵 *${title}*\n📦 *Size:* ${fileSizeMB} MB`
-        });
-      }
+      await sock.sendMessage(from, {
+        audio: finalBuffer,
+        mimetype,
+        fileName: `${safeTitle}.${extension}`,
+        caption: `🎵 *${title}*\n${artist ? `👤 ${artist}\n` : ''}✅ *Ready*`
+      });
 
     } catch (error) {
-      console.error('Play error:', error);
+      console.error('[play] error:', error);
+      await sock.sendMessage(from, {
+        text:
+          `❌ *Play failed*\n\n${error.message}\n\n` +
+          `💡 Try another search term or a direct YouTube URL.`
+      });
+    }
+  }
+});
 
-      // Fallback: Prince API
-      try {
-        const princeUrl = 'https://api.princetechn.com/api/download/ytmp3';
-        const fallbackRes = await fetch(`${princeUrl}?apikey=prince&url=${encodeURIComponent(query)}`);
-        const fallbackData = await fallbackRes.json();
+register({
+  name: 'playvideo',
+  aliases: ['ytvideo', 'video'],
+  category: 'DOWNLOADER',
+  description: 'Search YouTube and send the best matching video',
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return sock.sendMessage(from, {
+        text: `🎬 Usage: ${prefix}${command} <video name or YouTube URL>\nExample: ${prefix}${command} Never Gonna Give You Up`
+      });
+    }
 
-        let fallbackAudio = fallbackData.result?.download_url || fallbackData.result?.url || 
-                            fallbackData.download_url || fallbackData.url;
-        let fallbackTitle = fallbackData.result?.title || fallbackData.title || 'YouTube Audio';
+    const query = args.join(' ').trim();
+    await sock.sendMessage(from, { text: `🎬 Searching YouTube for: *${query}*` });
 
-        if (fallbackAudio) {
-          const aRes = await fetch(fallbackAudio);
-          const aBuf = Buffer.from(await aRes.arrayBuffer());
-          if (aBuf.length > 5000) {
-            return await sock.sendMessage(from, {
-              audio: aBuf,
-              mimetype: 'audio/mpeg',
-              fileName: `${fallbackTitle}.mp3`,
-              caption: `🎵 *${fallbackTitle}*\n✅ *Download Success (fallback)*`
-            });
-          }
-        }
-      } catch (fallbackErr) {
-        // Silent fail
+    try {
+      let videoId = extractYouTubeId(query);
+      let title = 'YouTube Video';
+
+      if (!videoId) {
+        const yts = require('yt-search');
+        const result = await yts(query);
+        const target = result?.videos?.[0];
+        if (!target) throw new Error(`No YouTube result found for "${query}"`);
+        videoId = extractYouTubeId(target.url);
+        title = target.title || title;
       }
 
-      // Fallback: Try yt-search with Prince API
-      try {
-        if (!isUrl) {
-          const yts = require('yt-search');
-          const searchResults = await yts(query);
-          if (searchResults && searchResults.videos && searchResults.videos.length > 0) {
-            const target = searchResults.videos[0];
-            const ytUrl = target.url;
-            
-            const princeUrl = 'https://api.princetechn.com/api/download/ytmp3';
-            const fallbackRes = await fetch(`${princeUrl}?apikey=prince&url=${encodeURIComponent(ytUrl)}`);
-            const fallbackData = await fallbackRes.json();
-            
-            let fallbackAudio = fallbackData.result?.download_url || fallbackData.result?.url || 
-                                fallbackData.download_url || fallbackData.url;
-            
-            if (fallbackAudio) {
-              const aRes = await fetch(fallbackAudio);
-              const aBuf = Buffer.from(await aRes.arrayBuffer());
-              if (aBuf.length > 5000) {
-                return await sock.sendMessage(from, {
-                  audio: aBuf,
-                  mimetype: 'audio/mpeg',
-                  fileName: `${target.title}.mp3`,
-                  caption: `🎵 *${target.title}*\n✅ *Download Success (search fallback)*`
-                });
-              }
-            }
-          }
-        }
-      } catch (ytErr) {}
+      const streams = await pipedStreams(videoId);
+      title = streams.title || title;
 
-      await sock.sendMessage(from, { 
-        text: `⚠️ Play Error: ${error.message || 'Unknown error'}\n\n💡 Try again or use a different song name.` 
+      const video = pickPipedVideo(streams);
+      if (!video) throw new Error('Piped returned no compatible MP4 video stream.');
+
+      const buffer = await fetchBuffer(video.url, 60 * 1024 * 1024, 'Video');
+
+      await sock.sendMessage(from, {
+        video: buffer,
+        mimetype: video.mimeType || 'video/mp4',
+        caption: `🎬 *${title}*\n📺 ${video.quality || `${video.height || '?'}p`}\n✅ *Ready*`
+      });
+    } catch (error) {
+      console.error('[playvideo] error:', error);
+      await sock.sendMessage(from, {
+        text: `❌ *Video download failed*\n\n${error.message}\n\n💡 Try a shorter/smaller video or another YouTube URL.`
       });
     }
   }
