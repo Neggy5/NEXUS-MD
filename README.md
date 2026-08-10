@@ -107,3 +107,29 @@ nexus-md/
 
 - This uses WhatsApp's official multi-device linking mechanism via Baileys — the same protocol WhatsApp Web/Desktop uses. It is not affiliated with or endorsed by WhatsApp/Meta; use responsibly and in line with WhatsApp's Terms of Service.
 - Don't use this for bulk/unsolicited messaging — that risks the linked number being banned.
+
+
+## Baileys fork + interactive buttons
+
+NEXUS-MD now loads Baileys through `src/baileys.js` and prefers `@vansnowi/baileys`.
+Set `BAILEYS_PACKAGE` if your deployment uses a different compatible package.
+
+Interactive commands:
+- `.buttons`
+- `.buttonmenu`
+- `.btnmenu`
+
+The bot also recognizes legacy button responses, list responses, template button replies, and compatible native-flow response IDs as command IDs.
+
+**Important:** `@vansnowi/baileys` was not available in the package registry used while this archive was prepared. If your deployment cannot resolve it, provide/install the fork package (or set `BAILEYS_PACKAGE` to a compatible installed package). The compatibility layer has a fallback to upstream Baileys so the rest of the project can still boot where the fork is unavailable.
+
+## Velox-style menu
+
+The `.menu` command now uses a modern WhatsApp native-flow interactive message:
+- Velox-style header with user, owner, version, prefix, uptime and date
+- Tools / Other / Exec command groups
+- Clickable quick-reply buttons
+- Configurable menu image through `MENU_IMAGE_URL`
+- Automatic text/image fallback when native-flow delivery is unavailable
+
+The `.buttons` command remains available as a compact interactive-menu test.
