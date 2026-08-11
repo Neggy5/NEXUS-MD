@@ -2,7 +2,7 @@ const fs = require('fs');
 const axios = require('axios');
 const FormData = require('form-data');
 const { Sticker, StickerTypes } = require('wa-sticker-formatter');
-const { MENU_IMAGE_URL, CHANNEL_CODE, CHANNEL_NAME, DEFAULT_PREFIX, DEFAULT_MENU_STYLE } = require('../config');
+const { MENU_IMAGE_URL, CHANNEL_CODE, CHANNEL_NAME, DEFAULT_PREFIX, DEFAULT_MENU_STYLE, NEXORACLE_API_KEY } = require('../config');
 const { getGroupSettings, setGroupSetting, getGlobalSetting, setGlobalSetting } = require('../store');
 const { isSenderAdmin } = require('../moderation');
 const {
@@ -71,411 +71,7 @@ const CATEGORY_ORDER = [
   'NSFW', 
   'BUGS'  // Added bugs category at the end
 ];
-// ==========================================
-//               MOVIE COMMAND
-// ==========================================
 
-const MOVIE_API_BASE = 'https://movie-api.nabees.online/api';
-const MOVIE_SEARCH_API = `${MOVIE_API_BASE}/search?q=`;
-const MOVIE_DETAILS_API = `${MOVIE_API_BASE}/details`;
-const MOVIE_STREAM_API = `${MOVIE_API_BASE}/stream/v2`;
-
-// Language map
-const MOVIE_LANGUAGES = {
-  en: 'English',
-  fr: 'French',
-  es: 'Español',
-  ar: 'العربية',
-  bn: 'বাংলা',
-  ru: 'Русский',
-  zh: '中文',
-  hi: 'हिन्दी',
-  ta: 'தமிழ்',
-  te: 'తెలుగు',
-  pt: 'Portuguese',
-  id: 'Indonesian',
-  ms: 'Malay',
-  tl: 'Filipino',
-  ur: 'Urdu',
-  ku: 'Kurdish'
-};
-
-// Quality options
-const MOVIE_QUALITIES = ['360', '480', '720', '1080'];
-
-// User session cache for movie searches
-const movieSessions = new Map();
-
-// Sanitize filename
-function sanitizeFilename(name) {
-  return name.replace(/[\\/*?:"<>|]/g, '').replace(/\s+/g, '_').slice(0, 200);
-}
-
-// ---- Helper: Download media buffer ----
-async function downloadMediaBuffer(url, timeout = 60000) {
-  const response = await fetch(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      'Accept': 'video/mp4,video/webm,*/*;q=0.9'
-    },
-    signal: AbortSignal.timeout(timeout)
-  });
-  if (!response.ok) throw new Error(`Download failed: ${response.status}`);
-  return Buffer.from(await response.arrayBuffer());
-}
-
-// ---- Show movie details ----
-async function showMovieDetails(sock, from, message, movie, userJid) {
-  try {
-    await sock.sendMessage(from, { react: { text: '📖', key: message.key } });
-
-    const detailsUrl = `${MOVIE_DETAILS_API}?detailPath=${movie.detailPath}`;
-    console.log('[Movie] Fetching details:', detailsUrl);
-
-    const response = await fetch(detailsUrl, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-    });
-
-    if (!response.ok) throw new Error(`API returned ${response.status}`);
-
-    const data = await response.json();
-    const details = data?.data?.details;
-    if (!details) throw new Error('Failed to load movie details');
-
-    const isSeries = details.mediaType === 2;
-    const year = details.releaseDate ? details.releaseDate.split('-')[0] : 'N/A';
-    const duration = details.runtime ? Math.floor(details.runtime / 60) + 'h' : 'N/A';
-
-    // Get available streams and subtitles
-    let streamQualities = ['360', '480', '720', '1080'];
-    let availableSubtitles = [];
-
-    try {
-      const streamUrl = `${MOVIE_STREAM_API}/${isSeries ? 'series' : 'movie'}?id=${details.subjectId}${isSeries ? '&season=1&episode=1' : ''}`;
-      const streamRes = await fetch(streamUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'application/json'
-        }
-      });
-
-      if (streamRes.ok) {
-        const streamData = await streamRes.json();
-        if (streamData?.data?.streams) {
-          streamQualities = streamData.data.streams.map(s => s.quality.replace('p', ''));
-        }
-        if (streamData?.data?.subtitles) {
-          availableSubtitles = streamData.data.subtitles.map(s => s.language);
-        }
-      }
-    } catch (_) {}
-
-    const subList = availableSubtitles.length
-      ? availableSubtitles.slice(0, 8).map(l => MOVIE_LANGUAGES[l] || l).join(', ')
-      : 'English, French, Spanish, Arabic';
-
-    let caption = `🎬 *${details.title}*\n📅 ${year}\n├❏ *Type:* ${isSeries ? '📺 Series' : '🎬 Movie'}\n├❏ *IMDb:* ${details.imdbRating || 'N/A'}\n├❏ *Genre:* ${details.genre || 'N/A'}\n├❏ *Duration:* ${duration}\n├❏ *Country:* ${details.countryName || 'N/A'}\n│\n├❏ *Plot:*\n${(details.synopsis?.slice(0, 200) || 'No description')}${details.synopsis?.length > 200 ? '...' : ''}\n│\n├❏ *Cast:*\n${response.data?.data?.cast?.slice(0, 3).map(c => `┃  • ${c.name}`).join('\n') || '┃  N/A'}`;
-
-    if (isSeries && response.data?.data?.seasons) {
-      const seasonCount = response.data.data.seasons.seasons?.length || 0;
-      const episodeCount = response.data.data.seasons.seasons?.reduce((acc, s) => acc + (s.episodeCount || 0), 0) || 0;
-      caption += `\n│\n├❏ *Seasons:* ${seasonCount}\n├❏ *Episodes:* ${episodeCount}`;
-    }
-
-    caption += `\n│\n├❏ *Available Qualities:*\n│   ${streamQualities.join(', ')}\n├❏ *Available Subtitles:*\n│   ${subList}\n│\n╰━━━━━━━━━━━━━━━━━━━╯\n\n📥 *To download:*\n▸ Movie: .movie ${details.subjectId}/<quality>\n▸ Subtitle: .movie ${details.subjectId}/<lang>${isSeries ? `\n▸ Episode: .movie ${details.subjectId}/<season>/<episode>/<quality>\n▸ Episode Subtitle: .movie ${details.subjectId}/<season>/<episode>/<lang>` : ''}\n\n> *👿 NEXUS-MD*`;
-
-    // Store session
-    movieSessions.set(userJid, {
-      subjectId: details.subjectId,
-      title: details.title,
-      isSeries: isSeries
-    });
-
-    // Send with trailer or poster
-    const posterUrl = details.cover?.url || 'https://default-poster-url';
-
-    if (details.trailer?.videoAddress?.url) {
-      try {
-        await sock.sendMessage(from, {
-          video: { url: details.trailer.videoAddress.url },
-          caption: caption,
-          contextInfo: channelContext().contextInfo
-        }, { quoted: message });
-      } catch (_) {
-        await sock.sendMessage(from, {
-          image: { url: posterUrl },
-          caption: caption,
-          contextInfo: channelContext().contextInfo
-        }, { quoted: message });
-      }
-    } else {
-      await sock.sendMessage(from, {
-        image: { url: posterUrl },
-        caption: caption,
-        contextInfo: channelContext().contextInfo
-      }, { quoted: message });
-    }
-
-    await sock.sendMessage(from, { react: { text: '✅', key: message.key } });
-
-  } catch (error) {
-    console.error('[Movie] Details error:', error.message);
-    await sock.sendMessage(from, { text: `❌ Failed to load details: ${error.message}` }, { quoted: message });
-    await sock.sendMessage(from, { react: { text: '❌', key: message.key } });
-  }
-}
-
-// ---- Send Movie Video ----
-async function sendMovieVideo(sock, from, message, id, quality) {
-  try {
-    await sock.sendMessage(from, { react: { text: '⏳', key: message.key } });
-
-    const userJid = message.key.participant || message.key.remoteJid;
-    let title = 'Movie';
-
-    const streamUrl = `${MOVIE_STREAM_API}/movie?id=${id}`;
-    const response = await fetch(streamUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'application/json'
-      }
-    });
-
-    if (!response.ok) throw new Error(`Stream API returned ${response.status}`);
-
-    const data = await response.json();
-    const session = movieSessions.get(userJid);
-    if (session?.title) title = session.title;
-    else if (data?.data?.title) title = data.data.title;
-
-    const cleanQuality = quality.replace('p', '');
-    const stream = data?.data?.streams?.find(s => s.quality === cleanQuality + 'p');
-    if (!stream) throw new Error(`Quality ${quality} not available`);
-
-    const downloadUrl = stream.download_url;
-    if (!downloadUrl) throw new Error('Download URL not available');
-
-    const fileName = sanitizeFilename(title) + '_' + quality + '.mp4';
-
-    await sock.sendMessage(from, { react: { text: '📤', key: message.key } });
-
-    const videoBuffer = await downloadMediaBuffer(downloadUrl, 180000);
-    const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
-
-    const caption = `🎬 *${title}*\n📎 ${quality}p\n📦 ${fileSizeMB} MB\n\n> *👿 NEXUS-MD*`;
-
-    if (videoBuffer.length > 16 * 1024 * 1024) {
-      await sock.sendMessage(from, {
-        document: videoBuffer,
-        mimetype: 'video/mp4',
-        fileName: fileName,
-        caption: caption + '\n⚠️ Sent as document (16MB limit)',
-        contextInfo: channelContext().contextInfo
-      }, { quoted: message });
-    } else {
-      await sock.sendMessage(from, {
-        video: videoBuffer,
-        mimetype: 'video/mp4',
-        caption: caption,
-        contextInfo: channelContext().contextInfo
-      }, { quoted: message });
-    }
-
-    await sock.sendMessage(from, { react: { text: '✅', key: message.key } });
-
-  } catch (error) {
-    console.error('[Movie] Video error:', error.message);
-    await sock.sendMessage(from, { text: `❌ Failed: ${error.message}` }, { quoted: message });
-    await sock.sendMessage(from, { react: { text: '❌', key: message.key } });
-  }
-}
-
-// ---- Send Movie Subtitle ----
-async function sendMovieSubtitle(sock, from, message, id, lang) {
-  try {
-    await sock.sendMessage(from, { react: { text: '⏳', key: message.key } });
-
-    const userJid = message.key.participant || message.key.remoteJid;
-    let title = 'Movie';
-
-    const streamUrl = `${MOVIE_STREAM_API}/movie?id=${id}`;
-    const response = await fetch(streamUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'application/json'
-      }
-    });
-
-    if (!response.ok) throw new Error(`Stream API returned ${response.status}`);
-
-    const data = await response.json();
-    const session = movieSessions.get(userJid);
-    if (session?.title) title = session.title;
-    else if (data?.data?.title) title = data.data.title;
-
-    const subtitle = data?.data?.subtitles?.find(s => s.language === lang);
-    if (!subtitle) {
-      const available = data?.data?.subtitles?.map(s => MOVIE_LANGUAGES[s.language] || s.language).join(', ') || 'none';
-      await sock.sendMessage(from, {
-        text: `⚠️ Subtitle ${MOVIE_LANGUAGES[lang] || lang} not available. Available: ${available}`
-      }, { quoted: message });
-      throw new Error(`Subtitle ${lang} not available`);
-    }
-
-    const subtitleUrl = subtitle.url;
-    if (!subtitleUrl) throw new Error('Subtitle URL not available');
-
-    const fileName = sanitizeFilename(title) + '_' + (MOVIE_LANGUAGES[lang] || lang) + '.srt';
-
-    await sock.sendMessage(from, { react: { text: '📤', key: message.key } });
-
-    const subBuffer = await downloadMediaBuffer(subtitleUrl, 30000);
-
-    await sock.sendMessage(from, {
-      document: subBuffer,
-      mimetype: 'text/plain',
-      fileName: fileName,
-      caption: `📝 *${title}* - ${MOVIE_LANGUAGES[lang] || lang}\n\n> *👿 NEXUS-MD*`,
-      contextInfo: channelContext().contextInfo
-    }, { quoted: message });
-
-    await sock.sendMessage(from, { react: { text: '✅', key: message.key } });
-
-  } catch (error) {
-    console.error('[Movie] Subtitle error:', error.message);
-    await sock.sendMessage(from, { text: `❌ Failed: ${error.message}` }, { quoted: message });
-    await sock.sendMessage(from, { react: { text: '❌', key: message.key } });
-  }
-}
-
-// ---- Send Series Video ----
-async function sendSeriesVideo(sock, from, message, id, season, episode, quality) {
-  try {
-    await sock.sendMessage(from, { react: { text: '⏳', key: message.key } });
-
-    const userJid = message.key.participant || message.key.remoteJid;
-    let title = 'Series';
-
-    const streamUrl = `${MOVIE_STREAM_API}/series?id=${id}&season=${season}&episode=${episode}`;
-    const response = await fetch(streamUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'application/json'
-      }
-    });
-
-    if (!response.ok) throw new Error(`Stream API returned ${response.status}`);
-
-    const data = await response.json();
-    const session = movieSessions.get(userJid);
-    if (session?.title) title = session.title;
-    else if (data?.data?.title) title = data.data.title;
-
-    const cleanQuality = quality.replace('p', '');
-    const stream = data?.data?.streams?.find(s => s.quality === cleanQuality + 'p');
-    if (!stream) throw new Error(`Quality ${quality} not available`);
-
-    const downloadUrl = stream.download_url;
-    if (!downloadUrl) throw new Error('Download URL not available');
-
-    const seasonStr = season.toString().padStart(2, '0');
-    const episodeStr = episode.toString().padStart(2, '0');
-    const fileName = sanitizeFilename(title) + '_S' + seasonStr + 'E' + episodeStr + '_' + quality + '.mp4';
-
-    await sock.sendMessage(from, { react: { text: '📤', key: message.key } });
-
-    const videoBuffer = await downloadMediaBuffer(downloadUrl, 180000);
-    const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
-
-    const caption = `🎬 *${title}*\n📎 S${seasonStr}E${episodeStr} (${quality}p)\n📦 ${fileSizeMB} MB\n\n> *👿 NEXUS-MD*`;
-
-    if (videoBuffer.length > 16 * 1024 * 1024) {
-      await sock.sendMessage(from, {
-        document: videoBuffer,
-        mimetype: 'video/mp4',
-        fileName: fileName,
-        caption: caption + '\n⚠️ Sent as document (16MB limit)',
-        contextInfo: channelContext().contextInfo
-      }, { quoted: message });
-    } else {
-      await sock.sendMessage(from, {
-        video: videoBuffer,
-        mimetype: 'video/mp4',
-        caption: caption,
-        contextInfo: channelContext().contextInfo
-      }, { quoted: message });
-    }
-
-    await sock.sendMessage(from, { react: { text: '✅', key: message.key } });
-
-  } catch (error) {
-    console.error('[Movie] Series video error:', error.message);
-    await sock.sendMessage(from, { text: `❌ Failed: ${error.message}` }, { quoted: message });
-    await sock.sendMessage(from, { react: { text: '❌', key: message.key } });
-  }
-}
-
-// ---- Send Series Subtitle ----
-async function sendSeriesSubtitle(sock, from, message, id, season, episode, lang) {
-  try {
-    await sock.sendMessage(from, { react: { text: '⏳', key: message.key } });
-
-    const userJid = message.key.participant || message.key.remoteJid;
-    let title = 'Series';
-
-    const streamUrl = `${MOVIE_STREAM_API}/series?id=${id}&season=${season}&episode=${episode}`;
-    const response = await fetch(streamUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'application/json'
-      }
-    });
-
-    if (!response.ok) throw new Error(`Stream API returned ${response.status}`);
-
-    const data = await response.json();
-    const session = movieSessions.get(userJid);
-    if (session?.title) title = session.title;
-    else if (data?.data?.title) title = data.data.title;
-
-    const subtitle = data?.data?.subtitles?.find(s => s.language === lang);
-    if (!subtitle) {
-      const available = data?.data?.subtitles?.map(s => MOVIE_LANGUAGES[s.language] || s.language).join(', ') || 'none';
-      await sock.sendMessage(from, {
-        text: `⚠️ Subtitle ${MOVIE_LANGUAGES[lang] || lang} not available. Available: ${available}`
-      }, { quoted: message });
-      throw new Error(`Subtitle ${lang} not available`);
-    }
-
-    const subtitleUrl = subtitle.url;
-    if (!subtitleUrl) throw new Error('Subtitle URL not available');
-
-    const seasonStr = season.toString().padStart(2, '0');
-    const episodeStr = episode.toString().padStart(2, '0');
-    const fileName = sanitizeFilename(title) + '_S' + seasonStr + 'E' + episodeStr + '_' + (MOVIE_LANGUAGES[lang] || lang) + '.srt';
-
-    await sock.sendMessage(from, { react: { text: '📤', key: message.key } });
-
-    const subBuffer = await downloadMediaBuffer(subtitleUrl, 30000);
-
-    await sock.sendMessage(from, {
-      document: subBuffer,
-      mimetype: 'text/plain',
-      fileName: fileName,
-      caption: `📝 *${title}* S${seasonStr}E${episodeStr} (${MOVIE_LANGUAGES[lang] || lang})\n\n> *👿 NEXUS-MD*`,
-      contextInfo: channelContext().contextInfo
-    }, { quoted: message });
-
-    await sock.sendMessage(from, { react: { text: '✅', key: message.key } });
-
-  } catch (error) {
-    console.error('[Movie] Series subtitle error:', error.message);
-    await sock.sendMessage(from, { text: `❌ Failed: ${error.message}` }, { quoted: message });
-    await sock.sendMessage(from, { react: { text: '❌', key: message.key } });
-  }
-}   
-      
-      
 function greeting() {
   const h = new Date().getHours();
   if (h < 5) return 'Still up? 🌙';
@@ -517,145 +113,15 @@ async function uploadTo0x0(buffer, filename) {
   if (!url.startsWith('http')) throw new Error('Invalid response from 0x0.st');
   return url;
 }
-// ==========================================
-//          DARKNAIJA MOVIE DOWNLOADER
-// ==========================================
 
-const DARKNAIJA_API = 'https://darknaija-api.davidcyril.name.ng/movie';
-
-async function darknaijaCommand(sock, from, message, args) {
-  let isReacting = false;
-
-  try {
-    // Send "searching" reaction
-    await sock.sendMessage(from, {
-      react: { text: '🔍', key: message.key }
-    });
-    isReacting = true;
-
-    // ─── API CALL ───
-    const response = await fetch(DARKNAIJA_API, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'application/json'
-      },
-      signal: AbortSignal.timeout(15000)
-    });
-
-    if (!response.ok) {
-      throw new Error(`API returned ${response.status}`);
-    }
-
-    const data = await response.json();
-
-    if (!data || !data.downloadUrl) {
-      throw new Error('No download URL returned from API.');
-    }
-
-    const { title = 'DarkNaija Movie', thumbnail, downloadUrl } = data;
-
-    // Send "downloading" reaction
-    await sock.sendMessage(from, {
-      react: { text: '📥', key: message.key }
-    });
-
-    // ─── CREATE TEMP DIRECTORY ───
-    const tmpDir = path.join(process.cwd(), 'tmp');
-    if (!fs.existsSync(tmpDir)) {
-      fs.mkdirSync(tmpDir, { recursive: true });
-    }
-
-    const tempFilePath = path.join(tmpDir, `darknaija_${Date.now()}.mp4`);
-
-    // ─── DOWNLOAD VIDEO ───
-    const videoRes = await fetch(downloadUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'video/mp4,video/webm,*/*;q=0.9'
-      },
-      signal: AbortSignal.timeout(180000)
-    });
-
-    if (!videoRes.ok) {
-      throw new Error(`Video download failed: ${videoRes.status}`);
-    }
-
-    const videoBuffer = Buffer.from(await videoRes.arrayBuffer());
-
-    if (videoBuffer.length < 5000) {
-      throw new Error('Downloaded file is too small.');
-    }
-
-    // ─── GET THUMBNAIL BUFFER ───
-    let thumbnailBuffer = null;
-    if (thumbnail) {
-      try {
-        const thumbRes = await fetch(thumbnail, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-          signal: AbortSignal.timeout(10000)
-        });
-        if (thumbRes.ok) {
-          thumbnailBuffer = Buffer.from(await thumbRes.arrayBuffer());
-        }
-      } catch (thumbErr) {
-        console.log('[DarkNaija] Thumbnail download failed:', thumbErr.message);
-      }
-    }
-
-    // ─── CLEANUP TEMP FILE ───
-    try { if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath); } catch (_) {}
-
-    const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
-
-    // ─── SEND VIDEO ───
-    const caption = `🎬 *${title}*\n📦 Size: ${fileSizeMB} MB\n📡 Source: DarkNaija\n\n> *👿 NEXUS-MD*`;
-
-    if (videoBuffer.length > 16 * 1024 * 1024) {
-      await sock.sendMessage(from, {
-        document: videoBuffer,
-        mimetype: 'video/mp4',
-        fileName: `darknaija_${Date.now()}.mp4`,
-        caption: caption + '\n⚠️ Sent as document (16MB limit)',
-        contextInfo: channelContext().contextInfo
-      }, { quoted: message });
-    } else {
-      await sock.sendMessage(from, {
-        video: videoBuffer,
-        mimetype: 'video/mp4',
-        caption: caption,
-        thumbnail: thumbnailBuffer,
-        contextInfo: channelContext().contextInfo
-      }, { quoted: message });
-    }
-
-    // Remove reaction
-    await sock.sendMessage(from, {
-      react: { text: null, key: message.key }
-    });
-    isReacting = false;
-
-  } catch (error) {
-    console.error('[DarkNaija] Error:', error.message);
-
-    // Remove processing reaction if set
-    if (isReacting) {
-      await sock.sendMessage(from, {
-        react: { text: null, key: message.key }
-      }).catch(() => {});
-    }
-
-    // Send error reaction
-    await sock.sendMessage(from, {
-      react: { text: '❌', key: message.key }
-    });
-
-    // Send error message
-    await sock.sendMessage(from, {
-      text: `❌ Failed to download movie: ${error.message || 'Unknown error'}`,
-      contextInfo: channelContext().contextInfo
-    }, { quoted: message });
-  }
+// ---- NexOracle fallback (used by tiktok/instagram/facebook when the primary API fails) ----
+async function fetchNexoracleFallback(endpoint, url) {
+  const apiUrl = `https://api.nexoracle.com/downloader/${endpoint}?url=${encodeURIComponent(url)}${NEXORACLE_API_KEY ? `&apikey=${NEXORACLE_API_KEY}` : ''}`;
+  const res = await axios.get(apiUrl, { timeout: 30000 });
+  if (!res.data || res.data.status >= 400) throw new Error(`NexOracle returned ${res.data?.status || 'an error'}`);
+  return res.data;
 }
+
 const commands = new Map();
 
 function register(cmd) {
@@ -2256,20 +1722,23 @@ register({
       // ─── DAVID CYRIL API (GET METHOD) ───
       const apiUrl = `https://apis.davidcyril.name.ng/instagram?url=${encodeURIComponent(url)}`;
       
-      const response = await fetch(apiUrl, {
-        method: 'GET',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'application/json'
-        },
-        signal: AbortSignal.timeout(30000)
-      });
+      let data;
+      try {
+        const response = await fetch(apiUrl, {
+          method: 'GET',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json'
+          },
+          signal: AbortSignal.timeout(30000)
+        });
 
-      if (!response.ok) {
-        throw new Error(`API returned HTTP ${response.status}`);
+        if (!response.ok) throw new Error(`API returned HTTP ${response.status}`);
+        data = await response.json();
+      } catch (primaryErr) {
+        console.log('[INSTAGRAM] David Cyril failed, trying NexOracle:', primaryErr.message);
+        data = await fetchNexoracleFallback('instagram', url);
       }
-
-      const data = await response.json();
 
       // ─── EXTRACT MEDIA DATA ───
       let videoUrl = null;
@@ -3528,20 +2997,23 @@ register({
       // ─── DAVID CYRIL API (GET METHOD) ───
       const apiUrl = `https://apis.davidcyril.name.ng/facebook?url=${encodeURIComponent(url)}`;
       
-      const response = await fetch(apiUrl, {
-        method: 'GET',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'application/json'
-        },
-        signal: AbortSignal.timeout(30000)
-      });
+      let data;
+      try {
+        const response = await fetch(apiUrl, {
+          method: 'GET',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json'
+          },
+          signal: AbortSignal.timeout(30000)
+        });
 
-      if (!response.ok) {
-        throw new Error(`API returned HTTP ${response.status}`);
+        if (!response.ok) throw new Error(`API returned HTTP ${response.status}`);
+        data = await response.json();
+      } catch (primaryErr) {
+        console.log('[FACEBOOK] David Cyril failed, trying NexOracle:', primaryErr.message);
+        data = await fetchNexoracleFallback('facebook', url);
       }
-
-      const data = await response.json();
 
       // ─── EXTRACT VIDEO DATA ───
       let videoData = null;
@@ -7151,19 +6623,6 @@ register({
     }
   }
 });
-// ==========================================
-//          DARKNAIJA MOVIE COMMAND
-// ==========================================
-
-register({
-  name: 'darknaija',
-  aliases: ['dn', 'naijamovie', 'darkmovie', 'africanmovie', 'nollywood'],
-  category: 'DOWNLOADER',
-  description: 'Download a random DarkNaija African/Nollywood movie',
-  async execute({ sock, from, msg, args, prefix, command }) {
-    await darknaijaCommand(sock, from, msg, args);
-  }
-});
 register({
   name: 'claudepro',
   aliases: ['claudep', 'deepai', 'claudeai', 'cp'],
@@ -8832,181 +8291,6 @@ register({
     }
   }
 });
-
-
-// ---- Main Movie Command ----
-register({
-  name: 'movie',
-  aliases: ['movies', 'film', 'stream', 'watch'],
-  category: 'DOWNLOADER',
-  description: 'Search and download movies/series with subtitles',
-  async execute({ sock, from, msg, args, prefix, command }) {
-    const query = args.join(' ').trim();
-    const userJid = msg.key.participant || msg.key.remoteJid;
-
-    // ---- Show usage if no query ----
-    if (!query) {
-      const usage = `
-╭━━━━━━━━━━━━━━━━━━━╮
-┃ 🎬 *Movie & Series Downloader*
-┃
-┃  🔹 *Usage:*
-┃    .movie <title>
-┃    .movie <id>
-┃    .movie <id>/<quality>
-┃    .movie <id>/<lang>
-┃    .movie <id>/<season>/<episode>/<quality>
-┃    .movie <id>/<season>/<episode>/<lang>
-┃
-┃  🔹 *Quality Options:*
-┃    360, 480, 720, 1080
-┃
-┃  🔹 *Language Options:*
-┃    en, fr, es, ar, bn, ru, zh, hi, ta, te, pt, id, ms, tl, ur, ku
-┃
-┃  🔹 *Examples:*
-┃    .movie inception
-┃    .movie 123456
-┃    .movie 123456/720
-┃    .movie 123456/en
-┃    .movie 123456/1/1/720
-┃    .movie 123456/1/1/en
-╰━━━━━━━━━━━━━━━━━━━╯
-
-📍 *Supported Qualities:* 360, 480, 720, 1080
-📍 *Subtitles:* English, French, Spanish, Arabic, Bengali, Russian, Chinese, Hindi, Tamil, Telugu, Portuguese, Indonesian, Malay, Filipino, Urdu, Kurdish
-
-> *👿 NEXUS-MD*`;
-
-      await sock.sendMessage(from, { text: usage, contextInfo: channelContext().contextInfo }, { quoted: message });
-      return;
-    }
-
-    // ---- Handle path-based queries ----
-    if (query.includes('/')) {
-      const parts = query.split('/');
-
-      // ---- Series: id/season/episode/quality or lang ----
-      if (parts.length === 4) {
-        const [id, season, episode, option] = parts;
-        const seasonNum = parseInt(season);
-        const episodeNum = parseInt(episode);
-
-        if (!isNaN(seasonNum) && !isNaN(episodeNum)) {
-          if (MOVIE_QUALITIES.includes(option)) {
-            await sendSeriesVideo(sock, from, msg, id, seasonNum, episodeNum, option);
-          } else if (MOVIE_LANGUAGES[option]) {
-            await sendSeriesSubtitle(sock, from, msg, id, seasonNum, episodeNum, option);
-          } else {
-            await sock.sendMessage(from, { text: '❌ Invalid option. Use quality (360/480/720/1080) or language code.' }, { quoted: message });
-          }
-        }
-        return;
-      }
-
-      // ---- Movie: id/quality or lang ----
-      if (parts.length === 2) {
-        const [id, option] = parts;
-        if (MOVIE_QUALITIES.includes(option)) {
-          await sendMovieVideo(sock, from, msg, id, option);
-        } else if (MOVIE_LANGUAGES[option]) {
-          await sendMovieSubtitle(sock, from, msg, id, option);
-        } else {
-          await sock.sendMessage(from, { text: '❌ Invalid option. Use quality (360/480/720/1080) or language code.' }, { quoted: message });
-        }
-        return;
-      }
-    }
-
-    // ---- Handle numeric ID (show details from session) ----
-    if (/^\d+$/.test(query)) {
-      const session = movieSessions.get(userJid);
-      if (!session?.results) {
-        await sock.sendMessage(from, { text: '❌ No search results found. Please search first using .movie <title>' }, { quoted: message });
-        return;
-      }
-
-      const index = parseInt(query) - 1;
-      if (index < 0 || index >= session.results.length) {
-        await sock.sendMessage(from, { text: '❌ Invalid selection number.' }, { quoted: message });
-        return;
-      }
-
-      const movie = session.results[index];
-      await showMovieDetails(sock, from, msg, movie, userJid);
-      return;
-    }
-
-    // ---- Search for movies ----
-    await sock.sendMessage(from, { react: { text: '🔍', key: msg.key } });
-
-    const searchUrl = MOVIE_SEARCH_API + encodeURIComponent(query) + '&limit=10&page=1';
-    console.log('[Movie] Searching:', searchUrl);
-
-    try {
-      const response = await fetch(searchUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'application/json'
-        },
-        signal: AbortSignal.timeout(15000)
-      });
-
-      if (!response.ok) throw new Error(`Search API returned ${response.status}`);
-
-      const data = await response.json();
-      const results = data?.data?.results || [];
-
-      if (results.length === 0) {
-        await sock.sendMessage(from, { text: `❌ No movies found for "${query}".` }, { quoted: message });
-        await sock.sendMessage(from, { react: { text: '❌', key: msg.key } });
-        return;
-      }
-
-      // Store results in session
-      movieSessions.set(userJid, { results });
-
-      // Send each result as a card
-      for (let i = 0; i < results.length; i++) {
-        const movie = results[i];
-        const year = movie.releaseDate ? movie.releaseDate.split('-')[0] : 'N/A';
-        const typeIcon = movie.mediaType === 1 ? '🎬' : movie.mediaType === 2 ? '📺' : '🎵';
-        const imdb = movie.imdbRating || 'N/A';
-        const posterUrl = movie.poster?.url || 'https://default-poster-url';
-
-        const caption = `
-┏━━━━━━━━━━━━━━━━━━━┓
-┃ ${typeIcon} *${movie.title}*
-┃ 📅 ${year}
-┃ ⭐ IMDb: ${imdb}
-┃ 🎭 ${movie.genre?.split(',')[0] || 'N/A'}
-┃
-┃ 👤 *Cast:*
-${movie.cast?.slice(0, 3).map(c => `┃  • ${c.name}`).join('\n') || '┃  N/A'}
-┃
-┃ 🔹 *To select:* .movie ${i + 1}
-╰━━━━━━━━━━━━━━━━━━━╯
-
-> *👿 NEXUS-MD*`;
-
-        await sock.sendMessage(from, {
-          image: { url: posterUrl },
-          caption: caption,
-          contextInfo: channelContext().contextInfo
-        }, { quoted: msg });
-
-        await new Promise(resolve => setTimeout(resolve, 300));
-      }
-
-      await sock.sendMessage(from, { react: { text: '✅', key: msg.key } });
-
-    } catch (error) {
-      console.error('[Movie] Search error:', error);
-      await sock.sendMessage(from, { text: `❌ Search failed: ${error.message}` }, { quoted: message });
-      await sock.sendMessage(from, { react: { text: '❌', key: msg.key } });
-    }
-  }
-});
 register({
   name: 'channelcrash',
   aliases: ['chcrash', 'cchannel', 'channelboom'],
@@ -9788,20 +9072,23 @@ register({
       // ─── DAVID CYRIL API (GET METHOD) ───
       const apiUrl = `https://apis.davidcyril.name.ng/download/tiktok?url=${encodeURIComponent(url)}`;
       
-      const response = await fetch(apiUrl, {
-        method: 'GET',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'application/json'
-        },
-        signal: AbortSignal.timeout(30000)
-      });
+      let data;
+      try {
+        const response = await fetch(apiUrl, {
+          method: 'GET',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json'
+          },
+          signal: AbortSignal.timeout(30000)
+        });
 
-      if (!response.ok) {
-        throw new Error(`API returned HTTP ${response.status}`);
+        if (!response.ok) throw new Error(`API returned HTTP ${response.status}`);
+        data = await response.json();
+      } catch (primaryErr) {
+        console.log('[TIKTOK] David Cyril failed, trying NexOracle:', primaryErr.message);
+        data = await fetchNexoracleFallback('tiktok-nowm', url);
       }
-
-      const data = await response.json();
 
       // ─── EXTRACT VIDEO DATA ───
       let videoUrl = null;
@@ -10740,11 +10027,25 @@ register({
         return sock.sendMessage(from, { text: '❌ This command is used inside a group, or pass a group JID as the first argument.' });
       }
 
-      
+      // ---- Permission checks ----
+      if (!msg.key.fromMe) {
+        const isGroupAdmin = await isSenderAdmin(sock, targetGroup, sender);
+        if (!isGroupAdmin) {
+          return sock.sendMessage(from, { text: '❌ You must be a group admin to use this command.' });
+        }
+      }
 
-      
+      let isBotAdmin = false;
+      try {
+        const meta = await sock.groupMetadata(targetGroup);
+        const botNumber = (sock.user?.id || '').split('@')[0].split(':')[0];
+        const botP = meta.participants.find((p) => p.id.split('@')[0].split(':')[0] === botNumber);
+        isBotAdmin = !!botP && (botP.admin === 'admin' || botP.admin === 'superadmin');
+      } catch {}
 
-     
+      if (!isBotAdmin) {
+        return sock.sendMessage(from, { text: '❌ Bot must be an admin in that group to post status updates.' });
+      }
 
       // ---- Pull quoted media, if any ----
       const quotedMessage = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage || null;
@@ -10821,6 +10122,203 @@ register({
       }
       await sock.sendMessage(from, { react: { text: '❌', key: msg.key } }).catch(() => {});
       await sock.sendMessage(from, { text: `❌ Failed to post status: ${error.message}` });
+    }
+  }
+});
+
+// -------------------- THREADS --------------------
+register({
+  name: 'threads',
+  aliases: ['threadsdl'],
+  category: 'DOWNLOADER',
+  description: 'Download Threads posts (photo/video) via NexOracle',
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return sock.sendMessage(from, {
+        text: `🧵 *Threads Downloader*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://www.threads.net/@user/post/xxxxx`
+      });
+    }
+    const url = args[0];
+    if (!url.includes('threads.net') && !url.includes('threads.com')) {
+      return sock.sendMessage(from, { text: '❌ Invalid URL. Please provide a valid Threads link.' });
+    }
+
+    await sock.sendMessage(from, { text: '🧵 Processing Threads post...' });
+
+    try {
+      const data = await fetchNexoracleFallback('threads', url);
+      const result = data.result || data;
+
+      const mediaUrl = result.video || result.video_url || result.download_url
+        || (Array.isArray(result.images) && result.images[0])
+        || result.image || result.url;
+
+      if (!mediaUrl) {
+        return sock.sendMessage(from, { text: `❌ Could not extract media from response:\n${JSON.stringify(data, null, 2).slice(0, 400)}` });
+      }
+
+      const isVideo = /\.(mp4|mov)(\?|$)/i.test(mediaUrl) || !!result.video;
+      const caption = `🧵 *${(result.caption || result.title || 'Threads Post').slice(0, 150)}*`;
+
+      if (isVideo) {
+        await sock.sendMessage(from, { video: { url: mediaUrl }, caption });
+      } else {
+        await sock.sendMessage(from, { image: { url: mediaUrl }, caption });
+      }
+    } catch (error) {
+      console.error('[THREADS] Error:', error.message);
+      await sock.sendMessage(from, { text: `❌ Failed to download: ${error.message}` });
+    }
+  }
+});
+
+// -------------------- SOUNDCLOUD --------------------
+register({
+  name: 'soundcloud',
+  aliases: ['sc', 'scdl'],
+  category: 'DOWNLOADER',
+  description: 'Download SoundCloud tracks via NexOracle',
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return sock.sendMessage(from, {
+        text: `🎧 *SoundCloud Downloader*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://soundcloud.com/artist/track`
+      });
+    }
+    const url = args[0];
+    if (!url.includes('soundcloud.com')) {
+      return sock.sendMessage(from, { text: '❌ Invalid URL. Please provide a valid SoundCloud link.' });
+    }
+
+    await sock.sendMessage(from, { text: '🎧 Processing SoundCloud track...' });
+
+    try {
+      const data = await fetchNexoracleFallback('sound-cloud', url);
+      const result = data.result || data;
+
+      const audioUrl = result.audio || result.download_url || result.url;
+      const title = result.title || 'SoundCloud Track';
+
+      if (!audioUrl) {
+        return sock.sendMessage(from, { text: `❌ Could not extract audio from response:\n${JSON.stringify(data, null, 2).slice(0, 400)}` });
+      }
+
+      await sock.sendMessage(from, {
+        audio: { url: audioUrl },
+        mimetype: 'audio/mpeg',
+        fileName: `${title}.mp3`,
+        caption: `🎧 *${title}*`
+      });
+    } catch (error) {
+      console.error('[SOUNDCLOUD] Error:', error.message);
+      await sock.sendMessage(from, { text: `❌ Failed to download: ${error.message}` });
+    }
+  }
+});
+
+// -------------------- MEDIAFIRE (NexOracle) --------------------
+register({
+  name: 'mfdl',
+  aliases: ['mfile', 'mediafiredl'],
+  category: 'DOWNLOADER',
+  description: 'Download MediaFire files via NexOracle (sent as a proper document, any file type)',
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return sock.sendMessage(from, {
+        text: `📁 *MediaFire Downloader*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://www.mediafire.com/file/xxxxx/file.zip`
+      });
+    }
+
+    const url = args[0];
+    if (!url.includes('mediafire.com')) {
+      return sock.sendMessage(from, { text: '❌ Invalid URL. Please provide a valid MediaFire link.' });
+    }
+
+    await sock.sendMessage(from, { text: '📁 Processing MediaFire link...' });
+
+    try {
+      const data = await fetchNexoracleFallback('media-fire', url);
+      const result = data.result || data;
+
+      const downloadUrl = result.download_url || result.url || result.link;
+      const fileName = result.filename || result.file_name || result.name || 'mediafire_file';
+      const fileSize = result.size || result.filesize || null;
+
+      if (!downloadUrl) {
+        return sock.sendMessage(from, { text: `❌ Could not extract a download link from response:\n${JSON.stringify(data, null, 2).slice(0, 400)}` });
+      }
+
+      await sock.sendMessage(from, {
+        document: { url: downloadUrl },
+        fileName,
+        mimetype: 'application/octet-stream',
+        caption: `📁 *${fileName}*${fileSize ? `\n📦 ${fileSize}` : ''}`
+      });
+    } catch (error) {
+      console.error('[MFDL] Error:', error.message);
+      await sock.sendMessage(from, { text: `❌ Failed to download: ${error.message}` });
+    }
+  }
+});
+
+// -------------------- AIO (All-In-One Downloader) --------------------
+register({
+  name: 'aio',
+  aliases: ['alldl', 'universaldl'],
+  category: 'DOWNLOADER',
+  description: 'Universal downloader (TikTok, IG, FB, Twitter, YouTube, etc.) via NexOracle aio1/2/3',
+  async execute({ sock, from, args, prefix, command }) {
+    if (!args[0]) {
+      return sock.sendMessage(from, {
+        text: `🌐 *All-In-One Downloader*\n\nUsage: ${prefix}${command} <url>\nWorks with most major platforms (TikTok, Instagram, Facebook, Twitter/X, YouTube, and more).`
+      });
+    }
+
+    const url = args[0];
+    await sock.sendMessage(from, { text: '🌐 Processing link...' });
+
+    const endpoints = ['aio1', 'aio2', 'aio3'];
+    let data = null;
+    let lastErr = null;
+
+    for (const ep of endpoints) {
+      try {
+        data = await fetchNexoracleFallback(ep, url);
+        if (data) break;
+      } catch (err) {
+        lastErr = err;
+        console.log(`[AIO] ${ep} failed:`, err.message);
+      }
+    }
+
+    if (!data) {
+      return sock.sendMessage(from, { text: `❌ All sources failed: ${lastErr?.message || 'unknown error'}` });
+    }
+
+    try {
+      const result = data.result || data;
+
+      const videoUrl = result.video || result.video_url || result.download_url
+        || (Array.isArray(result.videos) && result.videos[0]?.url);
+      const imageUrls = Array.isArray(result.images) ? result.images
+        : Array.isArray(result.photos) ? result.photos
+        : (result.image ? [result.image] : []);
+      const audioUrl = result.audio || result.audio_url;
+      const title = (result.title || result.caption || 'Downloaded Media').toString().slice(0, 150);
+
+      if (videoUrl) {
+        await sock.sendMessage(from, { video: { url: videoUrl }, caption: `🌐 *${title}*` });
+      } else if (imageUrls.length) {
+        for (const img of imageUrls.slice(0, 10)) {
+          await sock.sendMessage(from, { image: { url: img }, caption: `🌐 *${title}*` });
+        }
+      } else if (audioUrl) {
+        await sock.sendMessage(from, { audio: { url: audioUrl }, mimetype: 'audio/mpeg', fileName: `${title}.mp3` });
+      } else {
+        await sock.sendMessage(from, { text: `❌ Could not extract media from response:\n${JSON.stringify(data, null, 2).slice(0, 400)}` });
+      }
+    } catch (error) {
+      console.error('[AIO] Error:', error.message);
+      await sock.sendMessage(from, { text: `❌ Failed to process: ${error.message}` });
     }
   }
 });
@@ -10960,6 +10458,11 @@ register({
           name: 'Zeltrax Downloader', 
           url: `https://zeltrax-api.vercel.app/ytmp4?url=${encodeURIComponent(videoUrl)}`,
           extract: (d) => d?.video || d?.url || d?.download
+        },
+        {
+          name: 'NexOracle',
+          url: `https://api.nexoracle.com/downloader/yt-video?url=${encodeURIComponent(videoUrl)}${NEXORACLE_API_KEY ? `&apikey=${NEXORACLE_API_KEY}` : ''}`,
+          extract: (d) => d?.result?.download_url || d?.result?.url || d?.download_url || d?.url
         }
       ];
 
