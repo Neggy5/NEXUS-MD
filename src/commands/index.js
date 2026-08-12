@@ -1676,7 +1676,7 @@ register({
   name: 'nexusqwen',
   aliases: ['nqwen', 'nq', 'qwenai', 'qwen3', 'nexusq'],
   category: 'AI',
-  description: 'Chat with Qwen AI via Nexus (Alibaba's advanced model)',
+  description: 'Chat with Qwen AI via Nexus (Alibaba advanced model)',
   async execute({ sock, from, msg, args, prefix, command, sessionId }) {
     if (!args[0]) {
       return await sock.sendMessage(from, { 
