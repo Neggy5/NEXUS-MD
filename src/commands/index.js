@@ -1338,6 +1338,1037 @@ register({
     await sock.sendMessage(from, { text: `✅ Menu style set to *${style}*. Run ${commandPrefix}menu to see it.` });
   },
 });
+
+
+// prexzy-chat.js - Prexzy AI Chatbot
+register({
+  name: 'zuko',
+  aliases: ['zukoai', 'zai', 'zchat'],
+  category: 'AI',
+  description: 'Chat with Nexus AI assistant (supports conversation context)',
+  async execute({ sock, from, msg, args, prefix, command, sessionId }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🤖 *Nexus AI Chatbot*\n\nUsage: ${prefix || '.'} Nexus <message>\nExample: ${prefix || '.'} Nexus Hello, how are you?\n\n*Features:*\n• Maintains conversation context\n• Free to use\n• Fast responses\n\n*Aliases:* ${prefix || '.'}zukoai, ${prefix || '.'}pai, ${prefix || '.'}zchat\n\n*Commands:*\n${prefix || '.'} Nexus reset — Clear conversation history` 
+      });
+    }
+
+    const userMessage = args.join(' ');
+    const isReset = userMessage.toLowerCase() === 'reset';
+
+    // ─── HANDLE RESET ───
+    if (isReset) {
+      const sessionKey = `prexzy_${sessionId || from}`;
+      if (global.prexzySessions) {
+        delete global.prexzySessions[sessionKey];
+      }
+      return await sock.sendMessage(from, { 
+        text: `🧹 *Nexus chat history cleared.*\nStart fresh with: ${prefix || '.'} Nexus Hello` 
+      });
+    }
+
+    // ─── GENERATE SESSION ID ───
+    const userSessionId = sessionId || from.split('@')[0];
+    const sessionKey = `prexzy_${userSessionId}`;
+
+    // ─── GET OR CREATE CONVERSATION ID ───
+    let conversationId = null;
+    if (global.prexzySessions && global.prexzySessions[sessionKey]) {
+      conversationId = global.prexzySessions[sessionKey];
+    }
+
+    await sock.sendMessage(from, { text: `🤖 *Nexus AI thinking...*` });
+
+    try {
+      // ─── BUILD API URL ───
+      let apiUrl = `https://prexzyapis.com/ai/chatbot?text=${encodeURIComponent(userMessage)}`;
+      if (conversationId) {
+        apiUrl += `&conversation_id=${encodeURIComponent(conversationId)}`;
+      }
+
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        },
+        signal: AbortSignal.timeout(30000)
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ─── CHECK STATUS ───
+      if (!data.status || data.statusCode !== 200) {
+        return await sock.sendMessage(from, { 
+          text: `❌ API Error: ${data.status || 'Unknown error'}` 
+        });
+      }
+
+      // ─── EXTRACT RESPONSE ───
+      const reply = data.data?.response || data.response || 'No response received.';
+      const newConversationId = data.data?.conversation_id || data.conversation_id || null;
+
+      // ─── SAVE CONVERSATION ID ───
+      if (newConversationId) {
+        if (!global.prexzySessions) global.prexzySessions = {};
+        global.prexzySessions[sessionKey] = newConversationId;
+      }
+
+      // ─── SEND REPLY ───
+      await sock.sendMessage(from, { 
+        text: `🤖 *nexus AI:*\n\n${reply}` 
+      });
+
+      console.log(`✅ Nexus AI response sent for: "${userMessage}"`);
+
+    } catch (error) {
+      console.error('nexus AI error:', error);
+
+      // ─── FALLBACK: Try without conversation ID ───
+      if (conversationId) {
+        try {
+          const fallbackUrl = `https://prexzyapis.com/ai/chatbot?text=${encodeURIComponent(userMessage)}`;
+          const fallbackRes = await fetch(fallbackUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+          });
+
+          if (fallbackRes.ok) {
+            const fallbackData = await fallbackRes.json();
+            const fallbackReply = fallbackData.data?.response || fallbackData.response;
+            if (fallbackReply) {
+              return await sock.sendMessage(from, { 
+                text: `🤖 *Nexus AI (Fallback):*\n\n${fallbackReply}` 
+              });
+            }
+          }
+        } catch (fallbackErr) {}
+      }
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not reach Nexus AI.'}\n\n💡 Try:\n• ${prefix || '.'} Nexus reset (clear history)\n• ${prefix || '.'} Nexus Hello\n• Try again later` 
+      });
+    }
+  }
+});
+// nexus-bugs.js - Nexus Bug Detector
+register({
+  name: 'nexusbugs',
+  aliases: ['nbugs', 'detectbugs', 'codecheck', 'nexuscheck'],
+  category: 'TOOLS',
+  description: 'Detect bugs in code using Nexus AI',
+  async execute({ sock, from, msg, args, prefix, command }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🐛 *Nexus Bug Detector*\n\nUsage: ${prefix || '.'}nexusbugs <code>\nOr reply to a code message with: ${prefix || '.'}nexusbugs\n\n*Example:*\n${prefix || '.'}nexusbugs function add(a,b){return a-b}\n\n*Aliases:* ${prefix || '.'}nbugs, ${prefix || '.'}detectbugs, ${prefix || '.'}nexuscheck` 
+      });
+    }
+
+    // ─── GET CODE FROM ARGS OR QUOTED ───
+    let code = args.join(' ');
+    const quoted = msg?.quoted;
+    
+    if (quoted && quoted.message?.conversation) {
+      code = quoted.message.conversation;
+    } else if (quoted && quoted.message?.extendedTextMessage?.text) {
+      code = quoted.message.extendedTextMessage.text;
+    }
+
+    if (!code || code.length < 3) {
+      return await sock.sendMessage(from, { 
+        text: `❌ Please provide valid code to analyze.` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `🐛 *Nexus AI analyzing code for bugs...*` });
+
+    try {
+      // ─── URL-ENCODE THE CODE ───
+      const encodedCode = encodeURIComponent(code);
+      
+      // ─── BUILD API URL ───
+      const apiUrl = `https://prexzyapis.com/ai/detectbugs?code=${encodedCode}`;
+
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        },
+        signal: AbortSignal.timeout(60000)
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ─── CHECK STATUS ───
+      if (!data.status || data.statusCode !== 200) {
+        return await sock.sendMessage(from, { 
+          text: `❌ API Error: ${data.status || 'Unknown error'}` 
+        });
+      }
+
+      // ─── EXTRACT RESULTS ───
+      let result = data.result || data.explanation || data.data || 'No analysis provided.';
+      let bugs = data.bugs || data.issues || [];
+      let language = data.language || 'Unknown';
+      let suggestions = data.suggestions || data.fixes || [];
+
+      // ─── FORMAT RESPONSE ───
+      let reply = `🐛 *Nexus Bug Analysis*\n📌 Language: ${language}\n\n`;
+
+      if (result && typeof result === 'string') {
+        reply += `📝 *Analysis:*\n${result}\n\n`;
+      }
+
+      if (bugs && bugs.length > 0) {
+        reply += `🚨 *Bugs Found:*\n`;
+        bugs.forEach((bug, i) => {
+          reply += `${i + 1}. ${bug}\n`;
+        });
+        reply += `\n`;
+      }
+
+      if (suggestions && suggestions.length > 0) {
+        reply += `💡 *Suggestions:*\n`;
+        suggestions.forEach((s, i) => {
+          reply += `${i + 1}. ${s}\n`;
+        });
+        reply += `\n`;
+      }
+
+      if (!bugs || bugs.length === 0) {
+        reply += `✅ No obvious bugs detected.\n`;
+      }
+
+      reply += `\n✨ *Powered by Nexus AI*`;
+
+      // ─── SEND REPLY ───
+      if (reply.length > 4096) {
+        const chunks = reply.match(/.{1,4000}/g) || [reply];
+        for (let i = 0; i < chunks.length; i++) {
+          await sock.sendMessage(from, { 
+            text: i === 0 ? chunks[i] : `*(continued)*\n\n${chunks[i]}`
+          });
+        }
+      } else {
+        await sock.sendMessage(from, { text: reply });
+      }
+
+      console.log(`✅ Nexus bug analysis complete (${code.length} chars)`);
+
+    } catch (error) {
+      console.error('Nexus bug detector error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not analyze code.'}\n\n💡 Try:\n• ${prefix || '.'}nexusbugs reset\n• ${prefix || '.'}nexusbugs function test(){return true}\n• Try again later` 
+      });
+    }
+  }
+});
+// nexus-olabiba.js - Nexus Olabiba AI Chatbot
+register({
+  name: 'nexusolabiba',
+  aliases: ['nolabiba', 'no', 'olabiba', 'labiba', 'nexuschat'],
+  category: 'AI',
+  description: 'Chat with Olabiba AI via Nexus (friendly assistant)',
+  async execute({ sock, from, msg, args, prefix, command, sessionId }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🤖 *Nexus Olabiba AI*\n\nUsage: ${prefix || '.'}nexusolabiba <message>\nExample: ${prefix || '.'}nexusolabiba What is AI?\n\n*Features:*\n• Friendly conversational AI\n• Free to use\n• Quick responses\n\n*Aliases:* ${prefix || '.'}nolabiba, ${prefix || '.'}no, ${prefix || '.'}olabiba, ${prefix || '.'}labiba, ${prefix || '.'}nexuschat\n\n*Commands:*\n${prefix || '.'}nexusolabiba reset — Clear conversation history` 
+      });
+    }
+
+    const userMessage = args.join(' ');
+    const isReset = userMessage.toLowerCase() === 'reset';
+
+    // ─── HANDLE RESET ───
+    if (isReset) {
+      const sessionKey = `nexusolabiba_${sessionId || from}`;
+      if (global.nexusOlabibaSessions) {
+        delete global.nexusOlabibaSessions[sessionKey];
+      }
+      return await sock.sendMessage(from, { 
+        text: `🧹 *Nexus Olabiba chat history cleared.*\nStart fresh with: ${prefix || '.'}nexusolabiba Hello` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `🤖 *Nexus Olabiba thinking...*` });
+
+    try {
+      // ─── BUILD API URL ───
+      const apiUrl = `https://prexzyapis.com/ai/olabiba?prompt=${encodeURIComponent(userMessage)}`;
+
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        },
+        signal: AbortSignal.timeout(30000)
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ─── CHECK STATUS ───
+      if (!data.status || data.statusCode !== 200) {
+        return await sock.sendMessage(from, { 
+          text: `❌ API Error: ${data.status || 'Unknown error'}` 
+        });
+      }
+
+      // ─── EXTRACT RESPONSE ───
+      let reply = data.response || 'No response received.';
+      const mood = data.mood || 'friendly';
+      const language = data.language || 'en';
+      const followups = data.followup_questions || [];
+      const service = data.service || 'Olabiba AI';
+
+      // ─── CLEAN UP RESPONSE ───
+      reply = reply.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+
+      // ─── FORMAT RESPONSE ───
+      let result = `🤖 *${service}:*\n\n${reply}`;
+      
+      if (followups.length > 0) {
+        result += `\n\n💡 *Follow-up questions:*\n`;
+        followups.forEach((q, i) => {
+          result += `${i + 1}. ${q}\n`;
+        });
+      }
+
+      result += `\n\n😊 *Mood:* ${mood} | 🌐 *Language:* ${language}`;
+
+      // ─── SEND REPLY ───
+      if (result.length > 4096) {
+        const chunks = result.match(/.{1,4000}/g) || [result];
+        for (let i = 0; i < chunks.length; i++) {
+          await sock.sendMessage(from, { 
+            text: i === 0 ? chunks[i] : `*(continued)*\n\n${chunks[i]}`
+          });
+        }
+      } else {
+        await sock.sendMessage(from, { text: result });
+      }
+
+      console.log(`✅ Nexus Olabiba response sent for: "${userMessage}"`);
+
+    } catch (error) {
+      console.error('Nexus Olabiba error:', error);
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not reach Olabiba AI.'}\n\n💡 Try:\n• ${prefix || '.'}nexusolabiba reset (clear history)\n• ${prefix || '.'}nexusolabiba Hello\n• Try again later` 
+      });
+    }
+  }
+});
+// nexus-qwen.js - Nexus Qwen AI Chatbot
+register({
+  name: 'nexusqwen',
+  aliases: ['nqwen', 'nq', 'qwenai', 'qwen3', 'nexusq'],
+  category: 'AI',
+  description: 'Chat with Qwen AI via Nexus (Alibaba's advanced model)',
+  async execute({ sock, from, msg, args, prefix, command, sessionId }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🤖 *Nexus Qwen AI*\n\nUsage: ${prefix || '.'}nexusqwen <message>\nExample: ${prefix || '.'}nexusqwen What is artificial intelligence?\n\n*Features:*\n• Qwen 3.7+ model\n• Advanced reasoning\n• Free to use\n\n*Aliases:* ${prefix || '.'}nqwen, ${prefix || '.'}nq, ${prefix || '.'}qwenai, ${prefix || '.'}qwen3, ${prefix || '.'}nexusq\n\n*Commands:*\n${prefix || '.'}nexusqwen reset — Clear conversation history` 
+      });
+    }
+
+    const userMessage = args.join(' ');
+    const isReset = userMessage.toLowerCase() === 'reset';
+
+    // ─── HANDLE RESET ───
+    if (isReset) {
+      const sessionKey = `nexusqwen_${sessionId || from}`;
+      if (global.nexusQwenSessions) {
+        delete global.nexusQwenSessions[sessionKey];
+      }
+      return await sock.sendMessage(from, { 
+        text: `🧹 *Nexus Qwen chat history cleared.*\nStart fresh with: ${prefix || '.'}nexusqwen Hello` 
+      });
+    }
+
+    await sock.sendMessage(from, { text: `🤖 *Nexus Qwen thinking...*` });
+
+    try {
+      // ─── BUILD API URL ───
+      const apiUrl = `https://prexzyapis.com/ai/qwen?prompt=${encodeURIComponent(userMessage)}`;
+
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        },
+        signal: AbortSignal.timeout(45000)
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ─── CHECK STATUS ───
+      if (!data.status || data.statusCode !== 200) {
+        return await sock.sendMessage(from, { 
+          text: `❌ API Error: ${data.status || 'Unknown error'}` 
+        });
+      }
+
+      // ─── EXTRACT RESPONSE ───
+      let reply = data.response || '';
+      const model = data.model || 'qwen3.7-plus';
+      const service = data.service || 'Qwen AI';
+
+      // ─── CHECK FOR EMPTY RESPONSE ───
+      if (!reply || reply.trim().length === 0) {
+        // Try with a more detailed prompt
+        const detailedPrompt = `Please respond to: ${userMessage}`;
+        const retryUrl = `https://prexzyapis.com/ai/qwen?prompt=${encodeURIComponent(detailedPrompt)}`;
+        
+        const retryRes = await fetch(retryUrl, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+        });
+
+        if (retryRes.ok) {
+          const retryData = await retryRes.json();
+          if (retryData.response && retryData.response.trim().length > 0) {
+            reply = retryData.response;
+          }
+        }
+
+        // If still empty, provide a fallback
+        if (!reply || reply.trim().length === 0) {
+          reply = `I received your message but couldn't generate a response. Please try a more detailed question.\n\n💡 Try:\n• Ask a specific question\n• Provide more context\n• Use ${prefix || '.'}nexusqwen reset to clear history`;
+        }
+      }
+
+      // ─── CLEAN UP RESPONSE ───
+      reply = reply.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+
+      // ─── FORMAT RESPONSE ───
+      let result = `🤖 *${service} (${model}):*\n\n${reply}`;
+
+      // ─── SEND REPLY ───
+      if (result.length > 4096) {
+        const chunks = result.match(/.{1,4000}/g) || [result];
+        for (let i = 0; i < chunks.length; i++) {
+          await sock.sendMessage(from, { 
+            text: i === 0 ? chunks[i] : `*(continued)*\n\n${chunks[i]}`
+          });
+        }
+      } else {
+        await sock.sendMessage(from, { text: result });
+      }
+
+      console.log(`✅ Nexus Qwen response sent for: "${userMessage}"`);
+
+    } catch (error) {
+      console.error('Nexus Qwen error:', error);
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not reach Qwen AI.'}\n\n💡 Try:\n• ${prefix || '.'}nexusqwen reset (clear history)\n• Ask a more detailed question\n• Try again later` 
+      });
+    }
+  }
+});
+// nexus-manga.js - Nexus Manga Chapter Reader
+register({
+  name: 'nexusmanga',
+  aliases: ['nmanga', 'nm', 'mangachap', 'manga'],
+  category: 'DOWNLOADER',
+  description: 'Fetch and read manga chapters from Komiku source',
+  async execute({ sock, from, msg, args, prefix, command, sessionId }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `📖 *Nexus Manga Reader*\n\nUsage: ${prefix || '.'}nexusmanga <chapter_id>\nExample: ${prefix || '.'}nexusmanga 1\n\n*Aliases:* ${prefix || '.'}nmanga, ${prefix || '.'}nm, ${prefix || '.'}mangachap\n\n*Note:* Fetches manga chapters from Komiku source.` 
+      });
+    }
+
+    const chapterId = args[0];
+    
+    await sock.sendMessage(from, { text: `📖 *Fetching manga chapter ${chapterId}...*` });
+
+    try {
+      // ─── BUILD API URL ───
+      const apiUrl = `https://prexzyapis.com/anime/manga-chapter?chapter_id=${encodeURIComponent(chapterId)}`;
+
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        },
+        signal: AbortSignal.timeout(60000)
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ─── CHECK STATUS ───
+      if (!data.status || data.statusCode !== 200) {
+        return await sock.sendMessage(from, { 
+          text: `❌ API Error: ${data.status || 'Unknown error'}` 
+        });
+      }
+
+      // ─── EXTRACT CHAPTER DATA ───
+      const chapterData = data.data || {};
+      const chapterNumber = chapterData.number || chapterId;
+      const source = chapterData.source || 'komiku';
+      const images = chapterData.chapterImages || [];
+
+      // ─── CHECK FOR EMPTY CHAPTER ───
+      if (!images || images.length === 0) {
+        return await sock.sendMessage(from, { 
+          text: `📖 *Chapter ${chapterNumber}*\n\n❌ No images found for this chapter.\n\n💡 Try a different chapter ID.\n• Source: ${source}\n• Chapter ID: ${chapterId}` 
+        });
+      }
+
+      // ─── SEND CHAPTER INFO ───
+      await sock.sendMessage(from, { 
+        text: `📖 *Chapter ${chapterNumber}*\n📚 Source: ${source}\n📊 Pages: ${images.length}\n\n⬇️ *Sending pages...*` 
+      });
+
+      // ─── SEND EACH PAGE ───
+      let sentCount = 0;
+      const maxPages = Math.min(images.length, 20); // WhatsApp limit
+
+      for (let i = 0; i < maxPages; i++) {
+        try {
+          const imgUrl = images[i];
+          if (imgUrl && imgUrl.startsWith('http')) {
+            await sock.sendMessage(from, {
+              image: { url: imgUrl },
+              caption: `📖 Page ${i + 1}/${images.length}`
+            });
+            sentCount++;
+            // Small delay to avoid rate limiting
+            await new Promise(r => setTimeout(r, 500));
+          }
+        } catch (imgErr) {
+          console.log(`❌ Failed to send page ${i + 1}:`, imgErr.message);
+        }
+      }
+
+      if (sentCount === 0) {
+        return await sock.sendMessage(from, { 
+          text: `❌ Failed to send any pages. The images may be unavailable.` 
+        });
+      }
+
+      // ─── FINAL STATUS ───
+      let statusMsg = `✅ *Sent ${sentCount} pages from Chapter ${chapterNumber}*`;
+      if (images.length > maxPages) {
+        statusMsg += `\n📌 *${images.length - maxPages} more pages available.*`;
+      }
+      statusMsg += `\n\n💡 Use ${prefix || '.'}nexusmanga <chapter_id> to read more.`;
+      
+      await sock.sendMessage(from, { text: statusMsg });
+
+      console.log(`✅ Manga chapter ${chapterNumber} sent (${sentCount} pages)`);
+
+    } catch (error) {
+      console.error('Nexus Manga error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not fetch manga chapter.'}\n\n💡 Try:\n• ${prefix || '.'}nexusmanga 1\n• A different chapter ID\n• Try again later` 
+      });
+    }
+  }
+});
+// nexus-reposearch.js - Nexus Repository Search
+register({
+  name: 'nexusreposearch',
+  aliases: ['nrs', 'repofind', 'searchrepos', 'githubsearch'],
+  category: 'TOOLS',
+  description: 'Search for code repositories using Prexzy API',
+  async execute({ sock, from, msg, args, prefix, command, sessionId }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `📂 *Nexus Repository Search*\n\nUsage: ${prefix || '.'}nexusreposearch <query>\nExample: ${prefix || '.'}nexusreposearch whatsapp-bot\n\n*Aliases:* ${prefix || '.'}nrs, ${prefix || '.'}repofind, ${prefix || '.'}searchrepos\n\n*Note:* Search requires a query parameter.` 
+      });
+    }
+
+    const query = args.join(' ');
+    
+    await sock.sendMessage(from, { text: `📂 *Searching repositories for:* ${query}` });
+
+    try {
+      // ─── BUILD API URL WITH QUERY PARAMETER ───
+      const apiUrl = `https://prexzyapis.com/search/repos?query=${encodeURIComponent(query)}`;
+
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        },
+        signal: AbortSignal.timeout(30000)
+      });
+
+      if (response.status === 400) {
+        return await sock.sendMessage(from, { 
+          text: `❌ *Search Error (400)*\n\nThe search query may be empty or invalid.\n\n💡 Try:\n• ${prefix || '.'}nexusreposearch whatsapp-bot\n• Use a specific keyword\n• Check spelling` 
+        });
+      }
+
+      if (!response.ok) {
+        throw new Error(`API returned HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ─── CHECK STATUS ───
+      if (!data.status || data.statusCode !== 200) {
+        return await sock.sendMessage(from, { 
+          text: `❌ API Error: ${data.status || 'Unknown error'}` 
+        });
+      }
+
+      // ─── EXTRACT REPO DATA ───
+      const repos = data.data || data.repos || data.results || [];
+      
+      // If data is a single object, wrap it in an array
+      const repoList = Array.isArray(repos) ? repos : [repos].filter(Boolean);
+
+      if (!repoList || repoList.length === 0) {
+        return await sock.sendMessage(from, { 
+          text: `📂 *No repositories found for:* "${query}"\n\n💡 Try:\n• Different keywords\n• Shorter query\n• ${prefix || '.'}nexusreposearch bot` 
+        });
+      }
+
+      // ─── SEND RESULTS ───
+      const maxResults = Math.min(repoList.length, 10);
+      
+      await sock.sendMessage(from, { 
+        text: `📂 *Found ${repoList.length} repository(s) for "${query}"*\n📤 Showing ${maxResults}...` 
+      });
+
+      for (let i = 0; i < maxResults; i++) {
+        const repo = repoList[i];
+        
+        // ─── EXTRACT REPO DETAILS ───
+        const name = repo.name || repo.full_name || repo.title || 'Unknown Repo';
+        const fullName = repo.full_name || repo.name || name;
+        const description = repo.description || repo.desc || 'No description available.';
+        const stars = repo.stars || repo.stargazers_count || repo.watchers || 'N/A';
+        const forks = repo.forks || repo.forks_count || 'N/A';
+        const language = repo.language || repo.primary_language || 'Unknown';
+        const url = repo.url || repo.html_url || repo.link || null;
+        const owner = repo.owner || repo.author || repo.username || 'Unknown';
+        const updatedAt = repo.updated_at || repo.last_updated || repo.updated || 'N/A';
+
+        // ─── BUILD DETAIL MESSAGE ───
+        let detailMsg = `📂 *${fullName}*\n\n`;
+        detailMsg += `👤 *Owner:* ${owner}\n`;
+        detailMsg += `📝 *Description:*\n${description.slice(0, 200)}${description.length > 200 ? '...' : ''}\n\n`;
+        detailMsg += `⭐ *Stars:* ${stars}\n`;
+        detailMsg += `🍴 *Forks:* ${forks}\n`;
+        detailMsg += `💻 *Language:* ${language}\n`;
+        detailMsg += `🕐 *Updated:* ${updatedAt}\n\n`;
+        if (url) detailMsg += `🔗 *URL:* ${url}\n`;
+
+        // ─── SEND RESULT ───
+        await sock.sendMessage(from, { text: detailMsg });
+
+        // Small delay between results
+        await new Promise(r => setTimeout(r, 300));
+      }
+
+      if (repoList.length > maxResults) {
+        await sock.sendMessage(from, { 
+          text: `📌 *${repoList.length - maxResults} more result(s) available.*\n💡 Try a more specific search.` 
+        });
+      }
+
+      console.log(`✅ Repo search complete: "${query}" (${repoList.length} results)`);
+
+    } catch (error) {
+      console.error('Nexus Repo Search error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not search repositories.'}\n\n💡 Try:\n• ${prefix || '.'}nexusreposearch whatsapp-bot\n• A different keyword\n• Check spelling` 
+      });
+    }
+  }
+});
+// nexus-mangasearch.js - Nexus Manga Search & Detail
+register({
+  name: 'nexusmangasearch',
+  aliases: ['nmsearch', 'nms', 'mangasearch', 'mangafind'],
+  category: 'DOWNLOADER',
+  description: 'Search and get details for manga titles from Komiku source',
+  async execute({ sock, from, msg, args, prefix, command, sessionId }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `📚 *Nexus Manga Search*\n\nUsage: ${prefix || '.'}nexusmangasearch <manga_title>\nExample: ${prefix || '.'}nexusmangasearch One Piece\n\n*Aliases:* ${prefix || '.'}nmsearch, ${prefix || '.'}nms, ${prefix || '.'}mangasearch\n\n*Features:*\n• Search manga titles\n• Get manga details\n• Source: Komiku` 
+      });
+    }
+
+    const query = args.join(' ');
+    
+    await sock.sendMessage(from, { text: `📚 *Searching for:* ${query}` });
+
+    try {
+      // ─── BUILD API URL ───
+      const apiUrl = `https://prexzyapis.com/anime/manga-detail?query=${encodeURIComponent(query)}`;
+
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        },
+        signal: AbortSignal.timeout(30000)
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ─── CHECK STATUS ───
+      if (!data.status || data.statusCode !== 200) {
+        return await sock.sendMessage(from, { 
+          text: `❌ API Error: ${data.status || 'Unknown error'}` 
+        });
+      }
+
+      // ─── EXTRACT MANGA DATA ───
+      const mangaList = data.data || data.results || [];
+      
+      // If data is a single object, wrap it in an array
+      const results = Array.isArray(mangaList) ? mangaList : [mangaList].filter(Boolean);
+
+      // ─── CHECK FOR EMPTY RESULTS ───
+      if (!results || results.length === 0) {
+        return await sock.sendMessage(from, { 
+          text: `📚 *No results found for:* "${query}"\n\n💡 Try:\n• Different spelling\n• Shorter title\n• ${prefix || '.'}nexusmangasearch Naruto` 
+        });
+      }
+
+      // ─── SEND RESULTS ───
+      const maxResults = Math.min(results.length, 10);
+      
+      await sock.sendMessage(from, { 
+        text: `📚 *Found ${results.length} result(s) for "${query}"*\n📤 Showing ${maxResults}...` 
+      });
+
+      for (let i = 0; i < maxResults; i++) {
+        const manga = results[i];
+        
+        // ─── EXTRACT MANGA DETAILS ───
+        const title = manga.title || manga.name || manga.judul || 'Unknown Title';
+        const author = manga.author || manga.artist || manga.pengarang || 'Unknown';
+        const status = manga.status || manga.ongoing || 'Unknown';
+        const description = manga.description || manga.synopsis || manga.desc || 'No description available.';
+        const genres = manga.genres || manga.genre || manga.tags || [];
+        const thumbnail = manga.thumbnail || manga.cover || manga.image || manga.img || null;
+        const chapters = manga.chapters || manga.chapter_count || manga.total_chapters || 'N/A';
+        const rating = manga.rating || manga.score || manga.rate || 'N/A';
+        const url = manga.url || manga.link || manga.source_url || null;
+
+        // ─── FORMAT GENRES ───
+        let genreStr = '';
+        if (Array.isArray(genres)) {
+          genreStr = genres.slice(0, 5).join(', ');
+          if (genres.length > 5) genreStr += `, +${genres.length - 5} more`;
+        } else if (typeof genres === 'string') {
+          genreStr = genres;
+        }
+
+        // ─── BUILD DETAIL MESSAGE ───
+        let detailMsg = `📚 *${title}*\n\n`;
+        detailMsg += `✍️ *Author:* ${author}\n`;
+        detailMsg += `📊 *Status:* ${status}\n`;
+        detailMsg += `📖 *Chapters:* ${chapters}\n`;
+        detailMsg += `⭐ *Rating:* ${rating}\n`;
+        if (genreStr) detailMsg += `🏷️ *Genres:* ${genreStr}\n\n`;
+        detailMsg += `📝 *Description:*\n${description.slice(0, 300)}${description.length > 300 ? '...' : ''}\n\n`;
+        if (url) detailMsg += `🔗 *Source:* ${url}\n`;
+        detailMsg += `\n💡 Use ${prefix || '.'}nexusmanga <chapter_id> to read chapters.`;
+
+        // ─── SEND WITH THUMBNAIL ───
+        if (thumbnail && thumbnail.startsWith('http')) {
+          try {
+            await sock.sendMessage(from, {
+              image: { url: thumbnail },
+              caption: detailMsg
+            });
+          } catch (imgErr) {
+            await sock.sendMessage(from, { text: detailMsg });
+          }
+        } else {
+          await sock.sendMessage(from, { text: detailMsg });
+        }
+
+        // Small delay between results
+        await new Promise(r => setTimeout(r, 500));
+      }
+
+      if (results.length > maxResults) {
+        await sock.sendMessage(from, { 
+          text: `📌 *${results.length - maxResults} more result(s) available.*\n💡 Try a more specific search.` 
+        });
+      }
+
+      console.log(`✅ Manga search complete: "${query}" (${results.length} results)`);
+
+    } catch (error) {
+      console.error('Nexus Manga Search error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not search manga.'}\n\n💡 Try:\n• ${prefix || '.'}nexusmangasearch Naruto\n• A different title\n• Check spelling` 
+      });
+    }
+  }
+});
+// nexus-mangahome.js - Nexus Manga Home/Feed
+register({
+  name: 'nexusmangahome',
+  aliases: ['nmhome', 'nmh', 'mangahome', 'mangafeed', 'mangalist'],
+  category: 'DOWNLOADER',
+  description: 'Get the latest/popular manga list from Komiku',
+  async execute({ sock, from, msg, args, prefix, command, sessionId }) {
+    await sock.sendMessage(from, { text: `📚 *Fetching latest manga...*` });
+
+    try {
+      // ─── BUILD API URL ───
+      const apiUrl = `https://prexzyapis.com/anime/manga-home`;
+
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        },
+        signal: AbortSignal.timeout(30000)
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ─── CHECK STATUS ───
+      if (!data.status || data.statusCode !== 200) {
+        return await sock.sendMessage(from, { 
+          text: `❌ API Error: ${data.status || 'Unknown error'}` 
+        });
+      }
+
+      // ─── EXTRACT MANGA LIST ───
+      const mangaList = data.data || [];
+      
+      if (!mangaList || mangaList.length === 0) {
+        return await sock.sendMessage(from, { 
+          text: `❌ No manga found. Try again later.` 
+        });
+      }
+
+      // ─── SEND LIST ───
+      const maxResults = Math.min(mangaList.length, 15);
+      
+      let listMsg = `📚 *Latest Manga from Komiku*\n📊 Showing ${maxResults} titles\n\n`;
+
+      for (let i = 0; i < maxResults; i++) {
+        const manga = mangaList[i];
+        
+        const title = manga.title || 'Unknown Title';
+        const chapter = manga.latestChapterNumber || '?';
+        const readerInfo = manga.readerInfo || '';
+        const genres = manga.genres || [];
+        const genreStr = Array.isArray(genres) ? genres.slice(0, 3).join(', ') : '';
+        const description = manga.description || '';
+        const id = manga.id || '';
+
+        listMsg += `${i + 1}. *${title}*\n`;
+        listMsg += `   📖 Ch: ${chapter}\n`;
+        if (genreStr) listMsg += `   🏷️ ${genreStr}\n`;
+        if (readerInfo) listMsg += `   👥 ${readerInfo}\n`;
+        if (description) listMsg += `   📝 ${description.slice(0, 80)}${description.length > 80 ? '...' : ''}\n`;
+        listMsg += `   🔗 ID: ${id}\n\n`;
+      }
+
+      listMsg += `💡 Use ${prefix || '.'}nexusmangasearch <title> to search\n`;
+      listMsg += `💡 Use ${prefix || '.'}nexusmanga <chapter_id> to read`;
+
+      // ─── SEND LIST ───
+      if (listMsg.length > 4096) {
+        const chunks = listMsg.match(/.{1,4000}/g) || [listMsg];
+        for (let i = 0; i < chunks.length; i++) {
+          await sock.sendMessage(from, { 
+            text: i === 0 ? chunks[i] : `*(continued)*\n\n${chunks[i]}`
+          });
+        }
+      } else {
+        await sock.sendMessage(from, { text: listMsg });
+      }
+
+      console.log(`✅ Manga home list sent (${mangaList.length} titles)`);
+
+    } catch (error) {
+      console.error('Nexus Manga Home error:', error);
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not fetch manga list.'}\n\n💡 Try:\n• ${prefix || '.'}nexusmangahome\n• Try again later` 
+      });
+    }
+  }
+});
+// nexus-mistral.js - Nexus Mistral AI Chatbot
+register({
+  name: 'nexusmistral',
+  aliases: ['nmistral', 'nm', 'mistralai', 'nexusai'],
+  category: 'AI',
+  description: 'Chat with Mistral AI via Nexus (supports conversation context)',
+  async execute({ sock, from, msg, args, prefix, command, sessionId }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, { 
+        text: `🤖 *Nexus Mistral AI*\n\nUsage: ${prefix || '.'}nexusmistral <message>\nExample: ${prefix || '.'}nexusmistral What is AI?\n\n*Features:*\n• Maintains conversation context\n• Free to use\n• Web search enabled\n\n*Aliases:* ${prefix || '.'}nmistral, ${prefix || '.'}nm, ${prefix || '.'}mistralai, ${prefix || '.'}nexusai\n\n*Commands:*\n${prefix || '.'}nexusmistral reset — Clear conversation history` 
+      });
+    }
+
+    const userMessage = args.join(' ');
+    const isReset = userMessage.toLowerCase() === 'reset';
+
+    // ─── HANDLE RESET ───
+    if (isReset) {
+      const sessionKey = `nexusmistral_${sessionId || from}`;
+      if (global.nexusMistralSessions) {
+        delete global.nexusMistralSessions[sessionKey];
+      }
+      return await sock.sendMessage(from, { 
+        text: `🧹 *Nexus Mistral chat history cleared.*\nStart fresh with: ${prefix || '.'}nexusmistral Hello` 
+      });
+    }
+
+    // ─── GENERATE SESSION ID ───
+    const userSessionId = sessionId || from.split('@')[0];
+    const sessionKey = `nexusmistral_${userSessionId}`;
+
+    // ─── GET OR CREATE SESSION DATA ───
+    let chatId = null;
+    let sessionCookie = null;
+    
+    if (global.nexusMistralSessions && global.nexusMistralSessions[sessionKey]) {
+      const saved = global.nexusMistralSessions[sessionKey];
+      chatId = saved.chatId;
+      sessionCookie = saved.sessionCookie;
+    }
+
+    await sock.sendMessage(from, { text: `🤖 *Nexus Mistral thinking...*` });
+
+    try {
+      // ─── BUILD API URL ───
+      let apiUrl = `https://prexzyapis.com/ai/mistral?prompt=${encodeURIComponent(userMessage)}`;
+      if (chatId) {
+        apiUrl += `&chatId=${encodeURIComponent(chatId)}`;
+      }
+      if (sessionCookie) {
+        apiUrl += `&session=${encodeURIComponent(sessionCookie)}`;
+      }
+
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        },
+        signal: AbortSignal.timeout(45000)
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ─── CHECK STATUS ───
+      if (!data.status || data.statusCode !== 200) {
+        return await sock.sendMessage(from, { 
+          text: `❌ API Error: ${data.status || 'Unknown error'}` 
+        });
+      }
+
+      // ─── EXTRACT RESPONSE ───
+      const reply = data.response || 'No response received.';
+      const newChatId = data.chatId || null;
+      const newSessionCookie = data.session?.cookie || null;
+      const features = data.features || [];
+
+      // ─── SAVE SESSION DATA ───
+      if (newChatId && newSessionCookie) {
+        if (!global.nexusMistralSessions) global.nexusMistralSessions = {};
+        global.nexusMistralSessions[sessionKey] = {
+          chatId: newChatId,
+          sessionCookie: newSessionCookie
+        };
+      }
+
+      // ─── FORMAT RESPONSE ───
+      let result = `🤖 *Nexus Mistral AI:*\n\n${reply}`;
+      
+      if (features.length > 0) {
+        result += `\n\n⚡ *Features:* ${features.join(', ')}`;
+      }
+
+      // ─── SEND REPLY ───
+      if (result.length > 4096) {
+        const chunks = result.match(/.{1,4000}/g) || [result];
+        for (let i = 0; i < chunks.length; i++) {
+          await sock.sendMessage(from, { 
+            text: i === 0 ? chunks[i] : `*(continued)*\n\n${chunks[i]}`
+          });
+        }
+      } else {
+        await sock.sendMessage(from, { text: result });
+      }
+
+      console.log(`✅ Nexus Mistral response sent for: "${userMessage}"`);
+
+    } catch (error) {
+      console.error('Nexus Mistral error:', error);
+
+      // ─── FALLBACK: Try without session data ───
+      if (chatId || sessionCookie) {
+        try {
+          const fallbackUrl = `https://prexzyapis.com/ai/mistral?prompt=${encodeURIComponent(userMessage)}`;
+          const fallbackRes = await fetch(fallbackUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+          });
+
+          if (fallbackRes.ok) {
+            const fallbackData = await fallbackRes.json();
+            const fallbackReply = fallbackData.response;
+            if (fallbackReply) {
+              return await sock.sendMessage(from, { 
+                text: `🤖 *Nexus Mistral (Fallback):*\n\n${fallbackReply}` 
+              });
+            }
+          }
+        } catch (fallbackErr) {}
+      }
+
+      await sock.sendMessage(from, { 
+        text: `⚠️ Error: ${error.message || 'Could not reach Mistral AI.'}\n\n💡 Try:\n• ${prefix || '.'}nexusmistral reset (clear history)\n• ${prefix || '.'}nexusmistral Hello\n• Try again later` 
+      });
+    }
+  }
+});
 // ==========================================
 //               AI COMMANDS
 // ==========================================
@@ -10261,64 +11292,259 @@ register({
 });
 
 // -------------------- AIO (All-In-One Downloader) --------------------
+// -------------------- AIO (All-In-One Downloader) - Prexzy API --------------------
 register({
   name: 'aio',
-  aliases: ['alldl', 'universaldl'],
+  aliases: ['alldl', 'universaldl', 'prexzy'],
   category: 'DOWNLOADER',
-  description: 'Universal downloader (TikTok, IG, FB, Twitter, YouTube, etc.) via NexOracle aio1/2/3',
-  async execute({ sock, from, args, prefix, command }) {
+  description: 'Universal downloader using Prexzy API (TikTok, IG, FB, Twitter, YouTube, etc.)',
+  async execute({ sock, from, msg, args, prefix, command }) {
     if (!args[0]) {
       return sock.sendMessage(from, {
-        text: `🌐 *All-In-One Downloader*\n\nUsage: ${prefix}${command} <url>\nWorks with most major platforms (TikTok, Instagram, Facebook, Twitter/X, YouTube, and more).`
+        text: `🌐 *All-In-One Downloader (Prexzy)*\n\nUsage: ${prefix}${command} <url>\nWorks with most major platforms (TikTok, Instagram, Facebook, Twitter/X, YouTube, and more).`
       });
     }
 
     const url = args[0];
-    await sock.sendMessage(from, { text: '🌐 Processing link...' });
-
-    const endpoints = ['aio1', 'aio2', 'aio3'];
-    let data = null;
-    let lastErr = null;
-
-    for (const ep of endpoints) {
-      try {
-        data = await fetchNexoracleFallback(ep, url);
-        if (data) break;
-      } catch (err) {
-        lastErr = err;
-        console.log(`[AIO] ${ep} failed:`, err.message);
-      }
-    }
-
-    if (!data) {
-      return sock.sendMessage(from, { text: `❌ All sources failed: ${lastErr?.message || 'unknown error'}` });
-    }
+    await sock.sendMessage(from, { text: '⏳ Processing link via Prexzy API...' });
 
     try {
-      const result = data.result || data;
+      // ─── PREXZY API CALL ───
+      const apiUrl = `https://prexzyapis.com/download/aiov2?url=${encodeURIComponent(url)}`;
+      console.log('[AIO] Fetching:', apiUrl);
 
-      const videoUrl = result.video || result.video_url || result.download_url
-        || (Array.isArray(result.videos) && result.videos[0]?.url);
-      const imageUrls = Array.isArray(result.images) ? result.images
-        : Array.isArray(result.photos) ? result.photos
-        : (result.image ? [result.image] : []);
-      const audioUrl = result.audio || result.audio_url;
-      const title = (result.title || result.caption || 'Downloaded Media').toString().slice(0, 150);
+      const response = await fetch(apiUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        },
+        signal: AbortSignal.timeout(30000)
+      });
 
-      if (videoUrl) {
-        await sock.sendMessage(from, { video: { url: videoUrl }, caption: `🌐 *${title}*` });
-      } else if (imageUrls.length) {
-        for (const img of imageUrls.slice(0, 10)) {
-          await sock.sendMessage(from, { image: { url: img }, caption: `🌐 *${title}*` });
-        }
-      } else if (audioUrl) {
-        await sock.sendMessage(from, { audio: { url: audioUrl }, mimetype: 'audio/mpeg', fileName: `${title}.mp3` });
-      } else {
-        await sock.sendMessage(from, { text: `❌ Could not extract media from response:\n${JSON.stringify(data, null, 2).slice(0, 400)}` });
+      if (!response.ok) {
+        throw new Error(`API returned HTTP ${response.status}`);
       }
+
+      const data = await response.json();
+
+      // ─── EXTRACT MEDIA DATA ───
+      let videoUrl = null;
+      let imageUrls = [];
+      let audioUrl = null;
+      let title = 'Downloaded Media';
+      let thumbnail = null;
+
+      // Try different response structures from Prexzy
+      if (data.result) {
+        videoUrl = data.result.video || data.result.download_url || data.result.url || null;
+        imageUrls = data.result.images || data.result.photos || [];
+        audioUrl = data.result.audio || data.result.audio_url || null;
+        title = data.result.title || data.result.caption || 'Downloaded Media';
+        thumbnail = data.result.thumbnail || data.result.thumb || null;
+      } else if (data.video) {
+        videoUrl = data.video;
+        title = data.title || 'Downloaded Media';
+        thumbnail = data.thumbnail || null;
+      } else if (data.images) {
+        imageUrls = data.images;
+        title = data.title || 'Downloaded Media';
+        thumbnail = data.thumbnail || (imageUrls[0] || null);
+      } else if (data.url) {
+        videoUrl = data.url;
+        title = data.title || 'Downloaded Media';
+        thumbnail = data.thumbnail || null;
+      } else if (data.download_url) {
+        videoUrl = data.download_url;
+        title = data.title || 'Downloaded Media';
+        thumbnail = data.thumbnail || null;
+      } else if (data.image) {
+        imageUrls = [data.image];
+        title = data.title || 'Downloaded Media';
+        thumbnail = data.thumbnail || data.image;
+      } else {
+        // Try to find any URL in the response
+        const jsonString = JSON.stringify(data);
+        const videoMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp4|mov)/i);
+        const imageMatch = jsonString.match(/https?:\/\/[^\s"']+\.(jpg|jpeg|png|gif)/gi);
+        const audioMatch = jsonString.match(/https?:\/\/[^\s"']+\.(mp3|m4a|wav)/i);
+        
+        if (videoMatch) videoUrl = videoMatch[0];
+        else if (imageMatch) imageUrls = imageMatch;
+        else if (audioMatch) audioUrl = audioMatch[0];
+      }
+
+      // ─── SEND PREVIEW ───
+      if (thumbnail) {
+        try {
+          await sock.sendMessage(from, {
+            image: { url: thumbnail },
+            caption: `📥 *${title.slice(0, 80)}${title.length > 80 ? '...' : ''}*\n\n⬇️ *Downloading media...*`
+          });
+        } catch (_) {
+          await sock.sendMessage(from, { 
+            text: `📥 *${title.slice(0, 80)}${title.length > 80 ? '...' : ''}*\n\n⬇️ *Downloading media...*` 
+          });
+        }
+      }
+
+      let mediaSent = false;
+
+      // ─── SEND VIDEO ───
+      if (videoUrl) {
+        try {
+          const videoResponse = await fetch(videoUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              'Accept': 'video/mp4,video/webm,*/*;q=0.9',
+              'Range': 'bytes=0-'
+            },
+            signal: AbortSignal.timeout(120000)
+          });
+
+          if (videoResponse.ok) {
+            const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
+            if (videoBuffer.length > 5000) {
+              const fileSize = (videoBuffer.length / 1024 / 1024).toFixed(1);
+              const caption = `🎬 *${title.slice(0, 80)}${title.length > 80 ? '...' : ''}*\n📦 *Size:* ${fileSize} MB\n📡 *Source:* Prexzy API\n\n✅ *Download Success*`;
+
+              if (videoBuffer.length > 16 * 1024 * 1024) {
+                await sock.sendMessage(from, {
+                  document: videoBuffer,
+                  mimetype: 'video/mp4',
+                  fileName: `download_${Date.now()}.mp4`,
+                  caption: `🎬 *${title.slice(0, 80)}${title.length > 80 ? '...' : ''}*\n📦 *Size:* ${fileSize} MB\n\n⚠️ *Sent as document (16MB limit)*`
+                });
+              } else {
+                await sock.sendMessage(from, {
+                  video: videoBuffer,
+                  mimetype: 'video/mp4',
+                  caption: caption
+                });
+              }
+              mediaSent = true;
+            }
+          }
+        } catch (videoErr) {
+          console.log('[AIO] Video download failed:', videoErr.message);
+        }
+      }
+
+      // ─── SEND AUDIO ───
+      if (audioUrl && !mediaSent) {
+        try {
+          const audioResponse = await fetch(audioUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            },
+            signal: AbortSignal.timeout(60000)
+          });
+
+          if (audioResponse.ok) {
+            const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+            if (audioBuffer.length > 5000) {
+              await sock.sendMessage(from, {
+                audio: audioBuffer,
+                mimetype: 'audio/mpeg',
+                fileName: `${title.replace(/[^a-zA-Z0-9]/g, '_')}.mp3`,
+                caption: `🎵 *${title.slice(0, 80)}${title.length > 80 ? '...' : ''}*\n📡 *Source:* Prexzy API\n\n✅ *Download Success*`
+              });
+              mediaSent = true;
+            }
+          }
+        } catch (audioErr) {
+          console.log('[AIO] Audio download failed:', audioErr.message);
+        }
+      }
+
+      // ─── SEND IMAGES ───
+      if (imageUrls.length > 0 && !mediaSent) {
+        const maxImages = Math.min(imageUrls.length, 10);
+        let sentCount = 0;
+
+        for (let i = 0; i < maxImages; i++) {
+          try {
+            const imgUrl = imageUrls[i];
+            if (imgUrl && typeof imgUrl === 'string' && imgUrl.startsWith('http')) {
+              if (imgUrl.includes('.mp4') || imgUrl.includes('.mov')) continue;
+
+              const imgCaption = i === 0 
+                ? `🖼️ *${title.slice(0, 80)}${title.length > 80 ? '...' : ''}*\n📡 *Source:* Prexzy API\n📷 Image ${i+1}/${imageUrls.length}\n\n✅ *Download Success*`
+                : `📷 Image ${i+1}/${imageUrls.length}`;
+
+              await sock.sendMessage(from, {
+                image: { url: imgUrl },
+                caption: imgCaption
+              });
+              sentCount++;
+              await new Promise(r => setTimeout(r, 500));
+            }
+          } catch (imgErr) {
+            console.log(`[AIO] Failed to send image ${i+1}:`, imgErr.message);
+          }
+        }
+
+        if (sentCount > 0) mediaSent = true;
+      }
+
+      // ─── FALLBACK: Send as document ───
+      if (!mediaSent && videoUrl) {
+        try {
+          const vRes = await fetch(videoUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+          });
+          const vBuf = Buffer.from(await vRes.arrayBuffer());
+          if (vBuf.length > 5000) {
+            await sock.sendMessage(from, {
+              document: vBuf,
+              mimetype: 'video/mp4',
+              fileName: `download_${Date.now()}.mp4`,
+              caption: `📥 *${title.slice(0, 80)}${title.length > 80 ? '...' : ''}*\n\n✅ *Download Success (document)*`
+            });
+            mediaSent = true;
+          }
+        } catch (docErr) {}
+      }
+
+      if (!mediaSent) {
+        await sock.sendMessage(from, { 
+          text: `❌ *Download Failed*\n\nCould not extract media from Prexzy API.\n\nRaw response:\n${JSON.stringify(data, null, 2).slice(0, 500)}` 
+        });
+      }
+
     } catch (error) {
       console.error('[AIO] Error:', error.message);
-      await sock.sendMessage(from, { text: `❌ Failed to process: ${error.message}` });
+
+      // ─── FALLBACK: Try NexOracle as backup ───
+      try {
+        await sock.sendMessage(from, { text: '⏳ Trying fallback API...' });
+        
+        const fallbackData = await fetchNexoracleFallback('aio1', url);
+        const result = fallbackData.result || fallbackData;
+
+        const videoUrl = result.video || result.video_url || result.download_url
+          || (Array.isArray(result.videos) && result.videos[0]?.url);
+        const imageUrls = Array.isArray(result.images) ? result.images
+          : Array.isArray(result.photos) ? result.photos
+          : (result.image ? [result.image] : []);
+        const audioUrl = result.audio || result.audio_url;
+        const title = (result.title || result.caption || 'Downloaded Media').toString().slice(0, 150);
+
+        if (videoUrl) {
+          await sock.sendMessage(from, { video: { url: videoUrl }, caption: `🌐 *${title}*` });
+        } else if (imageUrls.length) {
+          for (const img of imageUrls.slice(0, 10)) {
+            await sock.sendMessage(from, { image: { url: img }, caption: `🌐 *${title}*` });
+          }
+        } else if (audioUrl) {
+          await sock.sendMessage(from, { audio: { url: audioUrl }, mimetype: 'audio/mpeg', fileName: `${title}.mp3` });
+        } else {
+          throw new Error('Fallback also failed');
+        }
+      } catch (fallbackErr) {
+        await sock.sendMessage(from, { 
+          text: `❌ *Download Failed*\n\n${error.message || 'Could not download media.'}\n\n💡 Tips:\n• Make sure the URL is valid\n• Try a different link\n• Check if the platform is supported` 
+        });
+      }
     }
   }
 });
@@ -10356,30 +11582,29 @@ register({
     await sock.sendMessage(from, { text: `⏱ Uptime: ${formatUptime(Date.now() - START_TIME)}` });
   },
 });
-// playvideo.js - FINAL FIXED VERSION
-// playvideo.js - Video ONLY (no audio)
+// playvideo.js - Prexzy API YouTube Downloader
 register({
   name: 'playvideo',
-  aliases: ['playv', 'ytmp4', 'ytvideo', 'watch', 'vplay'],
+  aliases: ['playv', 'ytmp4', 'ytvideo', 'watch', 'vplay', 'prexzy'],
   category: 'DOWNLOADER',
-  description: 'Search and download YouTube videos as MP4 (video only)',
+  description: 'Search and download YouTube videos as MP4 using Prexzy API',
   async execute({ sock, from, msg, args, prefix, command }) {
     const text = args.join(' ');
     
     if (!text) {
       return await sock.sendMessage(from, { 
-        text: `🎬 Usage: ${prefix || '.'}playvideo <song name or URL>\nExample: ${prefix || '.'}playvideo Music Video 4K` 
+        text: `🎬 *Prexzy Video Downloader*\n\nUsage: ${prefix || '.'}playvideo <URL or search query>\nExample: ${prefix || '.'}playvideo https://youtu.be/wdJrTQJh1ZQ\n\n*Aliases:* ${prefix || '.'}playv, ${prefix || '.'}ytmp4, ${prefix || '.'}watch\n\n*Note:* Supports up to 8K video quality.` 
       });
     }
 
-    await sock.sendMessage(from, { text: `🔍 Searching video: ${text}` });
+    await sock.sendMessage(from, { text: `🔍 *Processing:* ${text}` });
 
     try {
       let videoUrl = text;
       let videoTitle = 'YouTube Video';
       let thumbnail = '';
       let duration = '';
-      let artist = '';
+      let uploader = '';
       let views = '';
 
       // ─── RESOLVE URL OR SEARCH ───
@@ -10393,7 +11618,7 @@ register({
               videoTitle = search.title || 'YouTube Video';
               thumbnail = search.thumbnail || '';
               duration = search.timestamp || search.duration || '';
-              artist = search.author?.name || search.author || '';
+              uploader = search.author?.name || search.author || '';
               views = search.views ? `${search.views.toLocaleString()} views` : '';
             }
           } catch (e) {}
@@ -10405,127 +11630,79 @@ register({
         if (!search?.videos?.length) {
           return await sock.sendMessage(from, { text: '❌ No video results found.' });
         }
-        // Pick highest quality video (filter by duration > 10s to avoid shorts)
         const videos = search.videos.filter(v => (v.durationSeconds || 0) > 10);
         const video = videos.length ? videos[0] : search.videos[0];
         videoUrl = video.url;
         videoTitle = video.title || 'YouTube Video';
         thumbnail = video.thumbnail || '';
         duration = video.timestamp || video.duration || '';
-        artist = video.author?.name || video.author || '';
+        uploader = video.author?.name || video.author || '';
         views = video.views ? `${video.views.toLocaleString()} views` : '';
       }
 
+      // ─── PREXZY API CALL ───
+      const apiUrl = `https://prexzyapis.com/download/ytmp4?url=${encodeURIComponent(videoUrl)}`;
+      
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        },
+        signal: AbortSignal.timeout(30000)
+      });
+
+      if (!response.ok) {
+        throw new Error(`Prexzy API returned HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // ─── CHECK STATUS ───
+      if (!data.status || data.statusCode !== 200) {
+        return await sock.sendMessage(from, { 
+          text: `❌ API Error: ${data.status || 'Unknown error'}` 
+        });
+      }
+
+      // ─── EXTRACT DATA ───
+      const info = data.info || {};
+      const downloadUrl = data.download_url || data.format?.download_url || null;
+      const quality = data.quality || data.format?.quality || 'Unknown';
+      const filesize = data.filesize || data.format?.filesize || 0;
+      const formatId = data.format_id || data.format?.format_id || 'N/A';
+      const resolution = data.format?.resolution || info.resolution || 'N/A';
+      
+      // Use API data over search data
+      const title = info.title || videoTitle;
+      const thumb = info.thumbnail || thumbnail;
+      const dur = info.duration_string || duration;
+      const uploaderName = info.uploader || uploader;
+      const viewCount = info.view_count ? `${info.view_count.toLocaleString()} views` : views;
+
+      if (!downloadUrl) {
+        return await sock.sendMessage(from, { 
+          text: `❌ No download URL found.\n\nRaw response:\n${JSON.stringify(data, null, 2).slice(0, 500)}` 
+        });
+      }
+
       // ─── SEND THUMBNAIL PREVIEW ───
-      if (thumbnail) {
+      if (thumb) {
         try {
           await sock.sendMessage(from, {
-            image: { url: thumbnail },
-            caption: `🎬 *${videoTitle}*\n${artist ? `👤 ${artist}\n` : ''}${duration ? `⏱️ ${duration}\n` : ''}${views ? `👁️ ${views}\n` : ''}\n⏳ Downloading video...`
+            image: { url: thumb },
+            caption: `🎬 *${title}*\n👤 ${uploaderName || 'Unknown'}\n⏱️ ${dur || 'N/A'}\n👁️ ${viewCount || 'N/A'}\n📊 Quality: ${quality}\n📦 Size: ${(filesize / 1024 / 1024).toFixed(1)} MB\n\n⬇️ Downloading video...`
           });
         } catch (e) {}
       }
 
-      // ─── VIDEO-ONLY API ENDPOINTS ───
-      let videoData = null;
-      const apis = [
-        { 
-          name: 'EliteProTech', 
-          url: `https://eliteprotech-apis.zone.id/ytmp4?url=${encodeURIComponent(videoUrl)}`,
-          extract: (d) => d?.result?.url || d?.result?.download_url || d?.download_url || d?.url || d?.video || d?.download
-        },
-        { 
-          name: 'David Cyril', 
-          url: `https://apis.davidcyril.name.ng/play?url=${encodeURIComponent(videoUrl)}&format=mp4`,
-          extract: (d) => d?.result?.url || d?.download_url || d?.url || d?.video
-        },
-        { 
-          name: 'Prince Tech', 
-          url: `https://api.princetechn.com/api/download/ytmp4?apikey=prince&url=${encodeURIComponent(videoUrl)}`,
-          extract: (d) => d?.result?.download_url || d?.download_url || d?.url
-        },
-        { 
-          name: 'OmegaTech', 
-          url: `https://api.omegatech.app/api/download/play?search=${encodeURIComponent(videoUrl)}`,
-          extract: (d) => d?.result?.url || d?.download || d?.url
-        },
-        { 
-          name: 'Vexa API', 
-          url: `https://api.vexa.tech/ytdl?url=${encodeURIComponent(videoUrl)}&format=video`,
-          extract: (d) => d?.video?.url || d?.download || d?.url
-        },
-        { 
-          name: 'Zeltrax Downloader', 
-          url: `https://zeltrax-api.vercel.app/ytmp4?url=${encodeURIComponent(videoUrl)}`,
-          extract: (d) => d?.video || d?.url || d?.download
-        },
-        {
-          name: 'NexOracle',
-          url: `https://api.nexoracle.com/downloader/yt-video?url=${encodeURIComponent(videoUrl)}${NEXORACLE_API_KEY ? `&apikey=${NEXORACLE_API_KEY}` : ''}`,
-          extract: (d) => d?.result?.download_url || d?.result?.url || d?.download_url || d?.url
-        }
-      ];
-
-      for (const api of apis) {
-        try {
-          const res = await fetch(api.url, { 
-            method: 'GET',
-            headers: { 
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-              'Accept': 'application/json'
-            },
-            signal: AbortSignal.timeout(15000)
-          });
-          
-          if (!res.ok) continue;
-          const data = await res.json();
-          const download = api.extract(data);
-          
-          if (download && typeof download === 'string' && download.startsWith('http')) {
-            videoData = { 
-              download, 
-              title: data?.result?.title || data?.title || videoTitle,
-              quality: data?.result?.quality || data?.quality || '720p'
-            };
-            break;
-          }
-        } catch (e) {
-          console.log(`❌ ${api.name} failed:`, e.message);
-        }
-      }
-
-      if (!videoData) {
-        // ─── FALLBACK: Direct ytdl-core (video only) ───
-        try {
-          const ytdl = require('ytdl-core');
-          const info = await ytdl.getInfo(videoUrl);
-          const format = ytdl.chooseFormat(info.formats, { 
-            quality: 'highestvideo',
-            filter: 'videoonly'
-          });
-          if (format && format.url) {
-            videoData = {
-              download: format.url,
-              title: info.videoDetails.title,
-              quality: format.qualityLabel || '720p'
-            };
-          }
-        } catch (e) {
-          console.log('❌ ytdl-core fallback failed:', e.message);
-        }
-      }
-
-      if (!videoData) {
-        return await sock.sendMessage(from, { text: '❌ All video download sources failed. Try a different video.' });
-      }
-
       // ─── FETCH VIDEO BUFFER ───
-      const videoRes = await fetch(videoData.download, {
+      const videoRes = await fetch(downloadUrl, {
         headers: { 
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Range': 'bytes=0-' // Force full download
+          'Range': 'bytes=0-'
         },
-        signal: AbortSignal.timeout(60000) // 60s timeout for large videos
+        signal: AbortSignal.timeout(120000)
       });
 
       if (!videoRes.ok) {
@@ -10540,9 +11717,9 @@ register({
 
       const fileSizeMB = (videoBuffer.length / 1024 / 1024).toFixed(1);
 
-      // ─── SEND VIDEO ONLY ───
-      const safeTitle = (videoData.title || 'video').replace(/[^\w\s-]/g, '').trim();
-      const caption = `🎬 *${videoData.title || videoTitle}*\n📦 Size: ${fileSizeMB} MB\n🎯 Quality: ${videoData.quality || 'Auto'}\n📹 Format: MP4 (Video Only)`;
+      // ─── SEND VIDEO ───
+      const safeTitle = (title || 'video').replace(/[^\w\s-]/g, '').trim();
+      const caption = `🎬 *${title}*\n📦 Size: ${fileSizeMB} MB\n🎯 Quality: ${quality}\n📹 Format: MP4\n📡 Source: Prexzy API\n🆔 Format: ${formatId}`;
 
       // If video > 16MB, send as document
       if (videoBuffer.length > 16 * 1024 * 1024) {
@@ -10553,9 +11730,9 @@ register({
           caption: `${caption}\n⚠️ Sent as document (WhatsApp 16MB limit)`,
           contextInfo: {
             externalAdReply: {
-              title: videoData.title || videoTitle,
-              body: `🎥 ${duration || 'Video'}`,
-              thumbnail: thumbnail ? await fetch(thumbnail).then(r => r.buffer()).catch(() => null) : null,
+              title: title,
+              body: `🎥 ${dur || 'Video'}`,
+              thumbnail: thumb ? await fetch(thumb).then(r => r.buffer()).catch(() => null) : null,
               mediaType: 2,
               renderLargerThumbnail: true
             }
@@ -10569,9 +11746,9 @@ register({
             caption: caption,
             contextInfo: {
               externalAdReply: {
-                title: videoData.title || videoTitle,
-                body: `🎥 ${duration || 'Video'}`,
-                thumbnail: thumbnail ? await fetch(thumbnail).then(r => r.buffer()).catch(() => null) : null,
+                title: title,
+                body: `🎥 ${dur || 'Video'}`,
+                thumbnail: thumb ? await fetch(thumb).then(r => r.buffer()).catch(() => null) : null,
                 mediaType: 2,
                 renderLargerThumbnail: true
               }
@@ -10588,13 +11765,54 @@ register({
         }
       }
 
-      // ─── LOG ───
-      console.log(`✅ Video sent: ${videoData.title} (${fileSizeMB}MB)`);
+      console.log(`✅ Prexzy video sent: ${title} (${fileSizeMB}MB, ${quality})`);
 
     } catch (err) {
-      console.error('Playvideo error:', err);
+      console.error('Prexzy playvideo error:', err);
+      
+      // ─── FALLBACK: Try ytdl-core ───
+      try {
+        await sock.sendMessage(from, { text: `⏳ Prexzy failed, trying fallback...` });
+        
+        const ytdl = require('ytdl-core');
+        const info = await ytdl.getInfo(videoUrl || text);
+        const format = ytdl.chooseFormat(info.formats, { 
+          quality: 'highestvideo',
+          filter: 'videoonly'
+        });
+        
+        if (format && format.url) {
+          const vRes = await fetch(format.url);
+          const vBuf = Buffer.from(await vRes.arrayBuffer());
+          
+          if (vBuf.length > 5000) {
+            const size = (vBuf.length / 1024 / 1024).toFixed(1);
+            const title = info.videoDetails.title || 'YouTube Video';
+            
+            if (vBuf.length > 16 * 1024 * 1024) {
+              await sock.sendMessage(from, {
+                document: vBuf,
+                mimetype: 'video/mp4',
+                fileName: `${title.replace(/[^\w\s-]/g, '').trim()}.mp4`,
+                caption: `🎬 *${title}*\n📦 ${size} MB\n⚠️ Sent as document (16MB limit)\n✅ Fallback download`
+              });
+            } else {
+              await sock.sendMessage(from, {
+                video: vBuf,
+                mimetype: 'video/mp4',
+                caption: `🎬 *${title}*\n📦 ${size} MB\n✅ Fallback download`
+              });
+            }
+            return;
+          }
+        }
+        throw new Error('Fallback failed');
+      } catch (fallbackErr) {
+        console.log('❌ Fallback failed:', fallbackErr.message);
+      }
+
       await sock.sendMessage(from, { 
-        text: `❌ Error: ${err.message || 'Unknown error'}\n${err.stack ? 'Check logs for details' : ''}` 
+        text: `❌ Error: ${err.message || 'Unknown error'}\n\n💡 Try a different video or use ${prefix || '.'}play` 
       });
     }
   }
