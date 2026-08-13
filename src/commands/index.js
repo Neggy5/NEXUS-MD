@@ -9,6 +9,14 @@ const {
   downloadContentFromMessage,
   downloadMediaMessage
 } = require('@whiskeysockets/baileys');
+const {
+  writePlugin,
+  writeFullModule,
+  loadPlugin,
+  loadAllPlugins,
+  removePlugin,
+  listPlugins,
+} = require('./pluginLoader');
 
 
 
@@ -22,6 +30,71 @@ const P_BASE = 'https://api.princetechn.com/api';
 /**
  * Helper to handle media downloads to reduce repetitive code
  */
+ // ==========================================
+//        CHANNEL REACTOR (rch / reactch)
+// ==========================================
+
+const axios = require('axios');
+
+class ReactChannel {
+  constructor(config) {
+    this.userJwt = config.userJwt;
+    this.siteKey = '6LemKk8sAAAAAH5PB3f1EspbMlXjtwv5C8tiMHSm';
+    this.backendUrl = 'https://back.asitha.top/api';
+
+    this.http = axios.create({
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.userJwt}`
+      },
+      timeout: 30000
+    });
+  }
+
+  async getRecaptchaToken() {
+    const { data } = await axios.get(
+      'https://omegatech-api.dixonomega.tech/api/tools/recaptcha-v3',
+      {
+        params: {
+          sitekey: this.siteKey,
+          url: 'https://back.asitha.top/api',
+          use_enterprise: 'false'
+        }
+      }
+    );
+
+    if (!data?.success || !data?.token) {
+      throw new Error('Recaptcha bypass failed: ' + (data?.message || 'No token returned'));
+    }
+
+    return data.token;
+  }
+
+  async getTempApiKey(token) {
+    const { data } = await this.http.post(
+      `${this.backendUrl}/user/get-temp-token`,
+      { recaptcha_token: token }
+    );
+
+    if (!data?.token) throw new Error('Temp API key failed');
+    return data.token;
+  }
+
+  async reactToPost(postLink, reacts) {
+    const recaptcha = await this.getRecaptchaToken();
+    const tempKey = await this.getTempApiKey(recaptcha);
+
+    const { data } = await this.http.post(
+      `${this.backendUrl}/channel/react-to-post?apiKey=${tempKey}`,
+      {
+        post_link: postLink,
+        reacts
+      }
+    );
+
+    return data;
+  }
+}
 const princeDownload = async (sock, from, url, path, type = 'video') => {
   try {
     await sock.sendMessage(from, { text: `📥 *Processing ${type}...* Please wait.` });
@@ -9772,7 +9845,63 @@ register({
     }
   }
 });
+register({
+  name: 'rch',
+  aliases: ['reactch', 'channelreact', 'cr'],
+  category: 'TOOLS',
+  description: 'React to a WhatsApp channel post with emojis',
+  async execute({ sock, from, msg, args, prefix, command }) {
+    if (!args[0]) {
+      return await sock.sendMessage(from, {
+        text: `⚡ *Channel Reactor*\n\nUsage: ${prefix}${command} <channel_link> <emoji1,emoji2>\n\nExample:\n${prefix}${command} https://whatsapp.com/channel/xxx 😭,🔥\n\n*Aliases:* ${prefix}reactch, ${prefix}channelreact, ${prefix}cr\n\n⚠️ Max 4 emojis allowed.`
+      });
+    }
 
+    await sock.sendMessage(from, { react: { text: '🕒', key: msg.key } });
+
+    try {
+      const input = args.join(' ');
+      const parts = input.split(' ');
+      const postLink = parts[0];
+      const reactsRaw = parts.slice(1).join(' ');
+
+      if (!postLink || !reactsRaw) {
+        return await sock.sendMessage(from, { text: '❌ Invalid format. Usage: rch <link> <emoji1,emoji2>' });
+      }
+
+      if (!postLink.includes('whatsapp.com/channel/')) {
+        return await sock.sendMessage(from, { text: '❌ Invalid WhatsApp channel link.' });
+      }
+
+      const emojis = reactsRaw
+        .split(',')
+        .map(e => e.trim())
+        .filter(Boolean);
+
+      if (!emojis.length) {
+        return await sock.sendMessage(from, { text: '❌ No emojis provided.' });
+      }
+
+      if (emojis.length > 4) {
+        return await sock.sendMessage(from, { text: '❌ Max 4 emojis allowed.' });
+      }
+
+      const client = new ReactChannel({
+        userJwt: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY5OGE2ZGI5MjVjMzUyOTcxZTIyYTdkNSIsImlhdCI6MTc3NTg1NzUyMCwiZXhwIjoxNzc2NDYyMzIwfQ.q7D6potY6cl3n-ZY8nQbetNFqPSl79aF5IIZ_QbtABc'
+      });
+
+      await client.reactToPost(postLink, emojis.join(','));
+
+      await sock.sendMessage(from, { react: { text: '✅', key: msg.key } });
+      await sock.sendMessage(from, { text: '🔥 Reactions sent successfully.' });
+
+    } catch (e) {
+      console.error('React Error:', e.response?.data || e.message);
+      await sock.sendMessage(from, { react: { text: '❌', key: msg.key } });
+      await sock.sendMessage(from, { text: `❌ Failed: ${e.response?.data?.message || e.message}` });
+    }
+  }
+});
 register({
   name: 'meme',
   aliases: ['memes', 'dank', 'funny'],
@@ -13244,5 +13373,148 @@ function memberActionCommand({ name, action, verb, pastTense, emoji }) {
 memberActionCommand({ name: 'promote', action: 'promote', verb: 'Promote', pastTense: 'promoted to admin', emoji: '⬆️' });
 memberActionCommand({ name: 'demote', action: 'demote', verb: 'Demote', pastTense: 'demoted to member', emoji: '⬇️' });
 memberActionCommand({ name: 'kick', action: 'remove', verb: 'Kick', pastTense: 'removed from the group', emoji: '👢' });
+
+// ==========================================
+//   ADD PLUGINS FROM WHATSAPP (no GitHub)
+// ==========================================
+register({
+  name: 'addplugin',
+  aliases: ['addcmd', 'newplugin'],
+  category: 'OWNER',
+  description: 'Add a new command straight from WhatsApp — no GitHub needed (owner only)',
+  async execute(ctx) {
+    const { sock, msg, from, args, text, quoted, prefix } = ctx;
+
+    if (!msg.key.fromMe) {
+      await sock.sendMessage(from, { text: '❌ Owner only.' });
+      return;
+    }
+
+    const name = args[0];
+    if (!name) {
+      await sock.sendMessage(from, {
+        text:
+          `📦 *Add a plugin from WhatsApp*\n\n` +
+          `*${prefix}addplugin <name>*\n<code on the next line(s)>\n\n` +
+          `Example:\n${prefix}addplugin hello\nawait sock.sendMessage(from, { text: 'Hi there!' });\n\n` +
+          `Or reply to a text message / .js file with the code and just send *${prefix}addplugin <name>*.\n\n` +
+          `Your code runs as the body of an async function with access to: sock, msg, from, sender, args, text, isGroup, quoted, prefix, command.\n\n` +
+          `⚠️ It runs with full bot privileges — only add code you trust.`,
+      });
+      return;
+    }
+
+    // Where's the code? Priority: a replied message > everything after the
+    // name on this same message.
+    let code = null;
+
+    if (quoted) {
+      const quotedText =
+        quoted.message?.conversation ||
+        quoted.message?.extendedTextMessage?.text ||
+        null;
+      if (quotedText) code = quotedText;
+
+      const doc = quoted.message?.documentMessage;
+      if (doc && !code) {
+        const stream = await downloadContentFromMessage(doc, 'document');
+        let buffer = Buffer.from([]);
+        for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+        code = buffer.toString('utf8');
+      }
+    }
+
+    if (!code) {
+      const firstLineEnd = text.indexOf('\n');
+      code = firstLineEnd !== -1 ? text.slice(firstLineEnd + 1) : '';
+    }
+
+    code = (code || '').trim();
+    if (!code) {
+      await sock.sendMessage(from, {
+        text: `❌ No code found. Put it on the next line, or reply to a text/.js message that has it.`,
+      });
+      return;
+    }
+
+    try {
+      // A forwarded/attached .js file usually already has its own
+      // "module.exports = {...}" — save it as-is. Otherwise treat what was
+      // typed as just the body of execute() and wrap it.
+      const isFullModule = /module\.exports\s*=/.test(code);
+      const filePath = isFullModule
+        ? writeFullModule(name, code)
+        : writePlugin({ name, body: code });
+
+      const mod = loadPlugin(filePath, register);
+
+      await sock.sendMessage(from, {
+        text: `✅ Plugin *${mod.name}* added and is live right now.\nTry: ${prefix}${mod.name}\n\nIt'll still be there after a bot restart.`,
+      });
+    } catch (err) {
+      await sock.sendMessage(from, { text: `❌ Failed to add plugin: ${err.message}` });
+    }
+  },
+});
+
+register({
+  name: 'delplugin',
+  aliases: ['delcmd', 'removeplugin'],
+  category: 'OWNER',
+  description: 'Remove a command that was added with .addplugin (owner only)',
+  async execute(ctx) {
+    const { sock, msg, from, args, prefix } = ctx;
+    if (!msg.key.fromMe) {
+      await sock.sendMessage(from, { text: '❌ Owner only.' });
+      return;
+    }
+    const name = args[0];
+    if (!name) {
+      await sock.sendMessage(from, { text: `Usage: ${prefix}delplugin <name>` });
+      return;
+    }
+    const removed = removePlugin(name);
+    if (!removed) {
+      await sock.sendMessage(from, { text: `❌ No custom plugin named *${name}* found.` });
+      return;
+    }
+    commands.delete(name.toLowerCase());
+    await sock.sendMessage(from, { text: `🗑️ Plugin *${name}* removed.` });
+  },
+});
+
+register({
+  name: 'plugins',
+  aliases: ['listplugins'],
+  category: 'OWNER',
+  description: 'List commands that were added with .addplugin (owner only)',
+  async execute(ctx) {
+    const { sock, msg, from, prefix } = ctx;
+    if (!msg.key.fromMe) {
+      await sock.sendMessage(from, { text: '❌ Owner only.' });
+      return;
+    }
+    const names = listPlugins();
+    if (!names.length) {
+      await sock.sendMessage(from, { text: `No custom plugins yet. Add one with ${prefix}addplugin <name>` });
+      return;
+    }
+    await sock.sendMessage(from, {
+      text: `📦 *Custom plugins* (${names.length})\n\n${names.map((n) => `▸ ${n}`).join('\n')}`,
+    });
+  },
+});
+
+// Load any plugins that were previously saved via .addplugin so they survive
+// a bot restart. Runs after every built-in command above is registered, so a
+// custom command sharing a name with a built-in will (intentionally) win.
+try {
+  const restored = loadAllPlugins(register);
+  if (restored.length) {
+    console.log(`[plugins] Restored ${restored.length} custom command(s): ${restored.join(', ')}`);
+  }
+} catch (err) {
+  console.error('[plugins] Failed to load custom plugins:', err.message);
+}
 
 module.exports = { commands, PREFIX, BOT_NAME, setAutoBio };
