@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#262220" />
+<title>NEXUS-MD · Console</title>
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="icons/icon-192.png" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="panel">
+
+    <!-- Top bar -->
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">⚡</span>
+        <span class="brand-name">NEXUS&#8209;MD</span>
+      </div>
+      <div class="clock" id="clock">--:--:--</div>
+    </header>
+    <div class="panel-hairline"></div>
+
+    <!-- Readout window (signature element) -->
+    <section class="readout" id="readout">
+      <div class="readout-corner tl"></div>
+      <div class="readout-corner tr"></div>
+      <div class="readout-corner bl"></div>
+      <div class="readout-corner br"></div>
+
+      <div class="readout-eyebrow">SESSION STATE</div>
+      <div class="readout-status" id="statusWord">UNCONFIGURED</div>
+
+      <svg class="trace" id="trace" viewBox="0 0 300 60" preserveAspectRatio="none">
+        <polyline id="tracePath" points="0,30 300,30" />
+      </svg>
+
+      <div class="readout-row">
+        <div class="readout-field">
+          <span class="field-label">NUMBER</span>
+          <span class="field-value" id="phoneValue">&mdash;</span>
+        </div>
+        <div class="readout-field">
+          <span class="field-label">UPTIME</span>
+          <span class="field-value" id="uptimeValue">&mdash;</span>
+        </div>
+      </div>
+      <div class="readout-row">
+        <div class="readout-field">
+          <span class="field-label">LAST POLL</span>
+          <span class="field-value" id="lastPollValue">&mdash;</span>
+        </div>
+        <div class="readout-field">
+          <span class="field-label">LATENCY</span>
+          <span class="field-value" id="latencyValue">&mdash;</span>
+        </div>
+      </div>
+    </section>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" id="refreshBtn">Check now</button>
+      <button class="btn" id="pairBtn">Open pairing page</button>
+    </div>
+
+    <!-- Setup -->
+    <section class="card" id="setupCard">
+      <button class="card-toggle" id="setupToggle" aria-expanded="true">
+        <span>SETUP</span>
+        <span class="chev" id="setupChev">&#9662;</span>
+      </button>
+      <div class="card-body" id="setupBody">
+        <p class="hint">Point this at your own Railway deployment and your own linked number. This console only reads status &mdash; it doesn't link new numbers.</p>
+        <label class="field">
+          <span>Railway URL</span>
+          <input type="url" id="baseUrlInput" placeholder="https://your-app.up.railway.app" autocomplete="off" />
+        </label>
+        <label class="field">
+          <span>Session ID (your number, digits only)</span>
+          <input type="text" id="sessionIdInput" placeholder="15551234567" autocomplete="off" inputmode="numeric" />
+        </label>
+        <div class="setup-actions">
+          <button class="btn btn-primary" id="saveConfigBtn">Save</button>
+          <span class="save-note" id="saveNote"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Command manifest -->
+    <section class="card">
+      <button class="card-toggle" id="cmdToggle" aria-expanded="false">
+        <span>COMMAND MANIFEST</span>
+        <span class="chev" id="cmdChev">&#9662;</span>
+      </button>
+      <div class="card-body collapsed" id="cmdBody">
+        <table class="manifest">
+          <thead>
+            <tr><th>Command</th><th>Category</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>.menu / .help</td><td>MAIN</td><td>Shows the full command list</td></tr>
+            <tr><td>.ping</td><td>MAIN</td><td>Latency check</td></tr>
+            <tr><td>.alive</td><td>MAIN</td><td>Bot status</td></tr>
+            <tr><td>.runtime</td><td>MAIN</td><td>Uptime</td></tr>
+            <tr><td>.jid</td><td>INFO</td><td>Get current chat JID</td></tr>
+            <tr><td>.owner</td><td>INFO</td><td>Owner contact</td></tr>
+            <tr><td>.source</td><td>INFO</td><td>About the bot</td></tr>
+            <tr><td>.sticker / .s</td><td>TOOLS</td><td>Convert an image/video to a sticker</td></tr>
+          </tbody>
+        </table>
+        <p class="hint">Prefix is configurable via the <code>PREFIX</code> env var on your deployment (default <code>.</code>).</p>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <span id="pollIntervalLabel">Polling every 20s</span>
+      <span class="dot-sep">&middot;</span>
+      <span>Reads only &mdash; no pairing data stored here</span>
+    </footer>
+
+  </div>
+
+<script src="app.js"></script>
+</body>
+</html>
