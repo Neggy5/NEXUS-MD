@@ -34,7 +34,7 @@ const P_BASE = 'https://api.princetechn.com/api';
 //        CHANNEL REACTOR (rch / reactch)
 // ==========================================
 
-const axios = require('axios');
+
 
 class ReactChannel {
   constructor(config) {
