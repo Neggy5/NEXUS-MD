@@ -8,7 +8,7 @@ const { isSenderAdmin } = require('../moderation');
 const {
   downloadContentFromMessage,
   downloadMediaMessage
-} = require('@whiskeysockets/baileys');
+} = require('zuko-baileys');
 const {
   writePlugin,
   writeFullModule,
@@ -33,8 +33,6 @@ const P_BASE = 'https://api.princetechn.com/api';
  // ==========================================
 //        CHANNEL REACTOR (rch / reactch)
 // ==========================================
-
-
 
 class ReactChannel {
   constructor(config) {
@@ -861,7 +859,7 @@ register({
     await sock.sendMessage(from, { text: '⏳ Converting to GIF...' });
 
     try {
-      const { downloadMediaMessage } = require('@whiskeysockets/baileys');
+      const { downloadMediaMessage } = require('zuko-baileys');
       
       let mediaBuffer = null;
       
@@ -973,7 +971,7 @@ register({
     await sock.sendMessage(from, { react: { text: '📤', key: msg.key } });
 
     try {
-      const { downloadMediaMessage } = require('@whiskeysockets/baileys');
+      const { downloadMediaMessage } = require('zuko-baileys');
 
       let mediaBuffer = null;
       try {
@@ -1330,9 +1328,11 @@ function buildRichMenuSections(commandPrefix) {
   };
 }
 
-// Builds and relays a native-flow interactive message: header image, body
-// text, two list buttons (categories as sections, commands as rows), and
-// an optional CTA URL button linking to the bot's channel.
+// Builds and sends a swipeable carousel rich menu: one card per category,
+// each with a description and a list-style button that opens that
+// category's command list. Falls back to the plain text/image menu if the
+// carousel send fails for any reason (e.g. an iOS-heavy chat where
+// native-flow rendering is unreliable — see zuko-baileys README).
 async function sendRichMenu({ sock, from, sessionId, prefix, name, isGroup }) {
   const commandPrefix = prefix || getGlobalSetting(sessionId, 'prefix') || PREFIX;
   const style = getGlobalSetting(sessionId, 'menuStyle') || DEFAULT_MENU_STYLE;
@@ -1342,19 +1342,51 @@ async function sendRichMenu({ sock, from, sessionId, prefix, name, isGroup }) {
     isGroup: Boolean(isGroup),
   });
 
-  // Rich/interactive buttons were intentionally removed from the main menu.
-  // Keep this command as a backwards-compatible text/image menu only.
+  const { left, right } = buildRichMenuSections(commandPrefix);
+  const allSections = [...left, ...right];
+
+  // One carousel card per category — each card lists that category's
+  // commands as its body text, plus a quick-reply button that re-sends
+  // the classic .menu (rich list rows aren't available inside a carousel
+  // card, so we keep the button as a simple "show full menu" shortcut).
+  const cards = allSections.slice(0, 10).map((section) => ({
+    title: section.title,
+    body: section.rows.map((r) => `• ${r.title}`).join('\n') || 'No commands in this category yet.',
+    buttons: [{ id: `${commandPrefix}menu`, text: '📋 Full menu', type: 'reply' }],
+  }));
+
   const menuImage = await getMenuImage();
-  if (menuImage) {
+
+  if (!cards.length) {
+    // No categories to show — fall back straight to the classic menu.
+    if (menuImage) return sock.sendMessage(from, { image: menuImage, caption: menu, ...channelContext() });
+    return sock.sendMessage(from, { text: menu, ...channelContext() });
+  }
+
+  try {
     await sock.sendMessage(from, {
-      image: menuImage,
-      caption: menu,
+      text: `${greeting()}, *${name}*! Swipe through the categories below 👇`,
+      footer: 'NEXUS-MD',
+      carousel: cards,
       ...channelContext(),
     });
-  } else {
-    await sock.sendMessage(from, { text: menu, ...channelContext() });
+  } catch (e) {
+    console.error('Rich menu carousel failed, falling back to text menu:', e.message);
+    if (menuImage) return sock.sendMessage(from, { image: menuImage, caption: menu, ...channelContext() });
+    return sock.sendMessage(from, { text: menu, ...channelContext() });
   }
 }
+
+register({
+  name: 'richmenu',
+  aliases: ['cmenu', 'carouselmenu'],
+  category: 'MAIN',
+  description: 'Swipeable carousel menu, one card per category',
+  async execute({ sock, from, sender, isGroup, sessionId, prefix, msg }) {
+    const name = msg?.pushName || sender.split('@')[0];
+    await sendRichMenu({ sock, from, sessionId, prefix, name, isGroup });
+  },
+});
 
 
 register({
@@ -4594,7 +4626,7 @@ register({
   async execute({ sock, from, args, prefix, command }) {
     if (!args[0]) {
       return await sock.sendMessage(from, { 
-        text: `🖼️ *Telegram Sticker Downloader*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://t.me/addstickers/StickerPackName\n\n*Supports:*\n• t.me/addstickers/... (sticker packs)\n• t.me/sticker/... (individual stickers)\n\n*Note:* Sends up to 10 stickers from the pack.` 
+        text: `🖼️ *Telegram Sticker Downloader*\n\nUsage: ${prefix}${command} <url>\nExample: ${prefix}${command} https://t.me/addstickers/StickerPackName\n\n*Supports:*\n• t.me/addstickers/... (sticker packs)\n• t.me/sticker/... (individual stickers)\n\n*Note:* Sends up to 10 stickers, all tagged as one pack — WhatsApp will offer "Add sticker pack" once a few arrive.` 
       });
     }
 
@@ -4712,20 +4744,19 @@ register({
 
           if (stickerBuffer.length < 100) continue;
 
-          // Determine if it's a sticker (webp) or image
-          const isWebp = filePath.endsWith('.webp');
+          // Wrap every sticker with the SAME pack/author metadata so WhatsApp
+          // recognizes them as one pack and offers "Add sticker pack" to the
+          // recipient, instead of sending disconnected individual stickers.
+          // No caption — real sticker packs don't caption each tile.
+          const wrapped = new Sticker(stickerBuffer, {
+            pack: packTitle,
+            author: BOT_NAME,
+            type: StickerTypes.FULL,
+            quality: 70,
+          });
+          const finalSticker = await wrapped.toBuffer();
 
-          if (isWebp) {
-            await sock.sendMessage(from, {
-              sticker: stickerBuffer,
-              caption: `🖼️ ${i+1}/${maxStickers}`
-            });
-          } else {
-            await sock.sendMessage(from, {
-              image: stickerBuffer,
-              caption: `🖼️ ${i+1}/${maxStickers}`
-            });
-          }
+          await sock.sendMessage(from, { sticker: finalSticker });
 
           sentCount++;
           await new Promise(r => setTimeout(r, 300));
@@ -4772,10 +4803,13 @@ register({
                 if (imgRes.ok) {
                   const imgBuf = Buffer.from(await imgRes.arrayBuffer());
                   if (imgBuf.length > 1000) {
-                    await sock.sendMessage(from, {
-                      image: imgBuf,
-                      caption: `🖼️ ${i+1}/${maxFallback} (fallback)`
+                    const wrapped = new Sticker(imgBuf, {
+                      pack: packName,
+                      author: BOT_NAME,
+                      type: StickerTypes.FULL,
+                      quality: 70,
                     });
+                    await sock.sendMessage(from, { sticker: await wrapped.toBuffer() });
                     fallbackCount++;
                     await new Promise(r => setTimeout(r, 400));
                   }
@@ -8919,7 +8953,7 @@ register({
     await sock.sendMessage(from, { text: '⏳ Converting sticker to image...' });
 
     try {
-      const { downloadMediaMessage } = require('@whiskeysockets/baileys');
+      const { downloadMediaMessage } = require('zuko-baileys');
       
       let mediaBuffer = null;
       
@@ -11165,7 +11199,7 @@ register({
   description: 'Post a group message/media as a WhatsApp Status update',
   async execute({ sock, from, sender, msg, args }) {
     const { isSenderAdmin } = require('../moderation');
-    const { downloadContentFromMessage, generateWAMessageFromContent } = require('@whiskeysockets/baileys');
+    const { downloadContentFromMessage, generateWAMessageFromContent } = require('zuko-baileys');
 
     let isReacting = false;
 
@@ -12157,7 +12191,7 @@ register({
       return;
     }
 
-    const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+    const { downloadContentFromMessage } = require('zuko-baileys');
     const stream = await downloadContentFromMessage(imageMsg || videoMsg, imageMsg ? 'image' : 'video');
     let buffer = Buffer.from([]);
     for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
@@ -12506,7 +12540,7 @@ register({
     }
 
     try {
-      const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+      const { downloadContentFromMessage } = require('zuko-baileys');
       const stream = await downloadContentFromMessage(imageMsg, 'image');
       let buffer = Buffer.from([]);
       for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
@@ -13328,7 +13362,7 @@ register({
       return;
     }
     try {
-      const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+      const { downloadContentFromMessage } = require('zuko-baileys');
       const stream = await downloadContentFromMessage(imageMsg, 'image');
       let buffer = Buffer.from([]);
       for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
