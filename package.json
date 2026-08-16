@@ -12,7 +12,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "7.0.0-rc14",
+    "zuko-baileys": "github:Neggy5/ZUKO-BAILEYS",
     "@hapi/boom": "^10.0.1",
     "express": "^4.19.2",
     "pino": "^9.3.2",
