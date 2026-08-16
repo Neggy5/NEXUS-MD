@@ -125,20 +125,27 @@ async function handleModeration(sock, m, sessionId) {
         }
       }
 
-      // --- Antilink (DELETE + KICK, silent) ---
+      // --- Antilink (DELETE + WARN + KICK) ---
       if (settings.antilink && LINK_RE.test(text)) {
         const admin = await isSenderAdmin(sock, from, sender);
         if (!admin) {
           // 1️⃣ Delete the message
           await sock.sendMessage(from, { delete: msg.key }).catch(() => {});
 
-          // 2️⃣ Kick the user — no reply sent either way
+          // 2️⃣ Send warning with kick notification
+          const warnMsg = `🔗 @${bareNumber(sender)} links are not allowed in this group!\n\n🚫 You have been removed for violating group rules.`;
+          await sock.sendMessage(from, {
+            text: warnMsg,
+            mentions: [sender],
+          });
+
+          // 3️⃣ Kick the user (SILENT - no extra text)
           try {
             await sock.groupParticipantsUpdate(from, [sender], 'remove');
             console.log(`✅ Kicked ${sender} from ${from} for sending a link`);
           } catch (kickErr) {
             console.log(`❌ Failed to kick ${sender}:`, kickErr.message);
-            // If kick fails, the message is still deleted
+            // If kick fails, message is still deleted and warning sent
           }
 
           return;

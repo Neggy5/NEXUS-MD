@@ -6,7 +6,7 @@ const {
   DisconnectReason,
   fetchLatestBaileysVersion,
   Browsers,
-} = require('@whiskeysockets/baileys');
+} = require('zuko-baileys');
 const { Boom } = require('@hapi/boom');
 const logger = require('./logger');
 const { handleMessage } = require('./bot');
