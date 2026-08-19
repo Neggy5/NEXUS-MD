@@ -13551,4 +13551,94 @@ try {
   console.error('[plugins] Failed to load custom plugins:', err.message);
 }
 
+// ==========================================
+//   MOVIE / TV / ANIME / LIVE TV / MATCHES (DaraTech)
+// ==========================================
+const movieCommand = require('./movie');
+const { SUBCOMMANDS: MOVIE_SUBCOMMANDS } = movieCommand;
+
+// The movie module was written for a dispatcher that resolves a single
+// "subcommand" key (e.g. 'details:movie') from either a two-word phrase
+// ("movie details") or a bare command ("movietrailer"). Here every command
+// is registered under its own name, so we rebuild that same resolution from
+// the *actually typed* command word (ctx.command) plus its first arg.
+function resolveMovieSubcommand(cmdName, args) {
+  const twoWord = args[0] ? `${cmdName} ${args[0]}`.toLowerCase() : null;
+  if (twoWord && MOVIE_SUBCOMMANDS[twoWord]) {
+    return { subcommand: MOVIE_SUBCOMMANDS[twoWord], rest: args.slice(1) };
+  }
+  if (MOVIE_SUBCOMMANDS[cmdName]) {
+    return { subcommand: MOVIE_SUBCOMMANDS[cmdName], rest: args };
+  }
+  return { subcommand: null, rest: args };
+}
+
+function registerMovieCmd(name, aliases, description) {
+  register({
+    name,
+    aliases,
+    category: 'DOWNLOADER',
+    description,
+    async execute(ctx) {
+      const { sock, from, msg, args, command } = ctx;
+      const { subcommand, rest } = resolveMovieSubcommand(command, args);
+      return movieCommand(sock, from, msg, rest, subcommand);
+    },
+  });
+}
+
+registerMovieCmd('movie', [], 'Search movies — or: movie details/dl/episodes <id>');
+registerMovieCmd('tv', [], 'Search TV shows — or: tv details/dl/episodes <id>');
+registerMovieCmd('anime', [], 'Search anime — or: anime details/dl/episodes <id>');
+registerMovieCmd('kids', [], 'Search kids titles — or: kids details/dl/episodes <id>');
+registerMovieCmd('ugandan', [], 'Search Ugandan VJ titles — or: ugandan details/dl/episodes/vj <id>');
+
+registerMovieCmd('movietrailer', ['trailer'], 'Get a movie trailer');
+registerMovieCmd('moviecast', [], 'Get movie cast');
+registerMovieCmd('movierelated', [], 'Get related movies');
+registerMovieCmd('moviecaptions', ['moviesub'], 'Get movie captions/subtitles');
+registerMovieCmd('moviestills', [], 'Get movie stills');
+registerMovieCmd('moviefull', [], 'Get full universal details by ID');
+registerMovieCmd('moviehome', [], 'Movie homepage highlights');
+registerMovieCmd('moviefilter', [], 'Filter movies by genre');
+
+registerMovieCmd('tvtrailer', [], 'Get a TV show trailer');
+registerMovieCmd('tvcast', [], 'Get TV show cast');
+registerMovieCmd('tvrelated', [], 'Get related TV shows');
+registerMovieCmd('tvcaptions', [], 'Get TV captions/subtitles');
+registerMovieCmd('tvstills', [], 'Get TV stills');
+registerMovieCmd('tvnew', [], 'New TV shows');
+
+registerMovieCmd('animetrailer', [], 'Get an anime trailer');
+registerMovieCmd('animerelated', [], 'Get related anime');
+registerMovieCmd('animecaptions', [], 'Get anime captions/subtitles');
+registerMovieCmd('animenew', [], 'New anime');
+
+registerMovieCmd('kidsrelated', [], 'Get related kids titles');
+registerMovieCmd('kidscaptions', [], 'Get kids captions/subtitles');
+registerMovieCmd('kidstrailer', [], 'Get a kids title trailer');
+
+registerMovieCmd('ugandanvjs', [], 'List available Ugandan VJs');
+registerMovieCmd('ugandanlatest', [], 'Latest Ugandan VJ titles');
+
+registerMovieCmd('actor', [], 'Search titles by actor name');
+
+registerMovieCmd('trending', [], 'Trending movies');
+registerMovieCmd('popular', [], 'Popular movies');
+registerMovieCmd('upcoming', [], 'New movies');
+registerMovieCmd('topmovies', [], 'Top-rated movies');
+
+registerMovieCmd('livetv', ['tvchannel', 'channels', 'live'], 'Browse live TV channels');
+registerMovieCmd('livetvsearch', ['livesearch'], 'Search live TV channels');
+registerMovieCmd('livetvstream', ['livestream'], 'Get a live TV stream link');
+
+registerMovieCmd('matchlive', [], 'Live football matches');
+registerMovieCmd('matchupcoming', [], 'Upcoming football matches');
+registerMovieCmd('matchended', [], 'Recently ended football matches');
+registerMovieCmd('matchleagues', [], 'List football leagues');
+registerMovieCmd('matchstream', [], 'Get a football match stream link');
+registerMovieCmd('matchdetails', [], 'Get football match details');
+
+registerMovieCmd('more', [], 'Continue to the next page of the last movie/TV/anime list');
+
 module.exports = { commands, PREFIX, BOT_NAME, setAutoBio };
