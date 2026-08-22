@@ -13,10 +13,15 @@ const { ANTICALL_ENABLED, DEFAULT_PREFIX, DEFAULT_MENU_STYLE } = require('./conf
 let Database;
 try {
   Database = require('better-sqlite3');
-} catch {
+} catch (err) {
   console.error(
-    '[store] better-sqlite3 not found. Run:  npm install better-sqlite3\n' +
-    '        and add it to package.json dependencies.'
+    '[store] Failed to load better-sqlite3:\n' +
+    `        ${err.message}\n` +
+    '        If this says "Cannot find module", run:  npm install\n' +
+    '        If this mentions an ELF header / architecture / bindings error, the\n' +
+    '        native addon was built for a different platform than it is running on —\n' +
+    '        on Railway this usually means a stale build cache: redeploy with\n' +
+    '        "Clear build cache" (or bump a trivial change) to force a clean rebuild.'
   );
   process.exit(1);
 }
