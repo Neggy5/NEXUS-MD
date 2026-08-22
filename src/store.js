@@ -1,82 +1,93 @@
-const fs = require('fs');
+/**
+ * store.js — SQLite-backed persistence (replaces flat JSON files).
+ *
+ * Railway note: mount a Volume at /data so this file survives redeploys.
+ * Add  DATABASE_PATH=/data/nexus.db  to your Railway env vars (optional —
+ * the default is already /data/nexus.db).
+ */
+
 const path = require('path');
 const { ANTICALL_ENABLED, DEFAULT_PREFIX, DEFAULT_MENU_STYLE } = require('./config');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-const SETTINGS_FILE = path.join(DATA_DIR, 'group-settings.json');
-
-let settings = {};
+// ---- Lazy-load better-sqlite3 so the import error is readable ----
+let Database;
 try {
-  settings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+  Database = require('better-sqlite3');
 } catch {
-  settings = {};
+  console.error(
+    '[store] better-sqlite3 not found. Run:  npm install better-sqlite3\n' +
+    '        and add it to package.json dependencies.'
+  );
+  process.exit(1);
 }
 
-let saveTimer = null;
-function persist() {
-  // Debounce writes so a burst of toggles doesn't hammer the disk.
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    fs.writeFile(SETTINGS_FILE, JSON.stringify(settings, null, 2), (err) => {
-      if (err) console.error('settings save failed:', err.message);
-    });
-  }, 250);
-}
+const DB_PATH = process.env.DATABASE_PATH || path.join('/data', 'nexus.db');
 
+// Ensure /data directory exists (Railway volume or local dev)
+const fs = require('fs');
+const dbDir = path.dirname(DB_PATH);
+if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
+
+const db = new Database(DB_PATH);
+
+// WAL mode for concurrent reads and safer writes
+db.pragma('journal_mode = WAL');
+
+// ---- Schema ----
+db.exec(`
+  CREATE TABLE IF NOT EXISTS group_settings (
+    jid       TEXT PRIMARY KEY,
+    settings  TEXT NOT NULL DEFAULT '{}'
+  );
+
+  CREATE TABLE IF NOT EXISTS account_settings (
+    session_id  TEXT PRIMARY KEY,
+    settings    TEXT NOT NULL DEFAULT '{}'
+  );
+`);
+
+// ---- Prepared statements ----
+const stmts = {
+  getGroup:    db.prepare('SELECT settings FROM group_settings WHERE jid = ?'),
+  setGroup:    db.prepare('INSERT INTO group_settings (jid, settings) VALUES (?, ?) ON CONFLICT(jid) DO UPDATE SET settings = excluded.settings'),
+  getAccount:  db.prepare('SELECT settings FROM account_settings WHERE session_id = ?'),
+  setAccount:  db.prepare('INSERT INTO account_settings (session_id, settings) VALUES (?, ?) ON CONFLICT(session_id) DO UPDATE SET settings = excluded.settings'),
+};
+
+// ---- GROUP DEFAULTS — antidelete & antiedit default OFF (user must enable) ----
 const GROUP_DEFAULTS = {
-  antidelete: true,
-  antiedit: true,
-  antisticker: false,
-  antigroupmention: false,
-  antilink: false,
+  antidelete:        false,
+  antiedit:          false,
+  antisticker:       false,
+  antigroupmention:  false,
+  antilink:          false,
 };
 
 function getGroupSettings(jid) {
-  if (!settings[jid]) settings[jid] = { ...GROUP_DEFAULTS };
-  return settings[jid];
+  const row = stmts.getGroup.get(jid);
+  const saved = row ? JSON.parse(row.settings) : {};
+  return { ...GROUP_DEFAULTS, ...saved };
 }
 
 function setGroupSetting(jid, key, value) {
-  const s = getGroupSettings(jid);
-  s[key] = value;
-  persist();
+  const current = getGroupSettings(jid);
+  current[key] = value;
+  stmts.setGroup.run(jid, JSON.stringify(current));
 }
 
-// ---- Account-level (per-session) toggles, e.g. mode, anticall, autoreact ----
-// Keyed by sessionId so each linked account has its own settings — this used
-// to be a single flat object shared by every user, which broke multi-user use
-// and also crashed `.mode` (called as getGlobalSetting(sessionId, key) against
-// a function that only took one argument).
-const ACCOUNT_SETTINGS_FILE = path.join(DATA_DIR, 'account-settings.json');
-let accountSettings = {};
-try {
-  accountSettings = JSON.parse(fs.readFileSync(ACCOUNT_SETTINGS_FILE, 'utf8'));
-} catch {
-  accountSettings = {};
-}
-
-let accountSaveTimer = null;
-function persistAccount() {
-  clearTimeout(accountSaveTimer);
-  accountSaveTimer = setTimeout(() => {
-    fs.writeFile(ACCOUNT_SETTINGS_FILE, JSON.stringify(accountSettings, null, 2), (err) => {
-      if (err) console.error('account settings save failed:', err.message);
-    });
-  }, 250);
-}
-
+// ---- ACCOUNT DEFAULTS ----
 const ACCOUNT_DEFAULTS = {
-  mode: 'public',
-  anticall: ANTICALL_ENABLED,
+  mode:      'public',
+  anticall:  ANTICALL_ENABLED,
   autoreact: false,
-  prefix: DEFAULT_PREFIX,
+  prefix:    DEFAULT_PREFIX,
   menuStyle: DEFAULT_MENU_STYLE,
 };
 
 function getAccountSettings(sessionId) {
-  if (!accountSettings[sessionId]) accountSettings[sessionId] = { ...ACCOUNT_DEFAULTS };
-  return accountSettings[sessionId];
+  const row = stmts.getAccount.get(sessionId);
+  const saved = row ? JSON.parse(row.settings) : {};
+  return { ...ACCOUNT_DEFAULTS, ...saved };
 }
 
 function getGlobalSetting(sessionId, key) {
@@ -85,14 +96,12 @@ function getGlobalSetting(sessionId, key) {
 }
 
 function setGlobalSetting(sessionId, key, value) {
-  const s = getAccountSettings(sessionId);
-  s[key] = value;
-  persistAccount();
+  const current = getAccountSettings(sessionId);
+  current[key] = value;
+  stmts.setAccount.run(sessionId, JSON.stringify(current));
 }
 
-// ---- Short-lived cache of recent messages, keyed by message id ----
-// Used only to show what a deleted/edited message said. Capped and cleared
-// on a rolling basis so it never grows into a permanent message log.
+// ---- Short-lived in-memory message cache (antidelete / antiedit) ----
 const MAX_CACHE = 1500;
 const messageCache = new Map();
 

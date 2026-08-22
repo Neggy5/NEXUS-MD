@@ -207,7 +207,9 @@ function startTelegramBot() {
       }
 
       await bot.sendMessage(chatId, [
-        `Your pairing code: *${result.pairingCode}*`,
+        `Your pairing code: \`${result.pairingCode}\``,
+        '',
+        '👆 Tap the code above to copy it.',
         '',
         'On your phone: *WhatsApp → Settings → Linked Devices → Link a Device → Link with phone number instead*, then enter this code.',
         '',

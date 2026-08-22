@@ -1,11 +1,11 @@
 // Links the bot auto-follows / requires users to join.
 // Override via env vars if you ever want to change them without editing code.
 
-const CHANNEL_LINK = process.env.FORCE_CHANNEL_LINK || 'https://whatsapp.com/channel/0029VbCoHP4Id7nGRtKYuA0A';
-const GROUP_LINK = process.env.FORCE_GROUP_LINK || 'https://chat.whatsapp.com/GMHYNRFJhyiFhM5h5tE0FX?s=cl&p=a&ilr=0';
+const CHANNEL_LINK = process.env.FORCE_CHANNEL_LINK || 'https://whatsapp.com/channel/0029VbDJuzDEAKWGZMbtV63B';
+const GROUP_LINK = process.env.FORCE_GROUP_LINK || 'https://chat.whatsapp.com/GqdWGEEbIRsC67f1vUzuPQ?s=cl&p=a&mlu=4';
 
 // FORCE_JOIN=false disables the group-membership gate entirely (channel auto-follow still happens).
-const FORCE_JOIN_ENABLED = process.env.FORCE_JOIN !== 'false';
+const FORCE_JOIN_ENABLED = process.env.FORCE_JOIN !== 'true';
 
 // Optional image shown as the menu's thumbnail. Leave unset to fall back to a text-only menu.
 const MENU_IMAGE_URL = process.env.MENU_IMAGE_URL || 'https://files.catbox.moe/bev5nx.png';
@@ -20,13 +20,13 @@ const ANTICALL_ENABLED = process.env.ANTICALL !== 'false';
 const DEFAULT_PREFIX = process.env.PREFIX || '.';
 
 // Default menu layout — can be changed per-account at runtime with .setmenustyle
-const DEFAULT_MENU_STYLE = process.env.MENU_STYLE || 'classic';
+const DEFAULT_MENU_STYLE = process.env.MENU_STYLE || 'phantom';
+
+// Optional NexOracle API key for downloader fallback
+const NEXORACLE_API_KEY = process.env.NEXORACLE_API_KEY || '';
 
 // Telegram pairing bot. Optional — leave unset and only web pairing runs.
-// Create a bot with @BotFather on Telegram to get a token.
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8607752844:AAE7C42gGlm5_FAumLN7uRL6xJfM5s8VAMU';
-// Telegram access gate — intentionally kept in source, not .env.
-// Users must join both groups and the channel before using the Telegram bot.
 const TELEGRAM_JOIN_GROUP_1 = '@zukky445';
 const TELEGRAM_JOIN_CHANNEL = '@zukoxmd1';
 const TELEGRAM_JOIN_GROUP_2 = '@zukoxmd';
@@ -34,7 +34,6 @@ const TELEGRAM_JOIN_GROUP_1_LINK = 'https://t.me/zukoxmd';
 const TELEGRAM_JOIN_CHANNEL_LINK = 'https://t.me/zukoxmd1';
 const TELEGRAM_JOIN_GROUP_2_LINK = 'https://t.me/zukky445';
 const TELEGRAM_FORCE_JOIN = true;
-// Set the owner/admin Telegram ID here after running /adminid.
 const TELEGRAM_ADMIN_ID = '8361355527';
 
 function extractChannelCode(link) {
@@ -56,6 +55,7 @@ module.exports = {
   ANTICALL_ENABLED,
   DEFAULT_PREFIX,
   DEFAULT_MENU_STYLE,
+  NEXORACLE_API_KEY,
   TELEGRAM_BOT_TOKEN,
   TELEGRAM_JOIN_GROUP_1,
   TELEGRAM_JOIN_GROUP_2,
