@@ -345,18 +345,13 @@ async function doSearch(sock, chatId, message, rawQuery, typeKey, pageOverride) 
 
     let allItems = [];
     try {
-        const data = await apiFetch(`/search/${cfg.seg}?q=${encodeURIComponent(query)}&page=${page}`);
+        const data = await apiFetch(`/search?q=${encodeURIComponent(query)}&page=${page}`);
         allItems = data.items || data.results || [];
     } catch {
         try {
-            const data = await apiFetch(`/search?q=${encodeURIComponent(query)}`);
-            allItems = data.items || data.results || [];
-        } catch {
-            try {
-                const fallbackData = await apiFetch(`/${cfg.seg}`);
-                allItems = (fallbackData.items || []).filter(it => (it.title || '').toLowerCase().includes(query.toLowerCase()));
-            } catch { /* ignore */ }
-        }
+            const fallbackData = await apiFetch(`/${cfg.seg}`);
+            allItems = (fallbackData.items || []).filter(it => (it.title || '').toLowerCase().includes(query.toLowerCase()));
+        } catch { /* ignore */ }
     }
     const header = `${cfg.emoji} *${cfg.label} results for "${query}"*`;
     return renderCachedPage(sock, chatId, message, cfg, header, allItems, page, () => typeKey);

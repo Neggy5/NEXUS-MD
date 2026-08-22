@@ -238,6 +238,47 @@ async function getMenuImage() {
   }
   return null;
 }
+
+// Same image as getMenuImage(), but always resolved to a Buffer — needed
+// for externalAdReply.thumbnail, which (unlike the {url} shorthand accepted
+// by sock.sendMessage) requires raw bytes.
+let _menuThumbCache = null;
+async function getMenuThumbnail() {
+  if (_menuThumbCache) return _menuThumbCache;
+  if (!MENU_IMAGE_URL) return null;
+  try {
+    if (/^https?:\/\//i.test(MENU_IMAGE_URL)) {
+      const res = await axios.get(MENU_IMAGE_URL, { responseType: 'arraybuffer', timeout: 15000 });
+      _menuThumbCache = Buffer.from(res.data);
+    } else if (fs.existsSync(MENU_IMAGE_URL)) {
+      _menuThumbCache = await fs.promises.readFile(MENU_IMAGE_URL);
+    }
+  } catch (e) {
+    console.error('Menu thumbnail fetch failed:', e.message);
+  }
+  return _menuThumbCache;
+}
+
+// Newsletter-style contextInfo: the "forwarded from channel" tag plus a rich
+// preview card (title / item count / "Powered by" line + thumbnail) — the
+// same combo WhatsApp channels use for their forwarded posts.
+async function newsletterContext({ title, body }) {
+  const base = channelContext();
+  const thumbnail = await getMenuThumbnail().catch(() => null);
+  return {
+    contextInfo: {
+      ...base.contextInfo,
+      externalAdReply: {
+        title: title || BOT_NAME,
+        body: body || `Powered by ${BOT_NAME}`,
+        thumbnail: thumbnail || undefined,
+        mediaType: 1,
+        renderLargerThumbnail: true,
+        showAdAttribution: false,
+      },
+    },
+  };
+}
 // ==========================================
 //          MEDIA CONVERSION COMMANDS
 // ==========================================
@@ -1136,7 +1177,7 @@ register({
 });
 // ---------- MAIN ----------
 
-const MENU_STYLES = ['classic', 'compact', 'minimal', 'neon', 'elegant'];
+const MENU_STYLES = ['classic', 'compact', 'minimal', 'neon', 'elegant', 'phantom'];
 
 function buildMenu(style, { commandPrefix, name, isGroup }) {
   const byCategory = {};
@@ -1234,6 +1275,43 @@ function buildMenu(style, { commandPrefix, name, isGroup }) {
     return menu;
   }
 
+  // ---- phantom: sleek dark-glass panel aesthetic ----
+  if (style === 'phantom') {
+    const LINE  = '▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓';
+    const THIN  = '░░░░░░░░░░░░░░░░░░░░░░░░░░░░';
+
+    let menu = '';
+    menu += `${LINE}\n`;
+    menu += `   ⟦ 👁️ *${BOT_NAME}* ⟧\n`;
+    menu += `${LINE}\n`;
+    menu += `\n`;
+    menu += `  ✦ ${greeting()}, *${name}*\n`;
+    menu += `  ✦ 📅 ${date}\n`;
+    menu += `\n`;
+    menu += `  ⏳ Uptime   ⟶  ${uptime}\n`;
+    menu += `  ⚙️  Prefix   ⟶  [ ${commandPrefix} ]\n`;
+    menu += `  📦 Commands ⟶  ${totalCommands}\n`;
+    menu += `  🌐 Mode     ⟶  ${isGroup ? 'Group' : 'Private'}\n`;
+    menu += `\n`;
+    menu += `${THIN}\n\n`;
+
+    for (const cat of orderedCats) {
+      const names = byCategory[cat];
+      const icon = CATEGORY_STYLE[cat] || '📁';
+      menu += `  ⟦ ${icon} *${cat}* ⟧\n`;
+      names.forEach((n, i) => {
+        const connector = i === names.length - 1 ? '╰' : '├';
+        menu += `  ${connector}─ ${commandPrefix}${n}\n`;
+      });
+      menu += `\n`;
+    }
+
+    menu += `${LINE}\n`;
+    menu += `  ⟦ _${BOT_NAME} · always watching_ ⟧\n`;
+    menu += `${LINE}`;
+    return menu;
+  }
+
   // ---- classic: the original boxed/bordered layout (default) ----
   let menu = '';
   menu += `╭━━━⟪ 🤖 *${BOT_NAME}* ⟫━━━╮\n`;
@@ -1256,7 +1334,7 @@ function buildMenu(style, { commandPrefix, name, isGroup }) {
     menu += `└──────────────\n\n`;
   }
 
-  menu += `✨ _Powered by ${BOT_NAME} ·Lord zuko_`;
+  menu += `✨ _Powered by ${BOT_NAME}_`;
   return menu;
 }
 
@@ -1266,6 +1344,7 @@ register({
   category: 'MAIN',
   description: 'Show the command menu',
   async execute({ sock, from, sender, isGroup, sessionId, prefix, msg }) {
+    if (msg?.key) await sock.sendMessage(from, { react: { text: '📋', key: msg.key } }).catch(() => {});
     const commandPrefix = prefix || getGlobalSetting(sessionId, 'prefix') || PREFIX;
     const style = getGlobalSetting(sessionId, 'menuStyle') || DEFAULT_MENU_STYLE;
     const name = msg?.pushName || sender.split('@')[0];
@@ -1276,11 +1355,17 @@ register({
       isGroup,
     });
 
+    const totalCommands = new Set(commands.values()).size;
+    const nlContext = await newsletterContext({
+      title: `${BOT_NAME}`,
+      body: `📦 ${totalCommands} items  •  Powered by ${BOT_NAME}`,
+    });
+
     const menuImage = await getMenuImage();
     if (menuImage) {
-      await sock.sendMessage(from, { image: menuImage, caption: menu, ...channelContext() });
+      await sock.sendMessage(from, { image: menuImage, caption: menu, ...nlContext });
     } else {
-      await sock.sendMessage(from, { text: menu, ...channelContext() });
+      await sock.sendMessage(from, { text: menu, ...nlContext });
     }
   },
 });
@@ -11018,7 +11103,8 @@ register({
   aliases: ['p'],
   category: 'MAIN',
   description: 'Check bot speed and system status',
-  async execute({ sock, from }) {
+  async execute({ sock, from, msg }) {
+    if (msg?.key) await sock.sendMessage(from, { react: { text: '🏓', key: msg.key } }).catch(() => {});
     const os = require('os');
     const start = Date.now();
     
