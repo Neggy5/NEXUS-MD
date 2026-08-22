@@ -1,0 +1,9 @@
+# Railway/Nixpacks build config.
+#
+# better-sqlite3 compiles a native C++ addon via node-gyp during `npm install`,
+# which requires Python + a C/C++ toolchain. Nixpacks' default Node builder
+# doesn't include Python, causing the build to fail with:
+#   gyp ERR! find Python
+# This adds the missing packages to the build image.
+[phases.setup]
+nixPkgs = ["nodejs_20", "python3", "gcc", "gnumake"]
