@@ -241,17 +241,27 @@ async function getMenuImage() {
 
 // Same image as getMenuImage(), but always resolved to a Buffer — needed
 // for externalAdReply.thumbnail, which (unlike the {url} shorthand accepted
-// by sock.sendMessage) requires raw bytes.
+// by sock.sendMessage) requires raw bytes. WhatsApp's ad-reply thumbnail is
+// meant to be small (like a link-preview icon) — a full-size menu banner
+// can make the whole message fail to send, so anything oversized is dropped
+// rather than risk silently breaking .menu.
+const THUMBNAIL_MAX_BYTES = 100 * 1024; // 100KB
 let _menuThumbCache = null;
 async function getMenuThumbnail() {
   if (_menuThumbCache) return _menuThumbCache;
   if (!MENU_IMAGE_URL) return null;
   try {
+    let buf = null;
     if (/^https?:\/\//i.test(MENU_IMAGE_URL)) {
       const res = await axios.get(MENU_IMAGE_URL, { responseType: 'arraybuffer', timeout: 15000 });
-      _menuThumbCache = Buffer.from(res.data);
+      buf = Buffer.from(res.data);
     } else if (fs.existsSync(MENU_IMAGE_URL)) {
-      _menuThumbCache = await fs.promises.readFile(MENU_IMAGE_URL);
+      buf = await fs.promises.readFile(MENU_IMAGE_URL);
+    }
+    if (buf && buf.length <= THUMBNAIL_MAX_BYTES) {
+      _menuThumbCache = buf;
+    } else if (buf) {
+      console.warn(`[menu] thumbnail image too large (${buf.length}B > ${THUMBNAIL_MAX_BYTES}B) — sending card without a thumbnail.`);
     }
   } catch (e) {
     console.error('Menu thumbnail fetch failed:', e.message);
@@ -1356,16 +1366,28 @@ register({
     });
 
     const totalCommands = new Set(commands.values()).size;
-    const nlContext = await newsletterContext({
-      title: `${BOT_NAME}`,
-      body: `📦 ${totalCommands} items  •  Powered by ${BOT_NAME}`,
-    });
-
     const menuImage = await getMenuImage();
-    if (menuImage) {
-      await sock.sendMessage(from, { image: menuImage, caption: menu, ...nlContext });
-    } else {
-      await sock.sendMessage(from, { text: menu, ...nlContext });
+
+    // The newsletter-style card is a nice-to-have — if building or sending it
+    // fails for any reason (bad thumbnail, oversized payload, etc.), fall back
+    // to the plain forwarded-channel send rather than let .menu go silent.
+    try {
+      const nlContext = await newsletterContext({
+        title: `${BOT_NAME}`,
+        body: `📦 ${totalCommands} items  •  Powered by ${BOT_NAME}`,
+      });
+      if (menuImage) {
+        await sock.sendMessage(from, { image: menuImage, caption: menu, ...nlContext });
+      } else {
+        await sock.sendMessage(from, { text: menu, ...nlContext });
+      }
+    } catch (e) {
+      console.error('[menu] newsletter-style send failed, falling back to plain menu:', e.message);
+      if (menuImage) {
+        await sock.sendMessage(from, { image: menuImage, caption: menu, ...channelContext() });
+      } else {
+        await sock.sendMessage(from, { text: menu, ...channelContext() });
+      }
     }
   },
 });
